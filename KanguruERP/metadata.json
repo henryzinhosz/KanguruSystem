@@ -1,0 +1,6 @@
+{
+  "name": "ERP Games, Tech & Cards",
+  "description": "Sistema de gestão de estoque e controle financeiro para rede de 3 lojas físicas de informática, videogames e cartas colecionáveis.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
