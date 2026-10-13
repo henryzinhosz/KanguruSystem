@@ -15,6 +15,7 @@ import FinanceiroView from './components/FinanceiroView';
 import AssistênciaView from './components/AssistênciaView';
 import AdminToolsView from './components/AdminToolsView';
 import ConfiguracoesView from './components/ConfiguracoesView';
+import ServicosView from './components/ServicosView';
 import UcpView from './components/UcpView';
 import { UserRole } from './types';
 import { 
@@ -35,6 +36,7 @@ export default function App() {
     currentUser,
     setCurrentUser,
     products,
+    services,
     inventory,
     movements,
     sales,
@@ -47,6 +49,8 @@ export default function App() {
     resetDatabase,
     addProduct,
     editProduct,
+    saveService,
+    deleteService,
     registerMovement,
     registerSerializedStockEntry,
     registerSale,
@@ -70,7 +74,7 @@ export default function App() {
   } = useErpStore();
 
   // Active Main View Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'vendas' | 'assistencia' | 'financeiro' | 'admin' | 'configuracoes'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'servicos' | 'vendas' | 'assistencia' | 'financeiro' | 'admin' | 'configuracoes'>('dashboard');
 
   if (!currentUser) {
     return <LoginScreen accessError={authProfileError} />;
@@ -106,6 +110,7 @@ export default function App() {
   const navigationItems = [
     { id: 'dashboard', name: 'Dashboard Geral', icon: LayoutDashboard },
     { id: 'estoque', name: 'Catálogo & Estoque', icon: Package },
+    { id: 'servicos', name: 'Serviços', icon: Wrench },
     { id: 'vendas', name: 'Trade-In (Usados)', icon: Coins },
     { id: 'assistencia', name: 'Assistência / OS', icon: Wrench },
     { id: 'financeiro', name: 'Livro Caixa & DRE', icon: DollarSign },
@@ -203,6 +208,10 @@ export default function App() {
               registerMovement={registerMovement}
               registerSerializedStockEntry={registerSerializedStockEntry}
             />
+          )}
+
+          {activeTab === 'servicos' && (
+            <ServicosView services={services} saveService={saveService} deleteService={deleteService} />
           )}
 
           {activeTab === 'vendas' && (

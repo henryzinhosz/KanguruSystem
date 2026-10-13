@@ -131,6 +131,15 @@ export interface Product {
   kitItems?: KitItem[];
 }
 
+export interface Service {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  sellPrice: number;
+  isActive: boolean;
+}
+
 export interface StockQuantity {
   unitId: string;
   qty: number;
@@ -167,15 +176,40 @@ export interface StockMovement {
 }
 
 export interface SaleItem {
-  productId: string;
+  itemType?: 'PRODUCT' | 'SERVICE';
+  productId?: string;
+  serviceId?: string;
   variationId?: string;
   quantity: number;
   unitPrice: number;
+  discountPercent?: number;
+  lineTotal?: number;
   serials?: string[]; // serials linked to this item
   cardCondition?: CardCondition;
 }
 
 export type PaymentMethod = 'DINHEIRO' | 'PIX' | 'CREDITO' | 'DEBITO';
+
+// Metodos que podem aparecer em vendas vindas do PDV (inclui o legado
+// 'DIVIDIDO', gravado quando a venda tem 2+ linhas em sale_payments).
+export type SalePaymentLineMethod = PaymentMethod | 'VOUCHER' | 'CREDIARIO';
+export type SalePaymentMethod = SalePaymentLineMethod | 'DIVIDIDO';
+
+export interface SalePaymentLine {
+  paymentMethod: SalePaymentLineMethod;
+  amount: number; // valor aplicado (troco nao entra; em reserva, ja sem o sinal)
+  installments: number;
+}
+
+export const SALE_PAYMENT_METHOD_LABELS: Record<SalePaymentMethod, string> = {
+  DINHEIRO: 'Dinheiro',
+  PIX: 'Pix',
+  CREDITO: 'Crédito',
+  DEBITO: 'Débito',
+  VOUCHER: 'Voucher',
+  CREDIARIO: 'Crediário',
+  DIVIDIDO: 'Dividido',
+};
 
 export type SaleStatus = 'CONCLUIDA' | 'PENDENTE_APROVACAO' | 'CANCELADA' | 'REJEITADA';
 
@@ -184,7 +218,8 @@ export interface Sale {
   invoiceNumber: string;
   unitId: string;
   items: SaleItem[];
-  paymentMethod: PaymentMethod;
+  paymentMethod: SalePaymentMethod;
+  payments?: SalePaymentLine[]; // linhas de sale_payments (vendas do PDV a partir da 2.7)
   grossAmount: number;
   feeAmount: number;
   netAmount: number;
@@ -248,6 +283,7 @@ export interface WorkOrder {
 export interface StoreConfig {
   unitId: string;
   fixedCost: number; // for break-even calc
+  maxItemDiscountPercent: number;
   tradeName?: string;
   legalName?: string;
   cnpj?: string;

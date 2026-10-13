@@ -142,9 +142,9 @@ export default function DashboardView({
 
   filteredSales.forEach(s => {
     s.items.forEach(item => {
-      if (productPerformance[item.productId]) {
+      if (item.productId && productPerformance[item.productId]) {
         productPerformance[item.productId].qty += item.quantity;
-        productPerformance[item.productId].revenue += item.unitPrice * item.quantity;
+        productPerformance[item.productId].revenue += item.lineTotal ?? item.unitPrice * item.quantity;
       }
     });
   });
@@ -177,9 +177,10 @@ export default function DashboardView({
   const categorySales: { [cat: string]: number } = {};
   filteredSales.forEach(s => {
     s.items.forEach(item => {
+      if (!item.productId) return;
       const prod = products.find(p => p.id === item.productId);
       if (prod) {
-        categorySales[prod.category] = (categorySales[prod.category] || 0) + (item.unitPrice * item.quantity);
+        categorySales[prod.category] = (categorySales[prod.category] || 0) + (item.lineTotal ?? item.unitPrice * item.quantity);
       }
     });
   });
@@ -190,7 +191,20 @@ export default function DashboardView({
   // 7. Payment method dominant
   const paymentStats: { [method: string]: number } = {};
   filteredSales.forEach(s => {
-    paymentStats[s.paymentMethod] = (paymentStats[s.paymentMethod] || 0) + s.grossAmount;
+    if (!s.payments?.length) {
+      paymentStats[s.paymentMethod] = (paymentStats[s.paymentMethod] || 0) + s.grossAmount;
+      return;
+    }
+    // Vendas do PDV com linhas: cada linha no seu metodo. A diferenca para o
+    // total e o sinal de reserva (recebido antes, em outro registro).
+    const linesTotal = s.payments.reduce((acc, p) => acc + p.amount, 0);
+    s.payments.forEach(p => {
+      paymentStats[p.paymentMethod] = (paymentStats[p.paymentMethod] || 0) + p.amount;
+    });
+    const deposit = Math.round((s.grossAmount - linesTotal) * 100) / 100;
+    if (deposit > 0) {
+      paymentStats['SINAL DE RESERVA'] = (paymentStats['SINAL DE RESERVA'] || 0) + deposit;
+    }
   });
   const dominantPayment = Object.entries(paymentStats).sort((a, b) => b[1] - a[1])[0]?.[0] || 'Nenhuma';
 

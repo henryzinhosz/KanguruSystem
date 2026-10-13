@@ -11,6 +11,7 @@ import {
   StoreConfig, 
   Sale,
   PaymentMethod,
+  SALE_PAYMENT_METHOD_LABELS,
   Product,
   StockInventory,
   CardCondition
@@ -145,6 +146,7 @@ export default function FinanceiroView({
   const currentStoreConfig = storeConfigs.find(c => c.unitId === saleStore) || {
     unitId: saleStore,
     fixedCost: 10000,
+    maxItemDiscountPercent: 0,
     paymentFees: { DINHEIRO: 0, PIX: 0.005, CREDITO: 0.035, DEBITO: 0.015 }
   };
   const currentFeeRate = currentStoreConfig.paymentFees[salePaymentMethod] || 0;
@@ -177,6 +179,7 @@ export default function FinanceiroView({
   const activeEditingConfig = storeConfigs.find(c => c.unitId === selectedConfigUnit) || {
     unitId: selectedConfigUnit,
     fixedCost: 10000,
+    maxItemDiscountPercent: 0,
     paymentFees: { DINHEIRO: 0, PIX: 0.005, CREDITO: 0.035, DEBITO: 0.015 }
   };
 
@@ -487,6 +490,8 @@ export default function FinanceiroView({
                           s.invoiceNumber.toLowerCase().includes(query) ||
                           storeLabel.includes(query) ||
                           s.paymentMethod.toLowerCase().includes(query) ||
+                          (SALE_PAYMENT_METHOD_LABELS[s.paymentMethod] ?? '').toLowerCase().includes(query) ||
+                          (s.payments ?? []).some(p => (SALE_PAYMENT_METHOD_LABELS[p.paymentMethod] ?? p.paymentMethod).toLowerCase().includes(query)) ||
                           new Date(s.timestamp).toLocaleDateString('pt-BR').includes(query)
                         );
                       })
@@ -509,8 +514,17 @@ export default function FinanceiroView({
                             </td>
                             <td className="px-3 py-2.5 text-center">
                               <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded font-semibold text-[10px]">
-                                {s.paymentMethod}
+                                {SALE_PAYMENT_METHOD_LABELS[s.paymentMethod] ?? s.paymentMethod}
                               </span>
+                              {s.payments && s.payments.length > 1 && (
+                                <div className="mt-1 flex flex-col items-center gap-0.5 text-[10px] text-slate-500">
+                                  {s.payments.map((p, index) => (
+                                    <span key={`${s.id}-payment-${index}`}>
+                                      {SALE_PAYMENT_METHOD_LABELS[p.paymentMethod] ?? p.paymentMethod}: R$ {p.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </td>
                             <td className="px-3 py-2.5 text-right font-bold text-slate-950 font-mono">
                               R$ {s.grossAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}

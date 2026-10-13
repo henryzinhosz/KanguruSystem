@@ -1,9 +1,11 @@
 import { supabase } from './supabaseClient';
 import { 
   Product, 
+  Service,
   StockInventory, 
   StockMovement, 
-  Sale, 
+  Sale,
+  SalePaymentLine,
   Expense, 
   TradeIn, 
   WorkOrder, 
@@ -877,7 +879,7 @@ export const supabaseService = {
       const missingTables: string[] = [];
       const tablesToCheck = [
         'products', 'inventory', 'movements', 'sales', 
-        'expenses', 'trade_ins', 'work_orders', 'store_configs', 'suppliers'
+        'expenses', 'trade_ins', 'work_orders', 'store_configs', 'suppliers', 'services'
       ];
 
       // We will perform a quick request on 'products' first
@@ -963,6 +965,36 @@ export const supabaseService = {
 
   async deleteProduct(id: string): Promise<void> {
     const { error } = await supabase.from('products').delete().eq('id', id);
+    if (error) throw error;
+  },
+
+  async getServices(): Promise<Service[]> {
+    const { data, error } = await supabase.from('services').select('*').order('name');
+    if (error) throw error;
+    return (data || []).map(service => ({
+      id: service.id,
+      sku: service.sku,
+      name: service.name,
+      category: service.category,
+      sellPrice: Number(service.sell_price),
+      isActive: service.is_active
+    }));
+  },
+
+  async upsertService(service: Service): Promise<void> {
+    const { error } = await supabase.from('services').upsert({
+      id: service.id,
+      sku: service.sku.trim(),
+      name: service.name.trim(),
+      category: service.category.trim(),
+      sell_price: service.sellPrice,
+      is_active: service.isActive
+    });
+    if (error) throw error;
+  },
+
+  async deleteService(id: string): Promise<void> {
+    const { error } = await supabase.from('services').delete().eq('id', id);
     if (error) throw error;
   },
 
@@ -1113,12 +1145,35 @@ export const supabaseService = {
       .order('timestamp', { ascending: false });
 
     if (error) throw error;
+
+    // Linhas de pagamento das vendas do PDV. Tolerante a falha para o ERP
+    // continuar funcionando antes da migration 2.7 ser aplicada.
+    const paymentsBySale = new Map<string, SalePaymentLine[]>();
+    const { data: paymentRows, error: paymentsError } = await supabase
+      .from('sale_payments')
+      .select('sale_id, payment_method, amount, installments')
+      .order('created_at', { ascending: true });
+    if (paymentsError) {
+      console.warn('Nao foi possivel carregar sale_payments:', paymentsError.message);
+    } else {
+      (paymentRows || []).forEach(p => {
+        const lines = paymentsBySale.get(p.sale_id) ?? [];
+        lines.push({
+          paymentMethod: p.payment_method,
+          amount: Number(p.amount),
+          installments: Number(p.installments ?? 1)
+        });
+        paymentsBySale.set(p.sale_id, lines);
+      });
+    }
+
     return (data || []).map(s => ({
       id: s.id,
       invoiceNumber: s.invoice_number,
       unitId: s.unit_id,
       items: s.items,
       paymentMethod: s.payment_method,
+      payments: paymentsBySale.get(s.id),
       grossAmount: Number(s.gross_amount),
       feeAmount: Number(s.fee_amount),
       netAmount: Number(s.net_amount),
@@ -1297,6 +1352,7 @@ export const supabaseService = {
     return (data || []).map(c => ({
       unitId: c.unit_id,
       fixedCost: Number(c.fixed_cost),
+      maxItemDiscountPercent: Number(c.max_item_discount_percent ?? 0),
       paymentFees: c.payment_fees,
       tradeName: c.trade_name || undefined,
       legalName: c.legal_name || undefined,
@@ -1312,6 +1368,7 @@ export const supabaseService = {
     const payload = {
       unit_id: c.unitId,
       fixed_cost: c.fixedCost,
+      max_item_discount_percent: c.maxItemDiscountPercent ?? 0,
       payment_fees: c.paymentFees,
       trade_name: c.tradeName || null,
       legal_name: c.legalName || null,

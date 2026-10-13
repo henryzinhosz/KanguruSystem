@@ -251,16 +251,19 @@ export const STORE_CONFIGS_INITIAL: StoreConfig[] = [
   {
     unitId: 'loja_1',
     fixedCost: 18000,
+    maxItemDiscountPercent: 0,
     paymentFees: { DINHEIRO: 0.0, PIX: 0.005, CREDITO: 0.035, DEBITO: 0.015 }
   },
   {
     unitId: 'loja_2',
     fixedCost: 14000,
+    maxItemDiscountPercent: 0,
     paymentFees: { DINHEIRO: 0.0, PIX: 0.005, CREDITO: 0.035, DEBITO: 0.015 }
   },
   {
     unitId: 'loja_3',
     fixedCost: 9500,
+    maxItemDiscountPercent: 0,
     paymentFees: { DINHEIRO: 0.0, PIX: 0.005, CREDITO: 0.035, DEBITO: 0.015 }
   }
 ];

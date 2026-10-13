@@ -57,11 +57,46 @@ select public.set_pos_operator_pin(
 
 `validate_pos_operator_pin` retorna zero linhas para PIN invalido e uma linha com `authorization_id`, operador e expiracao para PIN valido. Esse comportamento permite gravar a tentativa invalida sem armazenar o PIN e sem sofrer rollback pela excecao da propria RPC.
 
-## Busca de produtos do PDV
+## Busca de itens do PDV
 
-Como a conta tecnica nao existe em `app_users`, ela nao deve consultar `products` e `inventory` diretamente. A interface usa a RPC `search_pos_products`, que valida o terminal e devolve somente produtos do tenant e da unidade vinculados a ele, com estoque positivo.
+Como a conta tecnica nao existe em `app_users`, ela nao deve consultar `products`, `services` e `inventory` diretamente. A interface usa a RPC `search_pos_items`, que valida o terminal e devolve produtos com estoque positivo e servicos ativos do tenant.
 
-Se voce ja aplicou uma versao anterior de `pos-terminal-and-pin.sql`, execute tambem [20260723_pos-product-search.sql](../supabase/20260723_pos-product-search.sql) uma unica vez no SQL Editor. Nao execute o arquivo inteiro original novamente, pois ele cria uma policy que ja existe.
+Antes de atualizar o PDV para a sub-fase 2.5, aplique uma vez a migration [20260929_services_item_discounts.sql](../../KanguruERP/supabase/migrations/20260929_services_item_discounts.sql) no SQL Editor do Supabase, depois das migrations de tenant, terminal, caixa e estoque serializado. Ela cria o catalogo `services`, o limite `store_configs.max_item_discount_percent`, a busca combinada e atualiza a RPC de venda/estorno. Configure o percentual por loja em Configuracoes no ERP; `0` bloqueia qualquer desconto.
+
+## Reservas de produtos (sub-fase 2.6)
+
+Aplique uma vez [20261003_pos_product_reservations.sql](../../KanguruERP/supabase/migrations/20261003_pos_product_reservations.sql) depois das migrations de tenant, terminal, caixa, estoque serializado e [20260929_services_item_discounts.sql](../../KanguruERP/supabase/migrations/20260929_services_item_discounts.sql). A migration cria reservas/log de sinais, altera busca e venda para respeitar quantidades reservadas, adiciona RPCs para criar/listar/cancelar e inclui sinais/devolucoes no fechamento do caixa. O cancelamento registra a devolucao manual; o estorno no adquirente continua sendo externo.
+
+### Roteiro de teste de reservas
+
+1. Inicie o PDV e abra o caixa. Adicione produto comum e serializado; abra o modal Reservar, informe cliente, prazo futuro e, em um dos casos, um sinal com forma de pagamento.
+2. Confirme a reserva. O carrinho deve limpar; os produtos reservados deixam de aparecer na busca. Para o serializado, confirme que a unidade selecionada deixou de aparecer entre os seriais disponiveis e ficou com `status = 'RESERVADO'`.
+3. Tente uma venda comum/segunda reserva da quantidade ja comprometida. O banco deve rejeitar excesso mesmo se a interface estiver desatualizada.
+4. Na tela Reservas, converta uma reserva em venda e pague o saldo. Confira `sales.reservation_deposit_applied`, que a unidade serializada fica `VENDIDO`, e que o fechamento conta sinal e saldo uma unica vez.
+5. Cancele outra reserva com sinal e confirme a forma da devolucao manual. A unidade serializada deve voltar a `DISPONIVEL`; produto comum volta a aparecer na busca; o fechamento deve deduzir a devolucao do metodo selecionado.
+6. Crie uma reserva com prazo passado por SQL de teste ou aguarde o prazo. Ela deve aparecer destacada como vencida, continuar bloqueando a busca e permitir conversao ou cancelamento manual.
+
+Confira reservas e estados serializados no SQL Editor:
+
+```sql
+select id, tenant_id, unit_id, customer_name, expires_at, deposit_amount,
+	   deposit_payment_method, status, sale_id
+from public.product_reservations
+order by created_at desc
+limit 20;
+
+select reservation_id, product_id, quantity, serial_unit_id, serial_number,
+	   item_sku, item_name, unit_price, discount_percent, line_total
+from public.product_reservation_items
+order by created_at desc
+limit 30;
+
+select id, product_id, unit_id, serial_number, status, sale_id
+from public.product_serial_units
+where status in ('RESERVADO', 'VENDIDO')
+order by updated_at desc
+limit 30;
+```
 
 ## Correcao de nome de operador
 
@@ -71,11 +106,15 @@ Se a validacao retornar `column reference "expires_at" is ambiguous`, execute um
 
 ## Roteiro de teste da venda
 
-1. Execute a migration de busca acima, se necessario, e inicie o PDV com `npm run tauri dev` depois de instalar Rust/Cargo.
-2. Entre com o e-mail e senha da conta tecnica vinculada a `loja_beb_games_campo_grande`.
-3. Informe o PIN do operador de teste. A tela deve mostrar o nome do operador no cabecalho.
-4. Busque um produto que tenha saldo positivo nessa loja, clique no resultado, escolha o pagamento e finalize a venda.
-5. No SQL Editor, confirme a venda e o operador:
+1. Aplique a migration 2.5 acima e cadastre no ERP um servico ativo, por exemplo `INST-01 / Instalacao / R$ 80,00`.
+2. Configure o limite de desconto da loja no ERP, por exemplo `10%`, e inicie o PDV com `npm run tauri dev` depois de instalar Rust/Cargo.
+3. Entre com a conta tecnica do terminal e abra o caixa.
+4. Busque e adicione o servico. Confirme que aparece como `Servico`, sem saldo de estoque; finalize a venda e confira que nenhum movimento de estoque foi criado para ele.
+5. Adicione um produto comum e outro serializado; ambos devem continuar respeitando saldo e selecao de serial.
+6. Aplique `10%` de desconto em uma linha e finalize: o total deve refletir o desconto e o JSON da venda deve guardar `unitPrice`, `discountPercent` e `lineTotal` por item.
+7. Tente informar mais de `10%`: o PDV deve bloquear a alteracao com mensagem clara. Tambem valide a protecao do banco alterando manualmente o payload para exceder o limite; a RPC deve rejeitar e nao registrar venda nem movimento.
+8. Cancele pelo ERP uma venda que contenha servico e produto: o estoque deve ser devolvido somente para o produto.
+9. No SQL Editor, confirme a venda e o operador:
 
 ```sql
 select id, unit_id, operator_id, operator_name, gross_amount, fee_amount, net_amount, payment_method, status, timestamp

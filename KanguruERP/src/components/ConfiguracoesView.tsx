@@ -22,6 +22,7 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   phone: '',
   contactEmail: '',
   fixedCost: 0,
+  maxItemDiscountPercent: 0,
   paymentFees: { DINHEIRO: 0, PIX: 0, CREDITO: 0, DEBITO: 0 }
 };
 
@@ -134,6 +135,7 @@ export default function ConfiguracoesView({
       phone: store.phone || '',
       contactEmail: store.contactEmail || '',
       fixedCost: store.fixedCost,
+      maxItemDiscountPercent: store.maxItemDiscountPercent,
       paymentFees: store.paymentFees
     });
     setStoreError('');
@@ -394,6 +396,18 @@ function StoreFields({ form, onChange }: {
           />
         </label>
       ))}
+      <label className="block text-xs font-bold text-slate-700">
+        Limite de desconto por item (%)
+        <input
+          type="number"
+          min="0"
+          max="100"
+          step="0.01"
+          value={form.maxItemDiscountPercent}
+          onChange={event => onChange('maxItemDiscountPercent', Number(event.target.value))}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
     </div>
   );
 }

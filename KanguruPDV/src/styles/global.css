@@ -218,6 +218,29 @@ small {
   gap: 0.5rem;
 }
 
+.reservation-nav,
+.reserve-action {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid #b4c7b1;
+  border-radius: 5px;
+  padding: 0 0.8rem;
+  color: #285e3a;
+  background: #fff;
+  font-family: 'Trebuchet MS', sans-serif;
+  font-weight: 700;
+}
+
+.reservation-nav:disabled,
+.reserve-action:disabled,
+.reservation-actions button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .icon-button {
   display: inline-grid;
   width: 42px;
@@ -305,6 +328,17 @@ small {
   flex: 1;
 }
 
+.cart-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.cart-heading h2 {
+  font-size: 1.6rem;
+}
+
 .cart-item {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -313,6 +347,122 @@ small {
   border-bottom: 1px solid #d0dacd;
   padding: 0.8rem 0;
   font-family: 'Trebuchet MS', sans-serif;
+}
+
+.cart-item > div:first-child {
+  min-width: 0;
+}
+
+.cart-discount-label {
+  grid-template-columns: minmax(0, 1fr) 76px;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.45rem 0 0;
+  color: #647366;
+  font-size: 0.72rem;
+}
+
+.cart-discount-label input {
+  min-height: 34px;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.85rem;
+}
+
+.cart-heading .discount-warning {
+  color: #b04a2a;
+  font-weight: 600;
+  margin-top: 0.25rem;
+}
+
+.payment-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 1.5rem;
+  padding: 0.75rem;
+  border: 1px solid #d4e0d0;
+  border-radius: 8px;
+  background: #f3f7f2;
+}
+
+.payment-lines-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #2d4a2b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.payment-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 110px 36px;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.payment-line select,
+.payment-line input {
+  min-height: 38px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #b4c7b1;
+  border-radius: 5px;
+  background: #fff;
+  font-size: 0.95rem;
+}
+
+.payment-lines-summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #b4c7b1;
+  font-size: 0.85rem;
+  color: #2d4a2b;
+}
+
+.payment-lines-summary strong.negative {
+  color: #b04a2a;
+}
+
+.payment-lines-summary strong.payment-change {
+  color: #1f6f3a;
+  font-size: 1rem;
+}
+
+.payment-lines-error {
+  color: #b04a2a;
+  font-weight: 600;
+}
+
+.admin-approval-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.admin-approval-list li {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #f1c6b2;
+  border-radius: 6px;
+  background: #fdf2eb;
+}
+
+.admin-approval-list strong {
+  font-size: 0.95rem;
+  color: #2d4a2b;
+}
+
+.admin-approval-list small {
+  color: #b04a2a;
+  font-weight: 600;
 }
 
 .quantity-control {
@@ -357,6 +507,178 @@ small {
 
 .finish-button {
   margin-top: auto;
+}
+
+.reserve-action {
+  width: 100%;
+  border-color: #c9592d;
+  color: #923c21;
+  background: #fff8f5;
+}
+
+.reserve-hint {
+  margin-top: 0.4rem;
+  color: #923c21;
+  font-family: 'Trebuchet MS', sans-serif;
+  line-height: 1.4;
+}
+
+.reservation-header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.reservation-method-label {
+  min-width: 170px;
+  margin: 0;
+  font-size: 0.72rem;
+}
+
+.reservation-method-label select {
+  min-height: 38px;
+  padding: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.reservation-back {
+  margin: 0 0.5rem;
+}
+
+.reservations-panel {
+  width: min(100%, 1080px);
+  margin: 0 auto;
+  padding: clamp(1rem, 3vw, 2rem);
+}
+
+.reservation-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.reservation-entry {
+  border: 1px solid #c5d3c1;
+  border-left: 5px solid #285e3a;
+  border-radius: 6px;
+  padding: 1rem;
+  background: #fbfcf7;
+}
+
+.reservation-entry.is-expired {
+  border-color: #d8b9ab;
+  border-left-color: #c9592d;
+  background: #fff8f5;
+}
+
+.reservation-entry-heading,
+.reservation-totals,
+.reservation-items li,
+.reservation-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.reservation-entry-heading h2 {
+  font-size: 1.15rem;
+}
+
+.reservation-entry-heading small,
+.reservation-items small {
+  display: block;
+}
+
+.reservation-status {
+  flex: 0 0 auto;
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+  color: #285e3a;
+  background: #e4efe1;
+  font: 700 0.68rem 'Trebuchet MS', sans-serif;
+}
+
+.reservation-status.expired {
+  color: #923c21;
+  background: #f8e5dc;
+}
+
+.reservation-deadline {
+  margin: 0.65rem 0;
+  color: #647366;
+  font: 0.85rem 'Trebuchet MS', sans-serif;
+}
+
+.reservation-items {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reservation-items li {
+  border-top: 1px solid #d0dacd;
+  padding: 0.55rem 0;
+  font-family: 'Trebuchet MS', sans-serif;
+}
+
+.reservation-totals {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  border-top: 1px solid #b4c7b1;
+  padding-top: 0.7rem;
+  color: #526354;
+  font: 0.8rem 'Trebuchet MS', sans-serif;
+}
+
+.reservation-totals strong {
+  color: #172218;
+}
+
+.reservation-actions {
+  justify-content: flex-end;
+  margin-top: 0.8rem;
+}
+
+.reservation-convert {
+  width: auto;
+  min-height: 42px;
+  padding: 0 0.85rem;
+  font-size: 0.85rem;
+}
+
+.reservation-cancel {
+  min-height: 42px;
+  border: 1px solid #d8b9ab;
+  border-radius: 5px;
+  padding: 0 0.85rem;
+  color: #923c21;
+  background: #fff;
+  font: 700 0.85rem 'Trebuchet MS', sans-serif;
+}
+
+.reservation-modal {
+  width: min(100%, 500px);
+}
+
+.reservation-modal form > label {
+  margin: 0.8rem 0;
+}
+
+.reservation-modal-summary {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  border-top: 1px solid #b4c7b1;
+  padding-top: 0.8rem;
+  color: #526354;
+  font: 0.85rem 'Trebuchet MS', sans-serif;
+}
+
+.reservation-modal-summary strong {
+  color: #172218;
+  text-align: right;
 }
 
 .remove-serial-unit {

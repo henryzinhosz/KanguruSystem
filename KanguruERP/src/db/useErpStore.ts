@@ -5,6 +5,7 @@ import {
   User, 
   UserRole,
   Product, 
+  Service,
   StockInventory, 
   StockMovement, 
   Sale, 
@@ -24,6 +25,7 @@ export function useErpStore() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
   const [inventory, setInventory] = useState<StockInventory[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -44,6 +46,7 @@ export function useErpStore() {
 
   const clearOperationalData = useCallback(() => {
     setProducts([]);
+    setServices([]);
     setInventory([]);
     setMovements([]);
     setSales([]);
@@ -135,6 +138,7 @@ export function useErpStore() {
       // Fetch all tables in parallel
       const [
         pList,
+        serviceList,
         iList,
         mList,
         sList,
@@ -146,6 +150,7 @@ export function useErpStore() {
         operatorList
       ] = await Promise.all([
         supabaseService.getProducts(),
+        supabaseService.getServices(),
         supabaseService.getInventory(),
         supabaseService.getMovements(),
         supabaseService.getSales(),
@@ -158,6 +163,7 @@ export function useErpStore() {
       ]);
 
       setProducts(pList);
+      setServices(serviceList);
       setInventory(iList);
       setMovements(mList);
       setSales(sList);
@@ -251,6 +257,7 @@ export function useErpStore() {
   const resetDatabase = () => {
     setCurrentUser(null);
     setProducts([]);
+    setServices([]);
     setInventory([]);
     setMovements([]);
     setSales([]);
@@ -300,6 +307,25 @@ export function useErpStore() {
     if (useSupabase) {
       supabaseService.upsertProduct(sanitizedProduct).catch(err => console.error('Erro ao editar produto no Supabase:', err));
     }
+  };
+
+  const saveService = async (service: Service) => {
+    const sanitizedService = {
+      ...service,
+      sku: service.sku.trim(),
+      name: service.name.trim(),
+      category: service.category.trim()
+    };
+    await supabaseService.upsertService(sanitizedService);
+    setServices(previous => previous.some(item => item.id === sanitizedService.id)
+      ? previous.map(item => item.id === sanitizedService.id ? sanitizedService : item)
+      : [...previous, sanitizedService].sort((left, right) => left.name.localeCompare(right.name))
+    );
+  };
+
+  const deleteService = async (id: string) => {
+    await supabaseService.deleteService(id);
+    setServices(previous => previous.filter(service => service.id !== id));
   };
 
   // Log raw movement & update quantity atomically
@@ -439,6 +465,7 @@ export function useErpStore() {
     const config = storeConfigs.find(c => c.unitId === unitId) || {
       unitId,
       fixedCost: 10000,
+      maxItemDiscountPercent: 0,
       paymentFees: { DINHEIRO: 0.0, PIX: 0.005, CREDITO: 0.035, DEBITO: 0.015 }
     };
 
@@ -534,6 +561,7 @@ export function useErpStore() {
     }
 
     sale.items.forEach(item => {
+      if (item.itemType === 'SERVICE' || !item.productId) return;
       registerMovement(
         item.productId,
         'CLIENTE',
@@ -682,6 +710,7 @@ export function useErpStore() {
     const updatedConfig: StoreConfig = {
       unitId,
       fixedCost: existing?.fixedCost || 0,
+      maxItemDiscountPercent: existing?.maxItemDiscountPercent ?? 0,
       ...existing,
       ...updated,
       paymentFees: {
@@ -808,6 +837,7 @@ export function useErpStore() {
     currentUser,
     setCurrentUser,
     products,
+    services,
     inventory,
     movements,
     sales,
@@ -829,6 +859,8 @@ export function useErpStore() {
     resetDatabase,
     addProduct,
     editProduct,
+    saveService,
+    deleteService,
     registerMovement,
     registerSerializedStockEntry,
     registerSale,
