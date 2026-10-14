@@ -103,7 +103,7 @@ por operador (inspirado no Linx Degust).
 | 2.4 Produtos serializados (`product_serial_units` DISPONIVEL/VENDIDO/RESERVADO, `mark_serial_units_sold`) | ✅ |
 | 2.5 Serviços e carrinho (`services`, `max_item_discount_percent`, `search_pos_items`, desconto por linha) | ✅ |
 | 2.6 Reserva de produto (`product_reservations`, sinal em ledger próprio, preço/desconto congelado) | ✅ |
-| 2.7 Pagamento dividido + aprovação de desconto | 🟡 Revisada, **migration NÃO aplicada**, testes pendentes (seção 6) |
+| 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada e testada (a)–(g) em 2026-10-14; falta só o PR para `main` (seção 6) |
 | 2.7b Etiquetas, código de barras e custo por unidade | 🔵 Desenho em discussão (seção 7) — fazer ANTES da 2.8 |
 | 2.8 Finalização da venda (fiscal, garantia) | ⚪ Não iniciada |
 | 2.9 Trocas e devoluções | ⚪ |
@@ -157,7 +157,7 @@ no SQL Editor com `20261014_drop_legacy_pos_terminal_sale.sql`; confirmado que s
 ### Pendências
 - ~~Aplicar a migration~~ (já aplicada). ~~Remover a versão antiga de 12 parâmetros~~ (feito em 2026-10-14).
 - Bundle Tauri não gerado (só `vite build`).
-- Testes manuais: (a) 1 método, (b) 2–3 métodos, (c) soma divergente rejeitada, (d) desconto acima do limite com senha correta/errada/bloqueio, (e) reserva com sinal + pagamento dividido, (f) fechamento com vendas novas e legadas juntas sem dupla contagem, (g) estorno de venda dividida.
+- ✅ Testes manuais aprovados pelo usuário em 2026-10-14: (a) 1 método, (b) 2–3 métodos, (c) soma divergente rejeitada, (d) desconto acima do limite com senha correta/errada/bloqueio, (e) reserva com sinal + pagamento dividido, (f) fechamento com vendas novas e legadas juntas sem dupla contagem, (g) estorno de venda dividida.
 - Depois dos testes: PR de `feat/2.7-split-payments` para `main`.
 
 ---
@@ -279,7 +279,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 
 ## 12. Diário de sessões (mais recente primeiro)
 
-- **2026-10-14** — Consulta da seção 9 rodada: a migration da 2.7 **já está aplicada**. Sobrou no banco uma versão antiga de 12 parâmetros de `process_pos_terminal_sale` (ver seção 6). Confirmado que o código vivo é o revisado (senha, auditoria, DIVIDIDO). Versão antiga removida pelo usuário. Detalhes que só existiam no Handoff v4 incorporados aqui; os handoffs ficam obsoletos. Próximo passo: testes manuais (a)–(g).
+- **2026-10-14** — Consulta da seção 9 rodada: a migration da 2.7 **já está aplicada**. Sobrou no banco uma versão antiga de 12 parâmetros de `process_pos_terminal_sale` (ver seção 6). Confirmado que o código vivo é o revisado (senha, auditoria, DIVIDIDO). Versão antiga removida pelo usuário. Detalhes que só existiam no Handoff v4 incorporados aqui; handoff apagado. Branch enviado ao GitHub. **Testes (a)–(g) da 2.7 passaram todos.** Próximo passo: PR de `feat/2.7-split-payments` para `main` (com aprovação) e depois retomar o desenho da 2.7b (seção 7).
 
 - **2026-10-13** — Sessão perdida após o handoff v3 investigada: os arquivos da 2.7 foram editados em 10/10 por volta das 17h e nada depois disso. Revisão da 2.7 feita: auditoria e limite de tentativas já tinham sido implementados; falta só conferir o banco ativo. Criado o branch `feat/2.7-split-payments` com commit `e6f6deb` (2.5 + 2.6 + 2.7). Criado este `CLAUDE.md`. Próximo passo: usuário rodar as consultas da seção 9 e colar o resultado; depois aplicar a migration (com aprovação) e testar (a)–(g).
 - **2026-10-10** — Sessão (perdida) implementou e corrigiu a 2.7. Handoff v3 escrito.
