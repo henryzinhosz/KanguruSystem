@@ -10,7 +10,8 @@
 ## 1. Contexto do negócio
 
 - O dono do projeto comprou a loja **"BeB Games Campo Grande"** (Rio de Janeiro), da rede de franquia BeB Games
-  (games, computadores, peças, cartas Pokémon), com contrato de cessão e parceria comercial de 48 meses.
+  (games, computadores, peças, cartas Pokémon), com contrato de cessão e parceria comercial de 48 meses
+  (repasse variável sobre faturamento ao cedente).
 - Também tem os quiosques de doces **Fini**, com sistema à parte ("Annadu ERP"), que **NÃO faz parte deste projeto**.
 - Ele constrói sozinho um sistema de gestão próprio (ERP + PDV) para a rede BeB Games e planeja
   **comercializá-lo para outros franqueados**.
@@ -49,7 +50,8 @@
   - Migrations antigas (fases 0–2.4): `supabase/_legado/erp/` e `supabase/_legado/pdv/`.
   - Edge Functions: `supabase/functions/` (ex.: `create-tenant-admin`).
   - `KanguruERP/src/db/supabaseService.ts` contém scripts SQL antigos embutidos em strings — **não são a versão viva**; a versão vigente de cada função é a da migration mais recente.
-- Workspace no HD externo, backup local em `Henry Tech LTDA\Backups` e cópia no Google Drive.
+- Ferramentas de IA usadas: Copilot → Claude Code (decidido continuar no Claude Code, chat do VS Code; Codex foi avaliado e descartado).
+- Workspace no HD externo (D:), backup local em `Henry Tech LTDA\Backups` e cópia no Google Drive.
 - Arquivos `.env` e `supabase/.temp/` **nunca** vão para o Git (já no `.gitignore`).
 - Git local deste repositório configurado com autor `henryzinhosz <luizedu31031@gmail.com>`.
 
@@ -125,7 +127,12 @@ Auditoria de segurança profissional, LGPD, backup, ambiente de staging.
 ## 6. Sub-fase 2.7 — estado detalhado
 
 **Commit:** `e6f6deb` no branch `feat/2.7-split-payments` (inclui também 2.5 e 2.6, que nunca tinham sido commitadas).
-**Migration:** `KanguruERP/supabase/migrations/20261008_pos_split_payments.sql` — **NÃO aplicada** no Supabase ativo (até 2026-10-13).
+**Migration:** `KanguruERP/supabase/migrations/20261008_pos_split_payments.sql` — **JÁ ESTÁ APLICADA** no Supabase ativo
+(descoberto em 2026-10-14: as 3 tabelas, `check_pos_admin_password` e a versão de 15 parâmetros/retorno JSONB existem).
+Provavelmente aplicada na sessão perdida de 10/10.
+**Versão antiga removida (2026-10-14):** sobrava no banco uma `process_pos_terminal_sale` de 12 parâmetros (lógica da 2.5,
+sem senha/auditoria, com GRANT para authenticated), recriada por reaplicação da 2.5 depois da 2.6. Removida pelo usuário
+no SQL Editor com `20261014_drop_legacy_pos_terminal_sale.sql`; confirmado que só resta a versão de 15 parâmetros.
 
 ### Desenho aprovado
 1. `sale_payments`: uma linha por forma de pagamento; `amount` = valor APLICADO (> 0); `installments` (só coluna, sem tela); mesmo método pode repetir.
@@ -148,7 +155,7 @@ Auditoria de segurança profissional, LGPD, backup, ambiente de staging.
   - todos os consumidores de `payment_method` (consulta 3 da seção 9).
 
 ### Pendências
-- Aplicar a migration (com aprovação).
+- ~~Aplicar a migration~~ (já aplicada). ~~Remover a versão antiga de 12 parâmetros~~ (feito em 2026-10-14).
 - Bundle Tauri não gerado (só `vite build`).
 - Testes manuais: (a) 1 método, (b) 2–3 métodos, (c) soma divergente rejeitada, (d) desconto acima do limite com senha correta/errada/bloqueio, (e) reserva com sinal + pagamento dividido, (f) fechamento com vendas novas e legadas juntas sem dupla contagem, (g) estorno de venda dividida.
 - Depois dos testes: PR de `feat/2.7-split-payments` para `main`.
@@ -271,6 +278,8 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ---
 
 ## 12. Diário de sessões (mais recente primeiro)
+
+- **2026-10-14** — Consulta da seção 9 rodada: a migration da 2.7 **já está aplicada**. Sobrou no banco uma versão antiga de 12 parâmetros de `process_pos_terminal_sale` (ver seção 6). Confirmado que o código vivo é o revisado (senha, auditoria, DIVIDIDO). Versão antiga removida pelo usuário. Detalhes que só existiam no Handoff v4 incorporados aqui; os handoffs ficam obsoletos. Próximo passo: testes manuais (a)–(g).
 
 - **2026-10-13** — Sessão perdida após o handoff v3 investigada: os arquivos da 2.7 foram editados em 10/10 por volta das 17h e nada depois disso. Revisão da 2.7 feita: auditoria e limite de tentativas já tinham sido implementados; falta só conferir o banco ativo. Criado o branch `feat/2.7-split-payments` com commit `e6f6deb` (2.5 + 2.6 + 2.7). Criado este `CLAUDE.md`. Próximo passo: usuário rodar as consultas da seção 9 e colar o resultado; depois aplicar a migration (com aprovação) e testar (a)–(g).
 - **2026-10-10** — Sessão (perdida) implementou e corrigiu a 2.7. Handoff v3 escrito.
