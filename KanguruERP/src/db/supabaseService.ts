@@ -1,9 +1,11 @@
 import { supabase } from './supabaseClient';
 import { 
   Product, 
+  Service,
   StockInventory, 
   StockMovement, 
-  Sale, 
+  Sale,
+  SalePaymentLine,
   Expense, 
   TradeIn, 
   WorkOrder, 
@@ -17,7 +19,10 @@ import {
   PosTerminalActivation,
   PdvOperator,
   PdvOperatorPermissions,
-  SerializedStockEntryUnit
+  SerializedStockEntryUnit,
+  ProductStoreCost,
+  StockEntryLine,
+  SaleStatus
 } from '../types';
 
 // Helper to check if an error is due to a missing table (relation does not exist)
@@ -55,6 +60,7 @@ function mapPdvOperator(operator: any): PdvOperator {
     id: operator.id,
     tenantId: operator.tenant_id,
     unitId: operator.unit_id ?? null,
+    code: operator.code ?? null,
     name: operator.name,
     permissions: { ...defaultPdvOperatorPermissions, ...(operator.permissions || {}) },
     isActive: operator.is_active,
@@ -877,7 +883,7 @@ export const supabaseService = {
       const missingTables: string[] = [];
       const tablesToCheck = [
         'products', 'inventory', 'movements', 'sales', 
-        'expenses', 'trade_ins', 'work_orders', 'store_configs', 'suppliers'
+        'expenses', 'trade_ins', 'work_orders', 'store_configs', 'suppliers', 'services'
       ];
 
       // We will perform a quick request on 'products' first
@@ -932,7 +938,8 @@ export const supabaseService = {
       isUsed: p.is_used,
       variations: p.variations || undefined,
       isKit: p.is_kit,
-      kitItems: p.kit_items || undefined
+      kitItems: p.kit_items || undefined,
+      minStock: p.min_stock ?? null
     }));
   },
 
@@ -951,7 +958,8 @@ export const supabaseService = {
       is_used: p.isUsed,
       variations: p.variations || null,
       is_kit: p.isKit || false,
-      kit_items: p.kitItems || null
+      kit_items: p.kitItems || null,
+      min_stock: p.minStock ?? null
     };
 
     const { error } = await supabase
@@ -963,6 +971,36 @@ export const supabaseService = {
 
   async deleteProduct(id: string): Promise<void> {
     const { error } = await supabase.from('products').delete().eq('id', id);
+    if (error) throw error;
+  },
+
+  async getServices(): Promise<Service[]> {
+    const { data, error } = await supabase.from('services').select('*').order('name');
+    if (error) throw error;
+    return (data || []).map(service => ({
+      id: service.id,
+      sku: service.sku,
+      name: service.name,
+      category: service.category,
+      sellPrice: Number(service.sell_price),
+      isActive: service.is_active
+    }));
+  },
+
+  async upsertService(service: Service): Promise<void> {
+    const { error } = await supabase.from('services').upsert({
+      id: service.id,
+      sku: service.sku.trim(),
+      name: service.name.trim(),
+      category: service.category.trim(),
+      sell_price: service.sellPrice,
+      is_active: service.isActive
+    });
+    if (error) throw error;
+  },
+
+  async deleteService(id: string): Promise<void> {
+    const { error } = await supabase.from('services').delete().eq('id', id);
     if (error) throw error;
   },
 
@@ -1020,12 +1058,42 @@ export const supabaseService = {
       p_unit_id: unitId,
       p_units: units.map(unit => ({
         serialNumber: unit.serialNumber,
-        imei: unit.imei || null
+        imei: unit.imei || null,
+        unitCost: unit.unitCost ?? null
       })),
       p_reason: reason
     });
 
     if (error) throw error;
+  },
+
+  // Entrada sem serial com custo: grava todas as lojas de uma vez (tudo ou nada)
+  // e recalcula o custo medio de cada loja que recebeu.
+  async registerStockEntry(
+    productId: string,
+    entries: StockEntryLine[],
+    unitCost: number,
+    reason: string
+  ): Promise<void> {
+    const { error } = await supabase.rpc('register_stock_entry', {
+      p_product_id: productId,
+      p_entries: entries.map(entry => ({ unitId: entry.unitId, quantity: entry.quantity })),
+      p_unit_cost: unitCost,
+      p_reason: reason
+    });
+
+    if (error) throw error;
+  },
+
+  async getProductStoreCosts(): Promise<ProductStoreCost[]> {
+    const { data, error } = await supabase.rpc('list_product_store_costs');
+    if (error) throw error;
+    return (data || []).map((row: { product_id: string; unit_id: string; avg_cost: number | string; unit_count: number | null }) => ({
+      productId: row.product_id,
+      unitId: row.unit_id,
+      avgCost: Number(row.avg_cost),
+      unitCount: row.unit_count ?? null
+    }));
   },
 
   async processSaleTransaction(s: Sale): Promise<void> {
@@ -1113,12 +1181,35 @@ export const supabaseService = {
       .order('timestamp', { ascending: false });
 
     if (error) throw error;
+
+    // Linhas de pagamento das vendas do PDV. Tolerante a falha para o ERP
+    // continuar funcionando antes da migration 2.7 ser aplicada.
+    const paymentsBySale = new Map<string, SalePaymentLine[]>();
+    const { data: paymentRows, error: paymentsError } = await supabase
+      .from('sale_payments')
+      .select('sale_id, payment_method, amount, installments')
+      .order('created_at', { ascending: true });
+    if (paymentsError) {
+      console.warn('Nao foi possivel carregar sale_payments:', paymentsError.message);
+    } else {
+      (paymentRows || []).forEach(p => {
+        const lines = paymentsBySale.get(p.sale_id) ?? [];
+        lines.push({
+          paymentMethod: p.payment_method,
+          amount: Number(p.amount),
+          installments: Number(p.installments ?? 1)
+        });
+        paymentsBySale.set(p.sale_id, lines);
+      });
+    }
+
     return (data || []).map(s => ({
       id: s.id,
       invoiceNumber: s.invoice_number,
       unitId: s.unit_id,
       items: s.items,
       paymentMethod: s.payment_method,
+      payments: paymentsBySale.get(s.id),
       grossAmount: Number(s.gross_amount),
       feeAmount: Number(s.fee_amount),
       netAmount: Number(s.net_amount),
@@ -1129,8 +1220,17 @@ export const supabaseService = {
       timestamp: s.timestamp,
       status: s.status,
       requiresApproval: s.requires_approval,
-      approvedBy: s.approved_by || undefined
+      approvedBy: s.approved_by || undefined,
+      sellerCode: s.seller_code || undefined,
+      sellerName: s.seller_name || undefined,
+      finalizedByName: s.finalized_by_name || undefined
     }));
+  },
+
+  // Muda so o status: nunca regrava os itens (o custo congelado vem do servidor).
+  async updateSaleStatus(saleId: string, status: SaleStatus): Promise<void> {
+    const { error } = await supabase.from('sales').update({ status }).eq('id', saleId);
+    if (error) throw error;
   },
 
   async upsertSale(s: Sale): Promise<void> {
@@ -1297,6 +1397,7 @@ export const supabaseService = {
     return (data || []).map(c => ({
       unitId: c.unit_id,
       fixedCost: Number(c.fixed_cost),
+      maxItemDiscountPercent: Number(c.max_item_discount_percent ?? 0),
       paymentFees: c.payment_fees,
       tradeName: c.trade_name || undefined,
       legalName: c.legal_name || undefined,
@@ -1312,6 +1413,7 @@ export const supabaseService = {
     const payload = {
       unit_id: c.unitId,
       fixed_cost: c.fixedCost,
+      max_item_discount_percent: c.maxItemDiscountPercent ?? 0,
       payment_fees: c.paymentFees,
       trade_name: c.tradeName || null,
       legal_name: c.legalName || null,
@@ -1351,13 +1453,20 @@ export const supabaseService = {
       .upsert({
         id: operator.id,
         unit_id: operator.unitId,
+        code: operator.code,
         name: operator.name,
         permissions: operator.permissions,
         is_active: operator.isActive
       })
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      // Indice unico (tenant + loja + codigo, entre ativos): mensagem clara.
+      if (error.code === '23505' && String(error.message || '').includes('pdv_operators_tenant_unit_code_key')) {
+        throw new Error(`Já existe um vendedor ativo com o código ${operator.code} nesta loja.`);
+      }
+      throw error;
+    }
     return mapPdvOperator(data);
   },
 

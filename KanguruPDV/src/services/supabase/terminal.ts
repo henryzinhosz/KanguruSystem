@@ -45,7 +45,10 @@ export async function setAdminPassword(password: string): Promise<void> {
 
 export async function requireAdminPassword(password: string): Promise<TerminalContext> {
   const { data, error } = await supabase.rpc('unlock_pos_terminal', { p_password: password });
-  return mapTerminalContext(data?.[0], error);
+  if (error) throw error;
+  // Senha errada devolve zero linhas (a tentativa fica registrada no servidor).
+  if (!data?.[0]) throw new Error('Senha administrativa incorreta.');
+  return mapTerminalContext(data[0], null);
 }
 
 function mapTerminalContext(data: Record<string, unknown> | undefined, error: unknown): TerminalContext {

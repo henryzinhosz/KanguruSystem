@@ -5,6 +5,7 @@ import {
   User, 
   UserRole,
   Product, 
+  Service,
   StockInventory, 
   StockMovement, 
   Sale, 
@@ -17,13 +18,16 @@ import {
   CardCondition,
   PaymentMethod,
   MovementType,
-  SerializedStockEntryUnit
+  SerializedStockEntryUnit,
+  ProductStoreCost,
+  StockEntryLine
 } from '../types';
 
 export function useErpStore() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const [products, setProducts] = useState<Product[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
   const [inventory, setInventory] = useState<StockInventory[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
@@ -33,6 +37,7 @@ export function useErpStore() {
   const [storeConfigs, setStoreConfigs] = useState<StoreConfig[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [pdvOperators, setPdvOperators] = useState<PdvOperator[]>([]);
+  const [productStoreCosts, setProductStoreCosts] = useState<ProductStoreCost[]>([]);
 
   // Supabase Sync States
   const useSupabase = true;
@@ -44,6 +49,7 @@ export function useErpStore() {
 
   const clearOperationalData = useCallback(() => {
     setProducts([]);
+    setServices([]);
     setInventory([]);
     setMovements([]);
     setSales([]);
@@ -53,6 +59,7 @@ export function useErpStore() {
     setStoreConfigs([]);
     setSuppliers([]);
     setPdvOperators([]);
+    setProductStoreCosts([]);
   }, []);
 
   // Supabase owns the persisted session; the ERP derives its in-memory gestor profile from it.
@@ -91,7 +98,19 @@ export function useErpStore() {
         if (baseUser.role === UserRole.SUPER_ADMIN) {
           clearOperationalData();
         }
-        setCurrentUser(baseUser);
+        // O Supabase reemite o login ao voltar para a janela (Alt+Tab) e ao renovar
+        // o token (~1h). Mesmo usuario e mesmo perfil = manter o objeto atual, para
+        // nao recarregar tudo nem apagar o que esta sendo digitado nas telas.
+        setCurrentUser(previous => previous
+          && previous.id === baseUser.id
+          && previous.name === baseUser.name
+          && previous.role === baseUser.role
+          && previous.tenantId === baseUser.tenantId
+          && previous.unitId === baseUser.unitId
+          && previous.planCode === baseUser.planCode
+          && previous.subscriptionStatus === baseUser.subscriptionStatus
+          ? previous
+          : baseUser);
         setAuthProfileError(null);
       } catch (error) {
         console.error('Erro ao carregar perfil de acesso:', error);
@@ -135,6 +154,7 @@ export function useErpStore() {
       // Fetch all tables in parallel
       const [
         pList,
+        serviceList,
         iList,
         mList,
         sList,
@@ -146,6 +166,7 @@ export function useErpStore() {
         operatorList
       ] = await Promise.all([
         supabaseService.getProducts(),
+        supabaseService.getServices(),
         supabaseService.getInventory(),
         supabaseService.getMovements(),
         supabaseService.getSales(),
@@ -158,6 +179,7 @@ export function useErpStore() {
       ]);
 
       setProducts(pList);
+      setServices(serviceList);
       setInventory(iList);
       setMovements(mList);
       setSales(sList);
@@ -167,6 +189,15 @@ export function useErpStore() {
       setStoreConfigs(cList);
       setSuppliers(supList);
       setPdvOperators(operatorList);
+
+      // Custo por loja (2.7b). Tolerante a falha: o restante do ERP continua
+      // funcionando mesmo que a leitura de custos falhe.
+      try {
+        setProductStoreCosts(await supabaseService.getProductStoreCosts());
+      } catch (costError) {
+        console.warn('Nao foi possivel carregar o custo por loja:', costError);
+        setProductStoreCosts([]);
+      }
       
       setSupabaseLoading(false);
       return true;
@@ -251,6 +282,7 @@ export function useErpStore() {
   const resetDatabase = () => {
     setCurrentUser(null);
     setProducts([]);
+    setServices([]);
     setInventory([]);
     setMovements([]);
     setSales([]);
@@ -260,6 +292,7 @@ export function useErpStore() {
     setStoreConfigs([]);
     setSuppliers([]);
     setPdvOperators([]);
+    setProductStoreCosts([]);
   };
 
   // Add a product to the catalog
@@ -300,6 +333,25 @@ export function useErpStore() {
     if (useSupabase) {
       supabaseService.upsertProduct(sanitizedProduct).catch(err => console.error('Erro ao editar produto no Supabase:', err));
     }
+  };
+
+  const saveService = async (service: Service) => {
+    const sanitizedService = {
+      ...service,
+      sku: service.sku.trim(),
+      name: service.name.trim(),
+      category: service.category.trim()
+    };
+    await supabaseService.upsertService(sanitizedService);
+    setServices(previous => previous.some(item => item.id === sanitizedService.id)
+      ? previous.map(item => item.id === sanitizedService.id ? sanitizedService : item)
+      : [...previous, sanitizedService].sort((left, right) => left.name.localeCompare(right.name))
+    );
+  };
+
+  const deleteService = async (id: string) => {
+    await supabaseService.deleteService(id);
+    setServices(previous => previous.filter(service => service.id !== id));
   };
 
   // Log raw movement & update quantity atomically
@@ -413,6 +465,16 @@ export function useErpStore() {
     });
   };
 
+  const registerStockEntry = async (
+    productId: string,
+    entries: StockEntryLine[],
+    unitCost: number,
+    reason: string
+  ) => {
+    await supabaseService.registerStockEntry(productId, entries, unitCost, reason);
+    await loadAllFromSupabase();
+  };
+
   const registerSerializedStockEntry = async (
     productId: string,
     unitId: string,
@@ -439,6 +501,7 @@ export function useErpStore() {
     const config = storeConfigs.find(c => c.unitId === unitId) || {
       unitId,
       fixedCost: 10000,
+      maxItemDiscountPercent: 0,
       paymentFees: { DINHEIRO: 0.0, PIX: 0.005, CREDITO: 0.035, DEBITO: 0.015 }
     };
 
@@ -473,7 +536,11 @@ export function useErpStore() {
     // Commit changes to state
     setSales(prev => [newSale, ...prev]);
     if (useSupabase) {
-      supabaseService.processSaleTransaction(newSale).catch(err => console.error('Erro ao salvar venda no Supabase:', err));
+      // Recarrega as vendas depois de gravar: o servidor congela o custo de cada item.
+      supabaseService.processSaleTransaction(newSale)
+        .then(() => supabaseService.getSales())
+        .then(setSales)
+        .catch(err => console.error('Erro ao salvar venda no Supabase:', err));
     }
 
     // Update local inventory/movement state only
@@ -507,7 +574,7 @@ export function useErpStore() {
         if (s.id === saleId) {
           const updated = { ...s, status: 'PENDENTE_APROVACAO' as const };
           if (useSupabase) {
-            supabaseService.upsertSale(updated).catch(err => console.error('Erro ao atualizar venda no Supabase:', err));
+            supabaseService.updateSaleStatus(saleId, 'PENDENTE_APROVACAO').catch(err => console.error('Erro ao atualizar venda no Supabase:', err));
           }
           return updated;
         }
@@ -534,6 +601,7 @@ export function useErpStore() {
     }
 
     sale.items.forEach(item => {
+      if (item.itemType === 'SERVICE' || !item.productId) return;
       registerMovement(
         item.productId,
         'CLIENTE',
@@ -682,6 +750,7 @@ export function useErpStore() {
     const updatedConfig: StoreConfig = {
       unitId,
       fixedCost: existing?.fixedCost || 0,
+      maxItemDiscountPercent: existing?.maxItemDiscountPercent ?? 0,
       ...existing,
       ...updated,
       paymentFees: {
@@ -808,6 +877,7 @@ export function useErpStore() {
     currentUser,
     setCurrentUser,
     products,
+    services,
     inventory,
     movements,
     sales,
@@ -817,6 +887,7 @@ export function useErpStore() {
     storeConfigs,
     suppliers,
     pdvOperators,
+    productStoreCosts,
     useSupabase,
     supabaseLoading,
     supabaseConnected,
@@ -829,7 +900,10 @@ export function useErpStore() {
     resetDatabase,
     addProduct,
     editProduct,
+    saveService,
+    deleteService,
     registerMovement,
+    registerStockEntry,
     registerSerializedStockEntry,
     registerSale,
     cancelSale,

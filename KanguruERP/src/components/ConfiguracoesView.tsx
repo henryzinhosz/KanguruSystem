@@ -22,6 +22,7 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   phone: '',
   contactEmail: '',
   fixedCost: 0,
+  maxItemDiscountPercent: 0,
   paymentFees: { DINHEIRO: 0, PIX: 0, CREDITO: 0, DEBITO: 0 }
 };
 
@@ -70,7 +71,7 @@ export default function ConfiguracoesView({
   const [storeMessage, setStoreMessage] = useState('');
   const [storeError, setStoreError] = useState('');
   const [editingOperatorId, setEditingOperatorId] = useState<string | null>(null);
-  const [operatorForm, setOperatorForm] = useState({ name: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true });
+  const [operatorForm, setOperatorForm] = useState({ name: '', code: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true });
   const [operatorMessage, setOperatorMessage] = useState('');
   const [operatorError, setOperatorError] = useState('');
   const canManageOperators = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
@@ -134,6 +135,7 @@ export default function ConfiguracoesView({
       phone: store.phone || '',
       contactEmail: store.contactEmail || '',
       fixedCost: store.fixedCost,
+      maxItemDiscountPercent: store.maxItemDiscountPercent,
       paymentFees: store.paymentFees
     });
     setStoreError('');
@@ -158,7 +160,7 @@ export default function ConfiguracoesView({
 
   const resetOperatorForm = () => {
     setEditingOperatorId(null);
-    setOperatorForm({ name: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true });
+    setOperatorForm({ name: '', code: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true });
   };
 
   const handleOperatorSubmit = async (event: FormEvent) => {
@@ -170,12 +172,32 @@ export default function ConfiguracoesView({
       setOperatorError('Informe o nome do operador.');
       return;
     }
+    // Codigo de 2 digitos (01 a 99); "7" vira "07".
+    const trimmedCode = operatorForm.code.trim();
+    const code = /^[0-9]{1,2}$/.test(trimmedCode) ? trimmedCode.padStart(2, '0') : '';
+    if (!code || code === '00') {
+      setOperatorError('Informe o código do vendedor: 2 dígitos, de 01 a 99.');
+      return;
+    }
+    if (!operatorForm.unitId) {
+      setOperatorError('Selecione a loja do vendedor.');
+      return;
+    }
+    const duplicate = pdvOperators.find(operator =>
+      operator.id !== editingOperatorId && operator.isActive && operatorForm.isActive
+      && operator.unitId === operatorForm.unitId && operator.code === code
+    );
+    if (duplicate) {
+      setOperatorError(`Já existe um vendedor ativo com o código ${code} nesta loja (${duplicate.name}).`);
+      return;
+    }
 
     try {
       await savePdvOperator({
         id: editingOperatorId || crypto.randomUUID(),
         name: operatorForm.name.trim(),
-        unitId: operatorForm.unitId || null,
+        code,
+        unitId: operatorForm.unitId,
         permissions: operatorForm.permissions,
         isActive: operatorForm.isActive
       });
@@ -190,6 +212,7 @@ export default function ConfiguracoesView({
     setEditingOperatorId(operator.id);
     setOperatorForm({
       name: operator.name,
+      code: operator.code || '',
       unitId: operator.unitId || '',
       permissions: { ...EMPTY_OPERATOR_PERMISSIONS, ...operator.permissions },
       isActive: operator.isActive
@@ -339,14 +362,14 @@ export default function ConfiguracoesView({
             </div>
             <div className="overflow-x-auto border border-slate-200 rounded-lg">
               <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 text-slate-500 uppercase text-[10px]"><tr><th className="p-3">Operador</th><th className="p-3">Loja</th><th className="p-3">Situação</th><th className="p-3 text-right">Ações</th></tr></thead>
+                <thead className="bg-slate-50 text-slate-500 uppercase text-[10px]"><tr><th className="p-3">Código</th><th className="p-3">Operador</th><th className="p-3">Loja</th><th className="p-3">Situação</th><th className="p-3 text-right">Ações</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
                   {pdvOperators.map(operator => {
                     const permissionCount = Object.values(operator.permissions).filter(Boolean).length;
                     const store = storeConfigs.find(item => item.unitId === operator.unitId);
-                    return <tr key={operator.id}><td className="p-3"><span className="block font-bold text-slate-900">{operator.name}</span><span className="text-slate-500">{permissionCount} permissões</span></td><td className="p-3 text-slate-600">{store?.tradeName || store?.legalName || (operator.unitId ? operator.unitId : 'Todas as lojas')}</td><td className="p-3"><span className={`rounded px-2 py-1 text-[10px] font-bold ${operator.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{operator.isActive ? 'ATIVO' : 'INATIVO'}</span></td><td className="p-3"><div className="flex justify-end gap-1"><button type="button" onClick={() => editOperator(operator)} title="Editar operador" className="p-2 text-blue-700 rounded-lg hover:bg-blue-50"><Pencil className="w-4 h-4" /></button><button type="button" onClick={() => void removeOperator(operator)} title="Excluir operador" className="p-2 text-rose-600 rounded-lg hover:bg-rose-50"><Trash2 className="w-4 h-4" /></button></div></td></tr>;
+                    return <tr key={operator.id}><td className="p-3 font-mono font-bold text-slate-900">{operator.code || <span className="text-amber-700 font-sans font-normal">sem código</span>}</td><td className="p-3"><span className="block font-bold text-slate-900">{operator.name}</span><span className="text-slate-500">{permissionCount} permissões</span></td><td className="p-3 text-slate-600">{store?.tradeName || store?.legalName || (operator.unitId ? operator.unitId : 'Todas as lojas')}</td><td className="p-3"><span className={`rounded px-2 py-1 text-[10px] font-bold ${operator.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{operator.isActive ? 'ATIVO' : 'INATIVO'}</span></td><td className="p-3"><div className="flex justify-end gap-1"><button type="button" onClick={() => editOperator(operator)} title="Editar operador" className="p-2 text-blue-700 rounded-lg hover:bg-blue-50"><Pencil className="w-4 h-4" /></button><button type="button" onClick={() => void removeOperator(operator)} title="Excluir operador" className="p-2 text-rose-600 rounded-lg hover:bg-rose-50"><Trash2 className="w-4 h-4" /></button></div></td></tr>;
                   })}
-                  {pdvOperators.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-slate-400">Nenhum operador cadastrado.</td></tr>}
+                  {pdvOperators.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">Nenhum operador cadastrado.</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -356,7 +379,8 @@ export default function ConfiguracoesView({
             {operatorError && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{operatorError}</p>}
             {operatorMessage && <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3">{operatorMessage}</p>}
             <label className="block text-xs font-bold text-slate-700">Nome<input required value={operatorForm.name} onChange={event => setOperatorForm({ ...operatorForm, name: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500" /></label>
-            <label className="block text-xs font-bold text-slate-700">Loja <span className="font-normal text-slate-400">(opcional)</span><select value={operatorForm.unitId} onChange={event => setOperatorForm({ ...operatorForm, unitId: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500"><option value="">Todas as lojas</option>{storeConfigs.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.legalName || store.unitId}</option>)}</select></label>
+            <label className="block text-xs font-bold text-slate-700">Código do vendedor <span className="font-normal text-slate-400">(2 dígitos, usado para finalizar vendas no PDV)</span><input required inputMode="numeric" maxLength={2} placeholder="Ex: 07" value={operatorForm.code} onChange={event => setOperatorForm({ ...operatorForm, code: event.target.value.replace(/[^0-9]/g, '').slice(0, 2) })} className="mt-1.5 w-24 bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono font-bold text-center tracking-widest outline-none focus:ring-1 focus:ring-blue-500" /></label>
+            <label className="block text-xs font-bold text-slate-700">Loja<select required value={operatorForm.unitId} onChange={event => setOperatorForm({ ...operatorForm, unitId: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500"><option value="">Selecione a loja</option>{storeConfigs.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.legalName || store.unitId}</option>)}</select></label>
             <fieldset className="space-y-2"><legend className="text-xs font-bold text-slate-700">Permissões</legend>{(Object.keys(operatorPermissionLabels) as Array<keyof PdvOperatorPermissions>).map(permission => <label key={permission} className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={operatorForm.permissions[permission]} onChange={event => setOperatorForm({ ...operatorForm, permissions: { ...operatorForm.permissions, [permission]: event.target.checked } })} />{operatorPermissionLabels[permission]}</label>)}</fieldset>
             <label className="flex items-center gap-2 text-xs font-bold text-slate-700"><input type="checkbox" checked={operatorForm.isActive} onChange={event => setOperatorForm({ ...operatorForm, isActive: event.target.checked })} />Operador ativo</label>
             <div className="flex gap-2 pt-1">{editingOperatorId && <button type="button" onClick={resetOperatorForm} className="px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg">Cancelar</button>}<button type="submit" className="ml-auto px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2">{editingOperatorId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}{editingOperatorId ? 'Salvar alterações' : 'Cadastrar operador'}</button></div>
@@ -394,6 +418,18 @@ function StoreFields({ form, onChange }: {
           />
         </label>
       ))}
+      <label className="block text-xs font-bold text-slate-700">
+        Limite de desconto por item (%)
+        <input
+          type="number"
+          min="0"
+          max="100"
+          step="0.01"
+          value={form.maxItemDiscountPercent}
+          onChange={event => onChange('maxItemDiscountPercent', Number(event.target.value))}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
     </div>
   );
 }

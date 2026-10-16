@@ -1,7 +1,8 @@
 import { supabase } from './client';
 
-export interface PosProduct {
+export interface PosCatalogItem {
   id: string;
+  itemType: 'PRODUCT' | 'SERVICE';
   sku: string;
   name: string;
   brand: string | null;
@@ -9,6 +10,7 @@ export interface PosProduct {
   availableQuantity: number;
   warrantyMonths: number | null;
   requiresUnitSelection: boolean;
+  maxItemDiscountPercent: number;
 }
 
 export interface PosSerialUnit {
@@ -17,8 +19,9 @@ export interface PosSerialUnit {
   imei: string | null;
 }
 
-interface PosProductRow {
-  product_id: string;
+interface PosCatalogItemRow {
+  item_id: string;
+  item_type: 'PRODUCT' | 'SERVICE';
   sku: string;
   name: string;
   brand: string | null;
@@ -26,6 +29,7 @@ interface PosProductRow {
   available_quantity: number | string;
   warranty_months: number | string | null;
   requires_unit_selection: boolean | null;
+  max_item_discount_percent: number | string;
 }
 
 interface PosSerialUnitRow {
@@ -35,21 +39,23 @@ interface PosSerialUnitRow {
   imei: string | null;
 }
 
-export async function searchPosProducts(query: string): Promise<PosProduct[]> {
-  const { data, error } = await supabase.rpc('search_pos_products', { p_query: query });
+export async function searchPosItems(query: string): Promise<PosCatalogItem[]> {
+  const { data, error } = await supabase.rpc('search_pos_items', { p_query: query });
   if (error) {
     throw error;
   }
 
-  return ((data ?? []) as PosProductRow[]).map((product) => ({
-    id: product.product_id,
-    sku: product.sku,
-    name: product.name,
-    brand: product.brand,
-    sellPrice: Number(product.sell_price),
-    availableQuantity: Number(product.available_quantity),
-    warrantyMonths: product.warranty_months === null ? null : Number(product.warranty_months),
-    requiresUnitSelection: product.requires_unit_selection === true,
+  return ((data ?? []) as PosCatalogItemRow[]).map((item) => ({
+    id: item.item_id,
+    itemType: item.item_type,
+    sku: item.sku,
+    name: item.name,
+    brand: item.brand,
+    sellPrice: Number(item.sell_price),
+    availableQuantity: Number(item.available_quantity),
+    warrantyMonths: item.warranty_months === null ? null : Number(item.warranty_months),
+    requiresUnitSelection: item.requires_unit_selection === true,
+    maxItemDiscountPercent: Number(item.max_item_discount_percent ?? 0),
   }));
 }
 

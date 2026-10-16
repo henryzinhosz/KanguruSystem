@@ -14,7 +14,31 @@ import {
   Sale,
   StoreConfig,
   SerializedStockEntryUnit,
+  ProductStoreCost,
+  StockEntryLine,
 } from '../types';
+import { formatMoney } from '../db/finance';
+
+// Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
+const DEFAULT_MIN_STOCK = 2;
+
+// Converte o texto digitado em valor monetario; null se invalido ou com mais de 2 casas.
+const parseMoneyInput = (value: string): number | null => {
+  const normalized = value.trim().replace(',', '.');
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  if (Math.round(parsed * 100) / 100 !== parsed) return null;
+  return parsed;
+};
+
+const errorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message) return error.message;
+  if (error && typeof error === 'object' && 'message' in error && typeof (error as { message: unknown }).message === 'string') {
+    return (error as { message: string }).message;
+  }
+  return fallback;
+};
 import { 
   Package, 
   Search, 
@@ -61,7 +85,17 @@ interface EstoqueViewProps {
     units: SerializedStockEntryUnit[],
     reason: string
   ) => Promise<void>;
+  registerStockEntry: (
+    productId: string,
+    entries: StockEntryLine[],
+    unitCost: number,
+    reason: string
+  ) => Promise<void>;
+  productStoreCosts: ProductStoreCost[];
 }
+
+type SerializedEntryDraft = { serialNumber: string; imei: string; unitCost: string };
+const emptySerializedDraft = (): SerializedEntryDraft => ({ serialNumber: '', imei: '', unitCost: '' });
 
 export default function EstoqueView({
   currentUser,
@@ -73,11 +107,16 @@ export default function EstoqueView({
   addProduct,
   editProduct,
   registerMovement,
-  registerSerializedStockEntry
+  registerSerializedStockEntry,
+  registerStockEntry,
+  productStoreCosts
 }: EstoqueViewProps) {
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const stores = storeConfigs.filter(store => store.unitId !== 'central');
   const defaultStoreId = stores[0]?.unitId || '';
+  // Os efeitos abaixo dependem da LISTA de lojas, nao do array: cada recarga de dados
+  // cria um array novo e, antes, isso apagava os formularios em preenchimento.
+  const storeIdsKey = stores.map(store => store.unitId).join('|');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('Todas');
@@ -98,13 +137,18 @@ export default function EstoqueView({
   const [newProdSerialized, setNewProdSerialized] = useState(false);
   const [newProdStore, setNewProdStore] = useState('');
   const [newProdQty, setNewProdQty] = useState(0);
+  const [newProdMinStock, setNewProdMinStock] = useState('');
 
   // Form states: Stock Entry
   const [stockEntrySearch, setStockEntrySearch] = useState('');
   const [stockEntryProductId, setStockEntryProductId] = useState('');
   const [stockEntryQuantities, setStockEntryQuantities] = useState<Record<string, string>>({});
   const [serializedEntryUnitId, setSerializedEntryUnitId] = useState('');
-  const [serializedEntryUnits, setSerializedEntryUnits] = useState<SerializedStockEntryUnit[]>([{ serialNumber: '', imei: '' }]);
+  const [serializedEntryUnits, setSerializedEntryUnits] = useState<SerializedEntryDraft[]>([emptySerializedDraft()]);
+  const [serializedApplyAllCost, setSerializedApplyAllCost] = useState('');
+  const [stockEntryUnitCost, setStockEntryUnitCost] = useState('');
+  const [stockEntrySubmitting, setStockEntrySubmitting] = useState(false);
+  const [minStockDrafts, setMinStockDrafts] = useState<Record<string, string>>({});
   const [stockEntryReason, setStockEntryReason] = useState('Reposição de estoque');
   const [stockEntryError, setStockEntryError] = useState('');
   const [stockEntrySuccess, setStockEntrySuccess] = useState('');
@@ -134,6 +178,9 @@ export default function EstoqueView({
   const getProductInventory = (productId: string) => inventory.find(item => item.productId === productId);
   const getUnitStock = (productId: string, unitId: string) => getProductInventory(productId)?.quantities[unitId]?.qty || 0;
   const getUnitSerials = (productId: string, unitId: string) => getProductInventory(productId)?.quantities[unitId]?.serials || [];
+  // Custo medio da loja; sem registro, o custo padrao do cadastro.
+  const getStoreCost = (product: Product, unitId: string) =>
+    productStoreCosts.find(cost => cost.productId === product.id && cost.unitId === unitId)?.avgCost ?? product.costPrice;
 
   const generateEntrySerials = (productSku: string, unitId: string, currentSerialCount: number, quantity: number) => {
     const skuBase = productSku.trim().toUpperCase();
@@ -149,7 +196,7 @@ export default function EstoqueView({
       if (stores.some(store => store.unitId === previous) && previous !== defaultStoreId) return previous;
       return stores[1]?.unitId || defaultStoreId;
     });
-  }, [storeConfigs]);
+  }, [storeIdsKey]);
 
   useEffect(() => {
     if (!stores.length) return;
@@ -160,16 +207,18 @@ export default function EstoqueView({
       });
       return next;
     });
-  }, [storeConfigs]);
+  }, [storeIdsKey]);
 
   useEffect(() => {
     if (!stockEntryProductId || !stores.length) return;
     setStockEntryQuantities(Object.fromEntries(stores.map(store => [store.unitId, ''])));
     setSerializedEntryUnitId(defaultStoreId);
-    setSerializedEntryUnits([{ serialNumber: '', imei: '' }]);
+    setSerializedEntryUnits([emptySerializedDraft()]);
+    setSerializedApplyAllCost('');
+    setStockEntryUnitCost('');
     setStockEntryError('');
     setStockEntrySuccess('');
-  }, [stockEntryProductId, storeConfigs]);
+  }, [stockEntryProductId, storeIdsKey]);
 
   // 1. Filtered Catalogs
   const filteredProducts = products.filter(p => {
@@ -189,6 +238,8 @@ export default function EstoqueView({
 
     if (!trimmedName || !trimmedSku) return;
 
+    const minStockValue = newProdMinStock.trim() === '' ? null : Math.max(0, parseInt(newProdMinStock, 10) || 0);
+
     addProduct({
       sku: trimmedSku,
       name: trimmedName,
@@ -199,7 +250,8 @@ export default function EstoqueView({
       ncm: trimmedNcm,
       warrantyMonths: newProdWarranty,
       isSerialized: newProdSerialized,
-      isUsed: false
+      isUsed: false,
+      minStock: minStockValue
     });
 
     // Reset Form
@@ -213,6 +265,7 @@ export default function EstoqueView({
     setNewProdSerialized(false);
     setNewProdStore(defaultStoreId);
     setNewProdQty(0);
+    setNewProdMinStock('');
     setShowAddProductModal(false);
   };
 
@@ -229,11 +282,17 @@ export default function EstoqueView({
     const movementReason = stockEntryReason.trim() || 'Entrada de estoque multi-loja';
 
     if (selectedStockEntryProduct.isSerialized) {
-      const units = serializedEntryUnits
-        .map(unit => ({ serialNumber: unit.serialNumber.trim(), imei: unit.imei?.trim() || undefined }))
-        .filter(unit => unit.serialNumber || unit.imei);
-      const missingSerial = units.some(unit => !unit.serialNumber);
-      const serials = units.map(unit => unit.serialNumber.toLocaleLowerCase());
+      const drafts = serializedEntryUnits
+        .map(unit => ({ serialNumber: unit.serialNumber.trim(), imei: unit.imei.trim(), unitCost: unit.unitCost.trim() }))
+        .filter(unit => unit.serialNumber || unit.imei || unit.unitCost);
+      const missingSerial = drafts.some(unit => !unit.serialNumber);
+      const serials = drafts.map(unit => unit.serialNumber.toLocaleLowerCase());
+      const invalidCost = drafts.some(unit => parseMoneyInput(unit.unitCost) === null);
+      const units: SerializedStockEntryUnit[] = drafts.map(unit => ({
+        serialNumber: unit.serialNumber,
+        imei: unit.imei || undefined,
+        unitCost: parseMoneyInput(unit.unitCost) ?? undefined
+      }));
 
       if (!serializedEntryUnitId || !stores.some(store => store.unitId === serializedEntryUnitId)) {
         setStockEntryError('Selecione a loja que receberá as unidades serializadas.');
@@ -247,14 +306,22 @@ export default function EstoqueView({
         setStockEntryError('Não repita números de série na mesma entrada.');
         return;
       }
+      if (invalidCost) {
+        setStockEntryError('Informe o custo de compra de cada unidade (valor em reais, até 2 casas decimais).');
+        return;
+      }
 
+      setStockEntrySubmitting(true);
       try {
         await registerSerializedStockEntry(selectedStockEntryProduct.id, serializedEntryUnitId, units, movementReason);
         setStockEntrySuccess(`${units.length} unidade(s) serializada(s) registrada(s) para ${selectedStockEntryProduct.name}.`);
-        setSerializedEntryUnits([{ serialNumber: '', imei: '' }]);
+        setSerializedEntryUnits([emptySerializedDraft()]);
+        setSerializedApplyAllCost('');
         setStockEntryReason('Reposição de estoque');
       } catch (error) {
-        setStockEntryError(error instanceof Error ? error.message : 'Não foi possível registrar a entrada serializada.');
+        setStockEntryError(errorMessage(error, 'Não foi possível registrar a entrada serializada.'));
+      } finally {
+        setStockEntrySubmitting(false);
       }
       return;
     }
@@ -271,22 +338,49 @@ export default function EstoqueView({
       return;
     }
 
-    requestedEntries.forEach(entry => {
-      registerMovement(
+    const unitCost = parseMoneyInput(stockEntryUnitCost);
+    if (unitCost === null) {
+      setStockEntryError('Informe o custo unitário da compra (valor em reais, até 2 casas decimais).');
+      return;
+    }
+
+    setStockEntrySubmitting(true);
+    try {
+      await registerStockEntry(
         selectedStockEntryProduct.id,
-        'FORNECEDOR',
-        entry.unitId,
-        'ENTRADA',
-        entry.qty,
-        [],
-        undefined,
+        requestedEntries.map(entry => ({ unitId: entry.unitId, quantity: entry.qty })),
+        unitCost,
         movementReason
       );
-    });
+      setStockEntrySuccess(`Entrada registrada para ${selectedStockEntryProduct.name} em ${requestedEntries.length} loja(s), custo unitário ${formatMoney(unitCost)}.`);
+      setStockEntryQuantities(Object.fromEntries(stores.map(store => [store.unitId, ''])));
+      setStockEntryUnitCost('');
+      setStockEntryReason('Reposição de estoque');
+    } catch (error) {
+      setStockEntryError(errorMessage(error, 'Não foi possível registrar a entrada. Nada foi gravado.'));
+    } finally {
+      setStockEntrySubmitting(false);
+    }
+  };
 
-    setStockEntrySuccess(`Entrada registrada para ${selectedStockEntryProduct.name} em ${requestedEntries.length} loja(s).`);
-    setStockEntryQuantities(Object.fromEntries(stores.map(store => [store.unitId, '0'])));
-    setStockEntryReason('Reposição de estoque');
+  const saveMinStock = (product: Product) => {
+    const draft = minStockDrafts[product.id];
+    if (draft === undefined) return;
+    const trimmed = draft.trim();
+    const value = trimmed === '' ? null : Number(trimmed);
+    const clearDraft = () => setMinStockDrafts(previous => {
+      const next = { ...previous };
+      delete next[product.id];
+      return next;
+    });
+    if (value !== null && (!Number.isInteger(value) || value < 0)) {
+      clearDraft();
+      return;
+    }
+    if (value !== (product.minStock ?? null)) {
+      editProduct({ ...product, minStock: value });
+    }
+    clearDraft();
   };
 
   // Handle Transfer Submit (Atomic operation)
@@ -505,6 +599,8 @@ export default function EstoqueView({
                     .filter(([uid]) => uid !== 'central')
                     .reduce((acc, [_, q]) => acc + q.qty, 0)
                 : prodInv?.quantities[activeUnitId]?.qty || 0;
+              const minStock = p.minStock ?? DEFAULT_MIN_STOCK;
+              const minStockDraft = minStockDrafts[p.id];
 
               return (
                 <div key={p.id} className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col justify-between">
@@ -516,9 +612,9 @@ export default function EstoqueView({
                           {p.category}
                         </span>
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase font-mono ml-1.5 ${
-                          totalStock === 0 
-                            ? 'bg-rose-50 text-rose-700 border border-rose-100/50' 
-                            : totalStock <= 2 
+                          totalStock === 0
+                            ? 'bg-rose-50 text-rose-700 border border-rose-100/50'
+                            : totalStock <= minStock
                               ? 'bg-amber-50 text-amber-700 border border-amber-100/50'
                               : 'bg-emerald-50 text-emerald-700 border border-emerald-100/50'
                         }`}>
@@ -533,8 +629,8 @@ export default function EstoqueView({
                           R$ {p.sellPrice.toLocaleString('pt-BR')}
                         </span>
                         {isAdmin && (
-                          <span className="text-[10px] text-emerald-600 font-medium block mt-0.5">
-                            Custo: R$ {p.costPrice.toLocaleString('pt-BR')}
+                          <span className="text-[10px] text-slate-500 font-medium block mt-0.5" title="Usado quando a loja ainda não tem custo de compra registrado">
+                            Custo padrão: {formatMoney(p.costPrice)}
                           </span>
                         )}
                       </div>
@@ -549,24 +645,30 @@ export default function EstoqueView({
                         {stores.map(store => {
                           const unit = { id: store.unitId, name: store.tradeName || store.unitId };
                           const unitQty = prodInv?.quantities[unit.id]?.qty || 0;
-                          const serials = prodInv?.quantities[unit.id]?.serials || [];
 
                           return (
                             <div key={unit.id} className="flex justify-between items-center p-1 bg-white rounded border border-slate-200/50">
-                              <span className="text-slate-600 truncate max-w-[100px] font-medium text-[11px]">
-                                {unit.name.split(' - ')[0]}
-                              </span>
+                              <div className="min-w-0">
+                                <span className="text-slate-600 truncate max-w-[100px] font-medium text-[11px] block">
+                                  {unit.name.split(' - ')[0]}
+                                </span>
+                                {isAdmin && (
+                                  <span className="text-[10px] text-emerald-700 font-mono block" title={p.isSerialized ? 'Média do custo das unidades em estoque' : 'Custo médio ponderado da loja'}>
+                                    Custo {formatMoney(getStoreCost(p, unit.id))}
+                                  </span>
+                                )}
+                              </div>
                               <div className="flex items-center space-x-1">
                                 <span className={`font-mono font-bold text-[11px] ${
-                                  unitQty === 0 
-                                    ? 'text-rose-500' 
-                                    : unitQty <= 2 
-                                      ? 'text-amber-500' 
+                                  unitQty === 0
+                                    ? 'text-rose-500'
+                                    : unitQty <= minStock
+                                      ? 'text-amber-500'
                                       : 'text-slate-900'
                                 }`}>
                                   {unitQty} un
                                 </span>
-                                {unitQty <= 2 && (
+                                {unitQty <= minStock && (
                                   <span className={`w-1.5 h-1.5 rounded-full ${unitQty === 0 ? 'bg-rose-500' : 'bg-amber-500'}`} />
                                 )}
                               </div>
@@ -594,7 +696,27 @@ export default function EstoqueView({
                           </span>
                         )}
                       </div>
-                      <span className="font-mono text-slate-400">Garantia: {p.warrantyMonths}m</span>
+                      <div className="flex items-center gap-3">
+                        {isAdmin ? (
+                          <label className="flex items-center gap-1 text-slate-400" title="Abaixo deste número o produto entra nos alertas do Dashboard. Em branco = padrão (2).">
+                            <span>Mínimo:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              value={minStockDraft ?? (p.minStock == null ? '' : String(p.minStock))}
+                              placeholder={String(DEFAULT_MIN_STOCK)}
+                              onChange={(e) => setMinStockDrafts(previous => ({ ...previous, [p.id]: e.target.value }))}
+                              onBlur={() => saveMinStock(p)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                              className="w-12 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-center font-mono text-slate-700 outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </label>
+                        ) : (
+                          <span className="font-mono text-slate-400">Mínimo: {minStock}</span>
+                        )}
+                        <span className="font-mono text-slate-400">Garantia: {p.warrantyMonths}m</span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -731,14 +853,39 @@ export default function EstoqueView({
                       </select>
                     </div>
 
+                    <div className="flex flex-wrap items-end gap-2 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                      <div className="space-y-1">
+                        <label className="font-medium text-slate-700">Mesmo custo para todas as unidades (R$)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={serializedApplyAllCost}
+                          onChange={(e) => setSerializedApplyAllCost(e.target.value)}
+                          placeholder="Ex: 4135,00"
+                          className="w-40 bg-white border border-slate-200 rounded-lg p-2 outline-none font-mono"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        disabled={parseMoneyInput(serializedApplyAllCost) === null}
+                        onClick={() => setSerializedEntryUnits(previous => previous.map(current => ({ ...current, unitCost: serializedApplyAllCost.trim() })))}
+                        className="px-3 py-2 border border-slate-200 bg-white text-slate-700 rounded-lg hover:bg-slate-100 transition font-semibold disabled:opacity-40"
+                      >
+                        Aplicar a todas
+                      </button>
+                      <p className="text-[11px] text-slate-500 basis-full">Se uma unidade custou diferente (ex.: compra urgente), ajuste só a linha dela.</p>
+                    </div>
+
                     <div className="space-y-2">
-                      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px] gap-2 px-1 text-[10px] uppercase tracking-wider text-slate-400 font-bold">
+                      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px_36px] gap-2 px-1 text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                         <span>Número de série</span>
                         <span>IMEI opcional</span>
+                        <span>Custo (R$)</span>
                         <span />
                       </div>
                       {serializedEntryUnits.map((unit, index) => (
-                        <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_36px] gap-2">
+                        <div key={index} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px_36px] gap-2">
                           <input
                             type="text"
                             value={unit.serialNumber}
@@ -748,10 +895,20 @@ export default function EstoqueView({
                           />
                           <input
                             type="text"
-                            value={unit.imei || ''}
+                            value={unit.imei}
                             onChange={(e) => setSerializedEntryUnits(previous => previous.map((current, currentIndex) => currentIndex === index ? { ...current, imei: e.target.value } : current))}
                             placeholder="Opcional"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={unit.unitCost}
+                            onChange={(e) => setSerializedEntryUnits(previous => previous.map((current, currentIndex) => currentIndex === index ? { ...current, unitCost: e.target.value } : current))}
+                            placeholder="0,00"
+                            aria-label="Custo de compra da unidade"
+                            className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono text-right"
                           />
                           <button
                             type="button"
@@ -769,25 +926,48 @@ export default function EstoqueView({
 
                     <button
                       type="button"
-                      onClick={() => setSerializedEntryUnits(previous => [...previous, { serialNumber: '', imei: '' }])}
+                      onClick={() => setSerializedEntryUnits(previous => [...previous, { ...emptySerializedDraft(), unitCost: previous[previous.length - 1]?.unitCost ?? '' }])}
                       className="px-3 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition font-semibold"
                     >
                       Adicionar unidade
                     </button>
                   </div>
                 ) : (
+                <div className="space-y-3">
+                <div className="space-y-1 max-w-xs">
+                  <label className="font-medium text-slate-700">Custo unitário desta compra (R$)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={stockEntryUnitCost}
+                    onChange={(e) => setStockEntryUnitCost(e.target.value)}
+                    placeholder="Ex: 11,00"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
+                  />
+                  <p className="text-[10px] text-slate-400">Cada loja que receber recalcula o próprio custo médio.</p>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-separate border-spacing-y-2">
                     <thead>
                       <tr className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">
                         <th className="px-3 py-1">Loja</th>
                         <th className="px-3 py-1 text-center">Estoque Atual</th>
+                        <th className="px-3 py-1 text-center">Custo médio</th>
                         <th className="px-3 py-1 text-center">Adicionar</th>
                       </tr>
                     </thead>
                     <tbody>
                       {stores.map(store => {
                         const currentQty = getUnitStock(selectedStockEntryProduct.id, store.unitId);
+                        const currentCost = getStoreCost(selectedStockEntryProduct, store.unitId);
+                        const addQty = parseInt(stockEntryQuantities[store.unitId] || '0', 10) || 0;
+                        const entryCost = parseMoneyInput(stockEntryUnitCost);
+                        const baseQty = Math.max(0, currentQty);
+                        // Mesma conta do servidor (apply_store_cost_entry), so para pre-visualizar.
+                        const projectedCost = entryCost !== null && addQty > 0
+                          ? (baseQty * currentCost + addQty * entryCost) / (baseQty + addQty)
+                          : null;
                         return (
                           <tr key={store.unitId} className="bg-slate-50/80">
                             <td className="px-3 py-3 rounded-l-xl border border-slate-200 border-r-0">
@@ -798,6 +978,12 @@ export default function EstoqueView({
                             </td>
                             <td className="px-3 py-3 border-y border-slate-200 text-center font-mono font-bold text-slate-700">
                               {currentQty}
+                            </td>
+                            <td className="px-3 py-3 border-y border-slate-200 text-center font-mono text-slate-700">
+                              {formatMoney(currentCost)}
+                              {projectedCost !== null && (
+                                <span className="block text-[10px] text-blue-700">→ {formatMoney(projectedCost)}</span>
+                              )}
                             </td>
                             <td className="px-3 py-3 rounded-r-xl border border-slate-200 border-l-0">
                               <input
@@ -816,6 +1002,7 @@ export default function EstoqueView({
                       })}
                     </tbody>
                   </table>
+                </div>
                 </div>
                 )}
 
@@ -837,10 +1024,21 @@ export default function EstoqueView({
                         ? serializedEntryUnits.filter(unit => unit.serialNumber.trim()).length
                         : stores.reduce((sum, store) => sum + (parseInt(stockEntryQuantities[store.unitId] || '0', 10) || 0), 0)} un
                     </p>
+                    <p className="text-sm font-semibold text-slate-900">
+                      Custo total da compra: {(() => {
+                        if (selectedStockEntryProduct.isSerialized) {
+                          const costs = serializedEntryUnits.filter(unit => unit.serialNumber.trim()).map(unit => parseMoneyInput(unit.unitCost));
+                          return costs.some(cost => cost === null) ? '—' : formatMoney(costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0));
+                        }
+                        const entryCost = parseMoneyInput(stockEntryUnitCost);
+                        const totalQty = stores.reduce((sum, store) => sum + (parseInt(stockEntryQuantities[store.unitId] || '0', 10) || 0), 0);
+                        return entryCost === null ? '—' : formatMoney(entryCost * totalQty);
+                      })()}
+                    </p>
                     <p className="text-[11px] text-slate-500">
                       {selectedStockEntryProduct.isSerialized
                         ? 'Cada linha representa uma unidade física. Números de série não são gerados automaticamente.'
-                        : 'O saldo será somado diretamente ao estoque da unidade.'}
+                        : 'Tudo é gravado de uma vez: se algo falhar, nenhuma loja recebe a entrada.'}
                     </p>
                   </div>
                 </div>
@@ -849,17 +1047,18 @@ export default function EstoqueView({
                   <button
                     type="button"
                     onClick={() => selectedStockEntryProduct.isSerialized
-                      ? setSerializedEntryUnits([{ serialNumber: '', imei: '' }])
-                      : setStockEntryQuantities(Object.fromEntries(stores.map(store => [store.unitId, '0'])))}
+                      ? setSerializedEntryUnits([emptySerializedDraft()])
+                      : setStockEntryQuantities(Object.fromEntries(stores.map(store => [store.unitId, ''])))}
                     className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition"
                   >
                     Zerar
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition"
+                    disabled={stockEntrySubmitting}
+                    className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition disabled:opacity-50"
                   >
-                    Confirmar Entrada
+                    {stockEntrySubmitting ? 'Gravando...' : 'Confirmar Entrada'}
                   </button>
                 </div>
               </form>
@@ -1270,7 +1469,7 @@ export default function EstoqueView({
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700">Preço Custo (R$)</label>
+                  <label className="font-bold text-slate-700" title="Usado só quando a loja ainda não tem custo de compra registrado. O custo real vem da Entrada de Estoque.">Custo padrão (R$)</label>
                   <input
                     type="number"
                     min="0"
@@ -1288,6 +1487,18 @@ export default function EstoqueView({
                     step="0.01"
                     value={newProdSell || ''}
                     onChange={(e) => setNewProdSell(parseFloat(e.target.value) || 0)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700">Estoque mínimo</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={newProdMinStock}
+                    placeholder={`Padrão: ${DEFAULT_MIN_STOCK}`}
+                    onChange={(e) => setNewProdMinStock(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                   />
                 </div>

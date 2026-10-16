@@ -35,6 +35,7 @@ export interface PdvOperator {
   id: string;
   tenantId: string;
   unitId: string | null;
+  code: string | null; // 2 digitos (01-99), unico por loja entre os ativos
   name: string;
   permissions: PdvOperatorPermissions;
   isActive: boolean;
@@ -129,6 +130,30 @@ export interface Product {
   variations?: ProductVariation[];
   isKit?: boolean;
   kitItems?: KitItem[];
+  minStock?: number | null; // estoque minimo para alertas; null = nao definido (usa o padrao)
+}
+
+// Custo medio de um produto em uma loja (sem serial: media ponderada;
+// com serial: media das unidades em estoque).
+export interface ProductStoreCost {
+  productId: string;
+  unitId: string;
+  avgCost: number;
+  unitCount: number | null; // so para serializados: unidades em estoque
+}
+
+export interface StockEntryLine {
+  unitId: string;
+  quantity: number;
+}
+
+export interface Service {
+  id: string;
+  sku: string;
+  name: string;
+  category: string;
+  sellPrice: number;
+  isActive: boolean;
 }
 
 export interface StockQuantity {
@@ -146,6 +171,7 @@ export interface StockInventory {
 export interface SerializedStockEntryUnit {
   serialNumber: string;
   imei?: string;
+  unitCost?: number;
 }
 
 export type MovementType = 'ENTRADA' | 'SAIDA' | 'PERDA' | 'TRANSFERENCIA';
@@ -167,15 +193,43 @@ export interface StockMovement {
 }
 
 export interface SaleItem {
-  productId: string;
+  itemType?: 'PRODUCT' | 'SERVICE';
+  productId?: string;
+  serviceId?: string;
   variationId?: string;
   quantity: number;
   unitPrice: number;
+  discountPercent?: number;
+  lineTotal?: number;
   serials?: string[]; // serials linked to this item
   cardCondition?: CardCondition;
+  // Custo congelado pelo servidor no momento da venda (a partir da 2.7b).
+  unitCost?: number;
+  costTotal?: number;
 }
 
 export type PaymentMethod = 'DINHEIRO' | 'PIX' | 'CREDITO' | 'DEBITO';
+
+// Metodos que podem aparecer em vendas vindas do PDV (inclui o legado
+// 'DIVIDIDO', gravado quando a venda tem 2+ linhas em sale_payments).
+export type SalePaymentLineMethod = PaymentMethod | 'VOUCHER' | 'CREDIARIO';
+export type SalePaymentMethod = SalePaymentLineMethod | 'DIVIDIDO';
+
+export interface SalePaymentLine {
+  paymentMethod: SalePaymentLineMethod;
+  amount: number; // valor aplicado (troco nao entra; em reserva, ja sem o sinal)
+  installments: number;
+}
+
+export const SALE_PAYMENT_METHOD_LABELS: Record<SalePaymentMethod, string> = {
+  DINHEIRO: 'Dinheiro',
+  PIX: 'Pix',
+  CREDITO: 'Crédito',
+  DEBITO: 'Débito',
+  VOUCHER: 'Voucher',
+  CREDIARIO: 'Crediário',
+  DIVIDIDO: 'Dividido',
+};
 
 export type SaleStatus = 'CONCLUIDA' | 'PENDENTE_APROVACAO' | 'CANCELADA' | 'REJEITADA';
 
@@ -184,7 +238,8 @@ export interface Sale {
   invoiceNumber: string;
   unitId: string;
   items: SaleItem[];
-  paymentMethod: PaymentMethod;
+  paymentMethod: SalePaymentMethod;
+  payments?: SalePaymentLine[]; // linhas de sale_payments (vendas do PDV a partir da 2.7)
   grossAmount: number;
   feeAmount: number;
   netAmount: number;
@@ -196,6 +251,11 @@ export interface Sale {
   status: SaleStatus;
   requiresApproval: boolean;
   approvedBy?: string; // admin who approved cancellation or high-value override
+  // Vendedor congelado na venda (PDV). Em reserva convertida e quem criou a reserva.
+  sellerCode?: string;
+  sellerName?: string;
+  // Quem finalizou no PDV (difere do vendedor so em reserva convertida).
+  finalizedByName?: string;
 }
 
 export interface Expense {
@@ -248,6 +308,7 @@ export interface WorkOrder {
 export interface StoreConfig {
   unitId: string;
   fixedCost: number; // for break-even calc
+  maxItemDiscountPercent: number;
   tradeName?: string;
   legalName?: string;
   cnpj?: string;
