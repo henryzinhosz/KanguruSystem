@@ -104,7 +104,7 @@ por operador (inspirado no Linx Degust).
 | 2.5 Serviços e carrinho (`services`, `max_item_discount_percent`, `search_pos_items`, desconto por linha) | ✅ |
 | 2.6 Reserva de produto (`product_reservations`, sinal em ledger próprio, preço/desconto congelado) | ✅ |
 | 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada e testada (a)–(g) em 2026-10-14; falta só o PR para `main` (seção 6) |
-| 2.7b Etiquetas, código de barras e custo por unidade | 🔵 Desenho em discussão (seção 7) — fazer ANTES da 2.8 |
+| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) com desenho aprovado, em implementação; Partes 2–3 depois (seção 7) |
 | 2.8 Finalização da venda (fiscal, garantia) | ⚪ Não iniciada |
 | 2.9 Trocas e devoluções | ⚪ |
 | 2.10 Interface para tablet | ⚪ (design visual adiado de propósito para o fim) |
@@ -186,10 +186,61 @@ fornecedor vs ~R$4.320 numa compra urgente, vendido a ~R$4.900) e ele quer o luc
 6. **Custo congelado no item da venda** (verificar se o sistema já faz isso).
 7. ERP: margem por venda/produto/período; "Entrada de Estoque" passa a pedir custo (por unidade nos serializados).
 
-### Perguntas em aberto ao usuário
-- PS5 entram com serial lido na entrada ou só como quantidade?
-- A Zebra fica no mesmo computador do PDV de cada loja?
-- Tamanho da etiqueta?
+### Respostas do usuário (2026-10-14)
+- PS5 entram **com serial lido** na entrada.
+- A Zebra fica **no mesmo computador do PDV** de cada loja.
+- Tamanho da etiqueta: **ainda não definido** (etiquetas não compradas).
+
+### Decisões de 2026-10-14
+- Ordem aprovada: **Parte 1 custo/lucro → Parte 2 código de barras → Parte 3 etiquetas** (quando Zebra/etiquetas chegarem).
+- Média ponderada para itens sem serial: **aprovada**.
+- Código de barras do fabricante: **NÃO** — sempre etiqueta própria (código de fábrica vem errado/rasurado às vezes).
+- Dashboard (junto da Parte 1), pedido do usuário: cards na ordem Faturamento Bruto | Lucro Bruto (fat. − custo) |
+  Lucro Real Operacional (lucro bruto − taxas − custos) | Ticket Médio. "Itens em Alerta" vira painel no lugar do
+  gráfico de categorias: lista de produtos com selo amarelo (médio risco) / vermelho (alto risco), contagem no subtítulo,
+  "Níveis de estoque normais" no rodapé. "Faturamento por Categoria" vai para o lado do "Comparativo entre Lojas", que
+  vira gráfico de linhas (referência: linhas em zigue-zague subindo, estilo profissional) mantendo a função de comparar lojas.
+- Cabos "diversos" com preços variados: **cada faixa de preço vira um produto** (sem "preço livre", evita desvio).
+- Lucro Real Operacional = lucro bruto − taxas − **despesas lançadas no Financeiro** (opção A). O "custo fixo" da loja
+  fica só como meta do ponto de equilíbrio no gráfico diário (usuário lança os custos reais no Financeiro).
+- Filtro de período no Dashboard: **aprovado** (Hoje / 7 dias / Este mês (padrão) / Mês passado / Personalizado).
+- Corrigir junto: fuso horário das datas, "cobertura 30 dias" que usa tudo, texto fixo "3 lojas", ano 2026 fixo.
+- Vendas antigas sem custo: **sem estimativa** — os dados atuais são de teste; o usuário vai **zerar o banco inteiro**
+  (cadastros, PDVs ativos etc.) antes de usar de verdade. Zerar exige plano próprio e aprovação explícita.
+- Itens em Alerta (aprovado): campo **estoque mínimo por produto** (padrão 2) + **dias de cobertura** (vendas dos
+  últimos 30 dias). 🔴 alto = zerado ou cobre < 7 dias; 🟡 médio = ≤ mínimo ou cobre < 15 dias; mostra o motivo.
+  Alerta **por loja**, com **seletor de loja próprio no card** (mostra só a loja escolhida). Ignora produto zerado sem
+  venda há 90+ dias e sem mínimo definido. Números 7/15/30/90 são iniciais (usuário não contestou).
+
+### Desenho APROVADO da Parte 1 — custo e lucro real (2026-10-15)
+Branch: `feat/2.7b-custos` (criado a partir de `feat/2.7-split-payments`, que ainda não foi para a `main`).
+1. **Custo médio POR LOJA** (não único): nova tabela de custo por produto+loja, com RLS. `products.cost_price` fica só
+   como referência/padrão. Motivo: média única distorce o lucro por loja (exemplo do usuário: Loja 1 R$11,00 vs Loja 2
+   R$12,09, média única R$11,43).
+2. Entrada sem serial: **nova RPC atômica** (produto, quantidades por loja, custo unitário) que recalcula a média
+   ponderada de cada loja que recebeu; estoque ≤ 0 → custo novo vira a média. Custo **obrigatório**.
+   A antiga `process_inventory_movement` continua para transferência/perda/ajuste (corrigir o loop não atômico do ERP).
+3. Saídas (perda, ajuste) **não mudam** a média. **Transferência leva o custo da loja de origem** e recalcula a média
+   da loja de destino.
+4. Serializados: `product_serial_units.unit_cost` (custo por unidade na entrada, com "aplicar a todas").
+5. `movements.unit_cost`: histórico de custo de cada compra.
+6. `products.min_stock` (nulo = não definido → usa 2) para os alertas.
+7. **Custo congelado no item da venda** (PDV e ERP): sem serial = média da loja no momento; com serial = custo das
+   unidades vendidas; serviço = 0; reserva = custo no momento da conversão (serial = unidade reservada).
+   Assinaturas e retornos das RPCs de venda **inalterados** (PDV não muda).
+8. Estorno devolve as unidades com o custo congelado na venda (recalcula a média da loja).
+9. Custo só no ERP; PDV nunca mostra custo.
+10. Seletor de loja (Consolidado = soma das lojas): Dashboard (cards, gráfico diário, categorias), **DRE Semanal do
+    Financeiro** (ganha seletor + linha "custo das mercadorias vendidas"), Cadastro de Produto (custo por loja).
+    Usuário de loja única vê só a própria loja.
+11. Dashboard conforme "Decisões de 2026-10-14".
+
+### Investigação do código (2026-10-14, só repositório — confirmar no banco ativo antes de implementar)
+- `products.cost_price`: um único custo por produto, definido no cadastro. A Entrada de Estoque **não pede custo**.
+- `product_serial_units`: sem coluna de custo (serial, imei, status, garantia, sale_id).
+- Venda do PDV grava em `sales.items` (JSONB) `unitPrice`, `itemSku`, `itemName` — **custo NÃO é congelado**.
+- "Lucro Real" do Dashboard = faturamento − taxas − despesas: **ignora o custo da mercadoria**.
+- Não existe campo de código de barras separado do SKU.
 
 Primeiro passo prático quando a Zebra chegar: teste de impressão ZPL a partir do Windows/PDV.
 
@@ -278,6 +329,8 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ---
 
 ## 12. Diário de sessões (mais recente primeiro)
+
+- **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`. Próximo passo: usuário colar o código vivo das funções afetadas (consulta pedida na conversa) para escrever a migration.
 
 - **2026-10-14** — Consulta da seção 9 rodada: a migration da 2.7 **já está aplicada**. Sobrou no banco uma versão antiga de 12 parâmetros de `process_pos_terminal_sale` (ver seção 6). Confirmado que o código vivo é o revisado (senha, auditoria, DIVIDIDO). Versão antiga removida pelo usuário. Detalhes que só existiam no Handoff v4 incorporados aqui; handoff apagado. Branch enviado ao GitHub. **Testes (a)–(g) da 2.7 passaram todos.** Próximo passo: PR de `feat/2.7-split-payments` para `main` (com aprovação) e depois retomar o desenho da 2.7b (seção 7).
 
