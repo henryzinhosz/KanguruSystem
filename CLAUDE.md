@@ -104,7 +104,7 @@ por operador (inspirado no Linx Degust).
 | 2.5 Serviços e carrinho (`services`, `max_item_discount_percent`, `search_pos_items`, desconto por linha) | ✅ |
 | 2.6 Reserva de produto (`product_reservations`, sinal em ledger próprio, preço/desconto congelado) | ✅ |
 | 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada e testada (a)–(g) em 2026-10-14; falta só o PR para `main` (seção 6) |
-| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) com desenho aprovado, em implementação; Partes 2–3 depois (seção 7) |
+| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) implementada e migration aplicada; testes pendentes. Partes 2–3 depois (seção 7) |
 | 2.8 Finalização da venda (fiscal, garantia) | ⚪ Não iniciada |
 | 2.9 Trocas e devoluções | ⚪ |
 | 2.10 Interface para tablet | ⚪ (design visual adiado de propósito para o fim) |
@@ -235,7 +235,7 @@ Branch: `feat/2.7b-custos` (criado a partir de `feat/2.7-split-payments`, que ai
     Usuário de loja única vê só a própria loja.
 11. Dashboard conforme "Decisões de 2026-10-14".
 
-### Implementação da Parte 1 (2026-10-16) — código pronto, migration NÃO aplicada
+### Implementação da Parte 1 (2026-10-16) — migration APLICADA em 2026-10-16 (conferida; md5 novo da função do PDV: 3e5d76b864f9c9bf962bab76ad68259b)
 - Migration `KanguruERP/supabase/migrations/20261015_product_costs.sql`: tabela `product_store_costs` (RLS leitura por
   loja), colunas `product_serial_units.unit_cost`, `movements.unit_cost`, `products.min_stock`; funções internas
   `inventory_with_unit`, `get_store_avg_cost`, `apply_store_cost_entry` (sem GRANT); nova RPC `register_stock_entry`
