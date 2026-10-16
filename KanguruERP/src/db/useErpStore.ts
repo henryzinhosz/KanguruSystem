@@ -18,7 +18,9 @@ import {
   CardCondition,
   PaymentMethod,
   MovementType,
-  SerializedStockEntryUnit
+  SerializedStockEntryUnit,
+  ProductStoreCost,
+  StockEntryLine
 } from '../types';
 
 export function useErpStore() {
@@ -35,6 +37,7 @@ export function useErpStore() {
   const [storeConfigs, setStoreConfigs] = useState<StoreConfig[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [pdvOperators, setPdvOperators] = useState<PdvOperator[]>([]);
+  const [productStoreCosts, setProductStoreCosts] = useState<ProductStoreCost[]>([]);
 
   // Supabase Sync States
   const useSupabase = true;
@@ -56,6 +59,7 @@ export function useErpStore() {
     setStoreConfigs([]);
     setSuppliers([]);
     setPdvOperators([]);
+    setProductStoreCosts([]);
   }, []);
 
   // Supabase owns the persisted session; the ERP derives its in-memory gestor profile from it.
@@ -173,6 +177,15 @@ export function useErpStore() {
       setStoreConfigs(cList);
       setSuppliers(supList);
       setPdvOperators(operatorList);
+
+      // Custo por loja (2.7b). Tolerante a falha: o restante do ERP continua
+      // funcionando mesmo que a leitura de custos falhe.
+      try {
+        setProductStoreCosts(await supabaseService.getProductStoreCosts());
+      } catch (costError) {
+        console.warn('Nao foi possivel carregar o custo por loja:', costError);
+        setProductStoreCosts([]);
+      }
       
       setSupabaseLoading(false);
       return true;
@@ -267,6 +280,7 @@ export function useErpStore() {
     setStoreConfigs([]);
     setSuppliers([]);
     setPdvOperators([]);
+    setProductStoreCosts([]);
   };
 
   // Add a product to the catalog
@@ -439,6 +453,16 @@ export function useErpStore() {
     });
   };
 
+  const registerStockEntry = async (
+    productId: string,
+    entries: StockEntryLine[],
+    unitCost: number,
+    reason: string
+  ) => {
+    await supabaseService.registerStockEntry(productId, entries, unitCost, reason);
+    await loadAllFromSupabase();
+  };
+
   const registerSerializedStockEntry = async (
     productId: string,
     unitId: string,
@@ -500,7 +524,11 @@ export function useErpStore() {
     // Commit changes to state
     setSales(prev => [newSale, ...prev]);
     if (useSupabase) {
-      supabaseService.processSaleTransaction(newSale).catch(err => console.error('Erro ao salvar venda no Supabase:', err));
+      // Recarrega as vendas depois de gravar: o servidor congela o custo de cada item.
+      supabaseService.processSaleTransaction(newSale)
+        .then(() => supabaseService.getSales())
+        .then(setSales)
+        .catch(err => console.error('Erro ao salvar venda no Supabase:', err));
     }
 
     // Update local inventory/movement state only
@@ -534,7 +562,7 @@ export function useErpStore() {
         if (s.id === saleId) {
           const updated = { ...s, status: 'PENDENTE_APROVACAO' as const };
           if (useSupabase) {
-            supabaseService.upsertSale(updated).catch(err => console.error('Erro ao atualizar venda no Supabase:', err));
+            supabaseService.updateSaleStatus(saleId, 'PENDENTE_APROVACAO').catch(err => console.error('Erro ao atualizar venda no Supabase:', err));
           }
           return updated;
         }
@@ -847,6 +875,7 @@ export function useErpStore() {
     storeConfigs,
     suppliers,
     pdvOperators,
+    productStoreCosts,
     useSupabase,
     supabaseLoading,
     supabaseConnected,
@@ -862,6 +891,7 @@ export function useErpStore() {
     saveService,
     deleteService,
     registerMovement,
+    registerStockEntry,
     registerSerializedStockEntry,
     registerSale,
     cancelSale,

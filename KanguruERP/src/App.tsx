@@ -53,6 +53,8 @@ export default function App() {
     deleteService,
     registerMovement,
     registerSerializedStockEntry,
+    registerStockEntry,
+    productStoreCosts,
     registerSale,
     cancelSale,
     addExpense,
@@ -207,6 +209,8 @@ export default function App() {
               editProduct={editProduct}
               registerMovement={registerMovement}
               registerSerializedStockEntry={registerSerializedStockEntry}
+              registerStockEntry={registerStockEntry}
+              productStoreCosts={productStoreCosts}
             />
           )}
 

@@ -19,7 +19,10 @@ import {
   PosTerminalActivation,
   PdvOperator,
   PdvOperatorPermissions,
-  SerializedStockEntryUnit
+  SerializedStockEntryUnit,
+  ProductStoreCost,
+  StockEntryLine,
+  SaleStatus
 } from '../types';
 
 // Helper to check if an error is due to a missing table (relation does not exist)
@@ -934,7 +937,8 @@ export const supabaseService = {
       isUsed: p.is_used,
       variations: p.variations || undefined,
       isKit: p.is_kit,
-      kitItems: p.kit_items || undefined
+      kitItems: p.kit_items || undefined,
+      minStock: p.min_stock ?? null
     }));
   },
 
@@ -953,7 +957,8 @@ export const supabaseService = {
       is_used: p.isUsed,
       variations: p.variations || null,
       is_kit: p.isKit || false,
-      kit_items: p.kitItems || null
+      kit_items: p.kitItems || null,
+      min_stock: p.minStock ?? null
     };
 
     const { error } = await supabase
@@ -1052,12 +1057,42 @@ export const supabaseService = {
       p_unit_id: unitId,
       p_units: units.map(unit => ({
         serialNumber: unit.serialNumber,
-        imei: unit.imei || null
+        imei: unit.imei || null,
+        unitCost: unit.unitCost ?? null
       })),
       p_reason: reason
     });
 
     if (error) throw error;
+  },
+
+  // Entrada sem serial com custo: grava todas as lojas de uma vez (tudo ou nada)
+  // e recalcula o custo medio de cada loja que recebeu.
+  async registerStockEntry(
+    productId: string,
+    entries: StockEntryLine[],
+    unitCost: number,
+    reason: string
+  ): Promise<void> {
+    const { error } = await supabase.rpc('register_stock_entry', {
+      p_product_id: productId,
+      p_entries: entries.map(entry => ({ unitId: entry.unitId, quantity: entry.quantity })),
+      p_unit_cost: unitCost,
+      p_reason: reason
+    });
+
+    if (error) throw error;
+  },
+
+  async getProductStoreCosts(): Promise<ProductStoreCost[]> {
+    const { data, error } = await supabase.rpc('list_product_store_costs');
+    if (error) throw error;
+    return (data || []).map((row: { product_id: string; unit_id: string; avg_cost: number | string; unit_count: number | null }) => ({
+      productId: row.product_id,
+      unitId: row.unit_id,
+      avgCost: Number(row.avg_cost),
+      unitCount: row.unit_count ?? null
+    }));
   },
 
   async processSaleTransaction(s: Sale): Promise<void> {
@@ -1186,6 +1221,12 @@ export const supabaseService = {
       requiresApproval: s.requires_approval,
       approvedBy: s.approved_by || undefined
     }));
+  },
+
+  // Muda so o status: nunca regrava os itens (o custo congelado vem do servidor).
+  async updateSaleStatus(saleId: string, status: SaleStatus): Promise<void> {
+    const { error } = await supabase.from('sales').update({ status }).eq('id', saleId);
+    if (error) throw error;
   },
 
   async upsertSale(s: Sale): Promise<void> {

@@ -129,6 +129,21 @@ export interface Product {
   variations?: ProductVariation[];
   isKit?: boolean;
   kitItems?: KitItem[];
+  minStock?: number | null; // estoque minimo para alertas; null = nao definido (usa o padrao)
+}
+
+// Custo medio de um produto em uma loja (sem serial: media ponderada;
+// com serial: media das unidades em estoque).
+export interface ProductStoreCost {
+  productId: string;
+  unitId: string;
+  avgCost: number;
+  unitCount: number | null; // so para serializados: unidades em estoque
+}
+
+export interface StockEntryLine {
+  unitId: string;
+  quantity: number;
 }
 
 export interface Service {
@@ -155,6 +170,7 @@ export interface StockInventory {
 export interface SerializedStockEntryUnit {
   serialNumber: string;
   imei?: string;
+  unitCost?: number;
 }
 
 export type MovementType = 'ENTRADA' | 'SAIDA' | 'PERDA' | 'TRANSFERENCIA';
@@ -186,6 +202,9 @@ export interface SaleItem {
   lineTotal?: number;
   serials?: string[]; // serials linked to this item
   cardCondition?: CardCondition;
+  // Custo congelado pelo servidor no momento da venda (a partir da 2.7b).
+  unitCost?: number;
+  costTotal?: number;
 }
 
 export type PaymentMethod = 'DINHEIRO' | 'PIX' | 'CREDITO' | 'DEBITO';

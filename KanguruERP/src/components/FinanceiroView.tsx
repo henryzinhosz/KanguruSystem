@@ -35,6 +35,16 @@ import {
   ShoppingBag,
   Trash2
 } from 'lucide-react';
+import {
+  CONSOLIDATED,
+  completedSales,
+  formatMoney,
+  inScope,
+  isInRange,
+  isoWeekKey,
+  resolvePeriod,
+  summarize,
+} from '../db/finance';
 
 interface FinanceiroViewProps {
   currentUser: User;
@@ -93,6 +103,11 @@ export default function FinanceiroView({
   const [saleSuccess, setSaleSuccess] = useState('');
   const [configSuccess, setConfigSuccess] = useState('');
   const [searchSaleQuery, setSearchSaleQuery] = useState('');
+
+  // Indicadores & DRE: usuario da central escolhe a loja; usuario de loja ve so a dele.
+  const canChooseStore = currentUser.unitId === 'central';
+  const [indicatorScope, setIndicatorScope] = useState<string>(CONSOLIDATED);
+  const activeIndicatorScope = canChooseStore ? indicatorScope : currentUser.unitId;
 
   const handleRegisterSimpleSale = (e: React.FormEvent) => {
     e.preventDefault();
@@ -239,37 +254,25 @@ export default function FinanceiroView({
     setConfigSuccess('Configurações de custos e taxas salvas com sucesso.');
   };
 
-  // Weekly ISO grouped balance calculation
-  // Helper to get ISO Week number
-  const getISOWeek = (dateStr: string) => {
-    const d = new Date(dateStr);
-    const dayNum = d.getUTCDay() || 7;
-    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return `${d.getUTCFullYear()}-W${Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7)}`;
-  };
-
-  const weeklyBalances: { [week: string]: { revenue: number; expenses: number; fees: number } } = {};
-
-  sales.filter(s => s.status === 'CONCLUIDA').forEach(s => {
-    const week = getISOWeek(s.timestamp);
-    if (!weeklyBalances[week]) weeklyBalances[week] = { revenue: 0, expenses: 0, fees: 0 };
-    weeklyBalances[week].revenue += s.grossAmount;
-    weeklyBalances[week].fees += s.feeAmount;
-  });
-
-  expenses.forEach(e => {
-    const week = getISOWeek(e.timestamp);
-    if (!weeklyBalances[week]) weeklyBalances[week] = { revenue: 0, expenses: 0, fees: 0 };
-    weeklyBalances[week].expenses += e.amount;
-  });
-
-  const weeklyChartData = Object.entries(weeklyBalances).map(([week, data]) => ({
+  // DRE semanal (semana ISO, horario local) — mesmas regras do Dashboard (db/finance.ts).
+  const scopedSales = completedSales(sales).filter(sale => inScope(sale.unitId, activeIndicatorScope));
+  const scopedExpenses = expenses.filter(expense => inScope(expense.unitId, activeIndicatorScope));
+  const weekKeys = Array.from(new Set([
+    ...scopedSales.map(sale => isoWeekKey(sale.timestamp)),
+    ...scopedExpenses.map(expense => isoWeekKey(expense.timestamp)),
+  ])).sort((a, b) => b.localeCompare(a));
+  const weeklyChartData = weekKeys.map(week => ({
     week,
-    gross: data.revenue,
-    expenses: data.expenses,
-    net: data.revenue - data.expenses - data.fees
-  })).sort((a, b) => a.week.localeCompare(b.week));
+    ...summarize(
+      scopedSales.filter(sale => isoWeekKey(sale.timestamp) === week),
+      scopedExpenses.filter(expense => isoWeekKey(expense.timestamp) === week)
+    ),
+  }));
+  const weeksMissingCost = weeklyChartData.reduce((sum, row) => sum + row.salesMissingCost, 0);
+
+  // Cards de ponto de equilibrio: mes atual (o custo fixo e mensal).
+  const currentMonth = resolvePeriod('mes');
+  const breakEvenStores = stores.filter(store => inScope(store.unitId, activeIndicatorScope));
 
   return (
     <div className="space-y-6">
@@ -745,18 +748,38 @@ export default function FinanceiroView({
       {/* 2. VIEW: Indicadores e DRE Semanal */}
       {activeTab === 'indicadores' && (
         <div className="space-y-6 font-sans text-xs">
-          {/* Break-Even Calculator explanation */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {storeConfigs.map(cfg => {
-              const storeSales = sales.filter(s => s.status === 'CONCLUIDA' && s.unitId === cfg.unitId);
-              const storeExpenses = expenses.filter(e => e.unitId === cfg.unitId);
-              const storeRev = storeSales.reduce((acc, s) => acc + s.grossAmount, 0);
-              const storeFees = storeSales.reduce((acc, s) => acc + s.feeAmount, 0);
-              const storeExp = storeExpenses.reduce((acc, e) => acc + e.amount, 0);
-              const storeProfit = storeRev - storeFees - storeExp;
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Indicadores & DRE</h3>
+              <p className="text-xs text-slate-400">Lucro bruto = faturamento − custo das mercadorias. Lucro real = lucro bruto − taxas − despesas.</p>
+            </div>
+            {canChooseStore && (
+              <label className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-500">Loja:</span>
+                <select
+                  id="financeiro-indicator-scope"
+                  value={indicatorScope}
+                  onChange={(e) => setIndicatorScope(e.target.value)}
+                  className="bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-semibold border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value={CONSOLIDATED}>Consolidado (todas as lojas)</option>
+                  {stores.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.unitId}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
 
-              const dailyBreakEven = cfg.fixedCost / 30;
-              const hasMetGoal = storeRev >= cfg.fixedCost;
+          {/* Ponto de equilibrio do mes atual, por loja */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {breakEvenStores.map(cfg => {
+              const month = summarize(
+                completedSales(sales).filter(sale => sale.unitId === cfg.unitId && isInRange(sale.timestamp, currentMonth)),
+                expenses.filter(expense => expense.unitId === cfg.unitId && isInRange(expense.timestamp, currentMonth))
+              );
+              const storeRev = month.revenue;
+              const storeProfit = month.operatingProfit;
+              const goalPercent = cfg.fixedCost > 0 ? (storeRev / cfg.fixedCost) * 100 : 0;
+              const hasMetGoal = cfg.fixedCost > 0 && storeRev >= cfg.fixedCost;
 
               return (
                 <div key={cfg.unitId} className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm space-y-4">
@@ -765,7 +788,7 @@ export default function FinanceiroView({
                       <h4 className="font-bold text-slate-900 text-sm">
                         {storeName(cfg.unitId)}
                       </h4>
-                      <span className="text-[10px] text-slate-400 font-mono">Custo Fixo: R$ {cfg.fixedCost.toLocaleString('pt-BR')} /mês</span>
+                      <span className="text-[10px] text-slate-400 font-mono">Meta (custo fixo): {formatMoney(cfg.fixedCost)} /mês</span>
                     </div>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                       hasMetGoal ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
@@ -777,32 +800,43 @@ export default function FinanceiroView({
                   {/* Meter graph progress bar */}
                   <div className="space-y-1">
                     <div className="flex justify-between text-[10px] text-slate-400 font-semibold">
-                      <span>Progresso da Meta:</span>
-                      <span>{Math.round((storeRev / cfg.fixedCost) * 100)}%</span>
+                      <span>Progresso da meta no mês:</span>
+                      <span>{Math.round(goalPercent)}%</span>
                     </div>
                     <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-500 ${hasMetGoal ? 'bg-emerald-500' : 'bg-amber-500'}`} 
-                        style={{ width: `${Math.min(100, (storeRev / cfg.fixedCost) * 100)}%` }} 
+                      <div
+                        className={`h-full transition-all duration-500 ${hasMetGoal ? 'bg-emerald-500' : 'bg-amber-500'}`}
+                        style={{ width: `${Math.min(100, goalPercent)}%` }}
                       />
                     </div>
                   </div>
 
                   <div className="border-t border-slate-100 pt-3.5 space-y-2">
                     <div className="flex justify-between">
-                      <span className="text-slate-500">Faturamento Realizado:</span>
-                      <span className="font-bold text-slate-900">R$ {storeRev.toLocaleString('pt-BR')}</span>
+                      <span className="text-slate-500">Faturamento do mês:</span>
+                      <span className="font-bold text-slate-900">{formatMoney(storeRev)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-500">Despesas + Taxas de Cartão:</span>
-                      <span className="font-semibold text-rose-600">- R$ {(storeExp + storeFees).toLocaleString('pt-BR')}</span>
+                      <span className="text-slate-500">Custo das mercadorias:</span>
+                      <span className="font-semibold text-rose-600">- {formatMoney(month.cost)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Taxas de pagamento:</span>
+                      <span className="font-semibold text-rose-600">- {formatMoney(month.fees)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Despesas lançadas:</span>
+                      <span className="font-semibold text-rose-600">- {formatMoney(month.expenses)}</span>
                     </div>
                     <div className="flex justify-between border-t border-slate-50 pt-2 text-sm font-black text-slate-900">
-                      <span>Resultado Líquido:</span>
+                      <span>Lucro real operacional:</span>
                       <span className={storeProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
-                        R$ {storeProfit.toLocaleString('pt-BR')}
+                        {formatMoney(storeProfit)}
                       </span>
                     </div>
+                    {month.salesMissingCost > 0 && (
+                      <p className="text-[10px] text-amber-700">{month.salesMissingCost} venda(s) sem custo registrado no mês.</p>
+                    )}
                   </div>
                 </div>
               );
@@ -813,17 +847,20 @@ export default function FinanceiroView({
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
             <div>
               <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-2">Balanço e DRE Semanal (ISO-Week)</h3>
-              <p className="text-xs text-slate-400 mb-4">Acompanhe a saúde de caixa agregada por semanas ISO de operação.</p>
+              <p className="text-xs text-slate-400 mb-4">Resultado por semana ISO, da mais recente para a mais antiga.</p>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-slate-500">
                 <thead className="text-[10px] text-slate-400 uppercase bg-slate-50 font-bold">
                   <tr>
-                    <th className="px-4 py-2.5">Código Semana ISO</th>
-                    <th className="px-4 py-2.5 text-right">Faturamento Bruto (Entradas)</th>
-                    <th className="px-4 py-2.5 text-right">Custos Variáveis (Taxas/Saídas)</th>
-                    <th className="px-4 py-2.5 text-right">Lucro Real Estimado</th>
+                    <th className="px-4 py-2.5">Semana ISO</th>
+                    <th className="px-4 py-2.5 text-right">Faturamento Bruto</th>
+                    <th className="px-4 py-2.5 text-right">Custo Mercadorias</th>
+                    <th className="px-4 py-2.5 text-right">Lucro Bruto</th>
+                    <th className="px-4 py-2.5 text-right">Taxas</th>
+                    <th className="px-4 py-2.5 text-right">Despesas</th>
+                    <th className="px-4 py-2.5 text-right">Lucro Real Operacional</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-mono">
@@ -831,28 +868,35 @@ export default function FinanceiroView({
                     <tr key={row.week} className="hover:bg-slate-50/50">
                       <td className="px-4 py-2.5 font-bold text-slate-900">
                         {row.week}
+                        {row.salesMissingCost > 0 && (
+                          <span className="ml-1 text-amber-600" title={`${row.salesMissingCost} venda(s) sem custo registrado`}>*</span>
+                        )}
                       </td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-slate-700">
-                        R$ {row.gross.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-rose-600 font-semibold">
-                        - R$ {row.expenses.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-slate-700">{formatMoney(row.revenue)}</td>
+                      <td className="px-4 py-2.5 text-right text-rose-600">- {formatMoney(row.cost)}</td>
+                      <td className={`px-4 py-2.5 text-right font-semibold ${row.grossProfit >= 0 ? 'text-slate-900' : 'text-rose-700'}`}>{formatMoney(row.grossProfit)}</td>
+                      <td className="px-4 py-2.5 text-right text-rose-600">- {formatMoney(row.fees)}</td>
+                      <td className="px-4 py-2.5 text-right text-rose-600">- {formatMoney(row.expenses)}</td>
                       <td className={`px-4 py-2.5 text-right font-black ${
-                        row.net >= 0 ? 'text-emerald-700' : 'text-rose-700'
+                        row.operatingProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
                       }`}>
-                        R$ {row.net.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        {formatMoney(row.operatingProfit)}
                       </td>
                     </tr>
                   ))}
                   {weeklyChartData.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="text-center text-slate-400 py-10 font-sans">Sem dados de faturamento recentes.</td>
+                      <td colSpan={7} className="text-center text-slate-400 py-10 font-sans">Sem dados de faturamento recentes.</td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
+            {weeksMissingCost > 0 && (
+              <p className="text-[11px] text-amber-700 mt-3 font-sans">
+                * Semana com {weeksMissingCost === 1 ? 'uma venda' : 'vendas'} sem custo registrado (anteriores à 2.7b ou lançamentos manuais): o custo delas não entra na conta.
+              </p>
+            )}
           </div>
         </div>
       )}

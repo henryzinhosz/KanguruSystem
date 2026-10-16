@@ -235,6 +235,24 @@ Branch: `feat/2.7b-custos` (criado a partir de `feat/2.7-split-payments`, que ai
     Usuário de loja única vê só a própria loja.
 11. Dashboard conforme "Decisões de 2026-10-14".
 
+### Implementação da Parte 1 (2026-10-16) — código pronto, migration NÃO aplicada
+- Migration `KanguruERP/supabase/migrations/20261015_product_costs.sql`: tabela `product_store_costs` (RLS leitura por
+  loja), colunas `product_serial_units.unit_cost`, `movements.unit_cost`, `products.min_stock`; funções internas
+  `inventory_with_unit`, `get_store_avg_cost`, `apply_store_cost_entry` (sem GRANT); nova RPC `register_stock_entry`
+  e `list_product_store_costs`; `CREATE OR REPLACE` (mesma assinatura/retorno) de `register_serialized_stock_entry`,
+  `process_inventory_movement`, `process_sale_transaction`, `process_sale_cancellation`, `process_pos_terminal_sale`.
+  A cópia da função do PDV foi comparada linha a linha com a 20261008: só entraram as linhas de custo.
+- **Antes de aplicar:** conferir que a função do PDV no banco é a da 20261008:
+  `select md5(prosrc) from pg_proc where proname='process_pos_terminal_sale';` → esperado `3716cf738da0e77da44358b841ca094c`
+  (CRLF) ou `f511cf62b7fb7d9c5448a934ebd3cac9` (LF). Se não bater, PARAR.
+- **Ordem de publicação:** aplicar a migration ANTES de publicar o ERP novo (o ERP grava `min_stock`).
+- ERP: `src/db/finance.ts` (regras únicas de período/custo/lucro para Dashboard e Financeiro), Dashboard reescrito,
+  Financeiro (Indicadores) com seletor de loja, cards do mês e DRE com custo; Estoque com custo na entrada, custo por
+  loja no cadastro e estoque mínimo editável. Estorno pendente agora só muda o status (`updateSaleStatus`), sem
+  regravar os itens. PDV não mudou.
+- Achados registrados (não corrigidos): abas "Transferências" e "Garantias" do Estoque sem botão na tela; trade-in de
+  produto serializado falha no banco (usa a entrada antiga); venda manual do Financeiro não tem itens (sem custo).
+
 ### Investigação do código (2026-10-14, só repositório — confirmar no banco ativo antes de implementar)
 - `products.cost_price`: um único custo por produto, definido no cadastro. A Entrada de Estoque **não pede custo**.
 - `product_serial_units`: sem coluna de custo (serial, imei, status, garantia, sale_id).
@@ -330,7 +348,8 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 
 ## 12. Diário de sessões (mais recente primeiro)
 
-- **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`. Próximo passo: usuário colar o código vivo das funções afetadas (consulta pedida na conversa) para escrever a migration.
+- **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-16** — Parte 1 implementada (migration + ERP), `tsc` e `vite build` ok. Próximo passo: usuário conferir o md5 (seção 7), aplicar a migration com aprovação e testar o roteiro da Parte 1.
 
 - **2026-10-14** — Consulta da seção 9 rodada: a migration da 2.7 **já está aplicada**. Sobrou no banco uma versão antiga de 12 parâmetros de `process_pos_terminal_sale` (ver seção 6). Confirmado que o código vivo é o revisado (senha, auditoria, DIVIDIDO). Versão antiga removida pelo usuário. Detalhes que só existiam no Handoff v4 incorporados aqui; handoff apagado. Branch enviado ao GitHub. **Testes (a)–(g) da 2.7 passaram todos.** Próximo passo: PR de `feat/2.7-split-payments` para `main` (com aprovação) e depois retomar o desenho da 2.7b (seção 7).
 
