@@ -47,7 +47,8 @@ import {
   formatMoney,
   inScope,
   isInRange,
-  isoWeekKey,
+  monthWeekKey,
+  monthWeekLabel,
   listDays,
   resolvePeriod,
   saleCost,
@@ -322,11 +323,11 @@ export default function DashboardView({
     : 'Nenhuma despesa lançada no período';
   const salesByWeek = new Map<string, number>();
   scopeSales.forEach(sale => {
-    const week = isoWeekKey(sale.timestamp);
+    const week = monthWeekKey(sale.timestamp);
     salesByWeek.set(week, (salesByWeek.get(week) || 0) + sale.grossAmount);
   });
   const topWeek = Array.from(salesByWeek.entries()).sort((a, b) => b[1] - a[1])[0];
-  const insightMaiorSemana = topWeek ? `${topWeek[0]} com ${formatMoney(topWeek[1])}` : 'Nenhum faturamento no período';
+  const insightMaiorSemana = topWeek ? `${monthWeekLabel(topWeek[0])} com ${formatMoney(topWeek[1])}` : 'Nenhum faturamento no período';
   const insightCategoriaLider = rankedCategories[0]?.name || 'Nenhuma';
 
   const paymentStats = new Map<string, number>();

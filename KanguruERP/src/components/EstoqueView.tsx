@@ -114,6 +114,9 @@ export default function EstoqueView({
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const stores = storeConfigs.filter(store => store.unitId !== 'central');
   const defaultStoreId = stores[0]?.unitId || '';
+  // Os efeitos abaixo dependem da LISTA de lojas, nao do array: cada recarga de dados
+  // cria um array novo e, antes, isso apagava os formularios em preenchimento.
+  const storeIdsKey = stores.map(store => store.unitId).join('|');
 
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('Todas');
@@ -193,7 +196,7 @@ export default function EstoqueView({
       if (stores.some(store => store.unitId === previous) && previous !== defaultStoreId) return previous;
       return stores[1]?.unitId || defaultStoreId;
     });
-  }, [storeConfigs]);
+  }, [storeIdsKey]);
 
   useEffect(() => {
     if (!stores.length) return;
@@ -204,7 +207,7 @@ export default function EstoqueView({
       });
       return next;
     });
-  }, [storeConfigs]);
+  }, [storeIdsKey]);
 
   useEffect(() => {
     if (!stockEntryProductId || !stores.length) return;
@@ -215,7 +218,7 @@ export default function EstoqueView({
     setStockEntryUnitCost('');
     setStockEntryError('');
     setStockEntrySuccess('');
-  }, [stockEntryProductId, storeConfigs]);
+  }, [stockEntryProductId, storeIdsKey]);
 
   // 1. Filtered Catalogs
   const filteredProducts = products.filter(p => {

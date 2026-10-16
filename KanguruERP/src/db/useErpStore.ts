@@ -98,7 +98,19 @@ export function useErpStore() {
         if (baseUser.role === UserRole.SUPER_ADMIN) {
           clearOperationalData();
         }
-        setCurrentUser(baseUser);
+        // O Supabase reemite o login ao voltar para a janela (Alt+Tab) e ao renovar
+        // o token (~1h). Mesmo usuario e mesmo perfil = manter o objeto atual, para
+        // nao recarregar tudo nem apagar o que esta sendo digitado nas telas.
+        setCurrentUser(previous => previous
+          && previous.id === baseUser.id
+          && previous.name === baseUser.name
+          && previous.role === baseUser.role
+          && previous.tenantId === baseUser.tenantId
+          && previous.unitId === baseUser.unitId
+          && previous.planCode === baseUser.planCode
+          && previous.subscriptionStatus === baseUser.subscriptionStatus
+          ? previous
+          : baseUser);
         setAuthProfileError(null);
       } catch (error) {
         console.error('Erro ao carregar perfil de acesso:', error);

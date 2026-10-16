@@ -158,15 +158,31 @@ export function summarize(sales: Sale[], expenses: Expense[]): FinancialSummary 
   };
 }
 
-// Semana ISO no horario local, ex.: '2026-W42'.
-export function isoWeekKey(timestamp: string): string {
-  const local = new Date(timestamp);
-  const date = new Date(Date.UTC(local.getFullYear(), local.getMonth(), local.getDate()));
-  const dayNum = date.getUTCDay() || 7;
-  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((date.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
-  return `${date.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+const MONTH_ABBREVIATIONS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+// Semana do mes (segunda a domingo, cortada na virada do mes), no horario local.
+// Sem 01 = do dia 1 ate o primeiro domingo. Chave ordenavel: 'YYYY-MM-NN'.
+export function monthWeekKey(timestamp: string): string {
+  const date = new Date(timestamp);
+  const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+  const mondayOffset = (firstDay.getDay() + 6) % 7; // 0 = o mes comeca numa segunda
+  const week = Math.floor((date.getDate() - 1 + mondayOffset) / 7) + 1;
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${String(week).padStart(2, '0')}`;
+}
+
+// 'Sem 01 - Out (01 a 05/10)'; o ano aparece quando nao e o ano atual.
+export function monthWeekLabel(key: string, now: Date = new Date()): string {
+  const [year, month, week] = key.split('-').map(Number);
+  const firstDay = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0).getDate();
+  const mondayOffset = (firstDay.getDay() + 6) % 7;
+  const startDay = Math.max(1, (week - 1) * 7 - mondayOffset + 1);
+  const endDay = Math.min(lastDay, week * 7 - mondayOffset);
+  const monthLabel = MONTH_ABBREVIATIONS[month - 1] + (year !== now.getFullYear() ? `/${year}` : '');
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const days = startDay === endDay ? `${pad(startDay)}/${pad(month)}` : `${pad(startDay)} a ${pad(endDay)}/${pad(month)}`;
+  return `Sem ${pad(week)} - ${monthLabel} (${days})`;
 }
 
 export const formatMoney = (value: number) =>

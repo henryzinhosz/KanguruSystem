@@ -41,7 +41,8 @@ import {
   formatMoney,
   inScope,
   isInRange,
-  isoWeekKey,
+  monthWeekKey,
+  monthWeekLabel,
   resolvePeriod,
   summarize,
 } from '../db/finance';
@@ -254,18 +255,18 @@ export default function FinanceiroView({
     setConfigSuccess('Configurações de custos e taxas salvas com sucesso.');
   };
 
-  // DRE semanal (semana ISO, horario local) — mesmas regras do Dashboard (db/finance.ts).
+  // DRE semanal (semana do mes, horario local) — mesmas regras do Dashboard (db/finance.ts).
   const scopedSales = completedSales(sales).filter(sale => inScope(sale.unitId, activeIndicatorScope));
   const scopedExpenses = expenses.filter(expense => inScope(expense.unitId, activeIndicatorScope));
   const weekKeys = Array.from(new Set([
-    ...scopedSales.map(sale => isoWeekKey(sale.timestamp)),
-    ...scopedExpenses.map(expense => isoWeekKey(expense.timestamp)),
+    ...scopedSales.map(sale => monthWeekKey(sale.timestamp)),
+    ...scopedExpenses.map(expense => monthWeekKey(expense.timestamp)),
   ])).sort((a, b) => b.localeCompare(a));
   const weeklyChartData = weekKeys.map(week => ({
     week,
     ...summarize(
-      scopedSales.filter(sale => isoWeekKey(sale.timestamp) === week),
-      scopedExpenses.filter(expense => isoWeekKey(expense.timestamp) === week)
+      scopedSales.filter(sale => monthWeekKey(sale.timestamp) === week),
+      scopedExpenses.filter(expense => monthWeekKey(expense.timestamp) === week)
     ),
   }));
   const weeksMissingCost = weeklyChartData.reduce((sum, row) => sum + row.salesMissingCost, 0);
@@ -843,18 +844,18 @@ export default function FinanceiroView({
             })}
           </div>
 
-          {/* DRE Semanal ISO Display */}
+          {/* DRE Semanal (semana do mes) */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
             <div>
-              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-2">Balanço e DRE Semanal (ISO-Week)</h3>
-              <p className="text-xs text-slate-400 mb-4">Resultado por semana ISO, da mais recente para a mais antiga.</p>
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-2">Balanço e DRE Semanal</h3>
+              <p className="text-xs text-slate-400 mb-4">Resultado por semana do mês (segunda a domingo), da mais recente para a mais antiga.</p>
             </div>
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-slate-500">
                 <thead className="text-[10px] text-slate-400 uppercase bg-slate-50 font-bold">
                   <tr>
-                    <th className="px-4 py-2.5">Semana ISO</th>
+                    <th className="px-4 py-2.5">Semana</th>
                     <th className="px-4 py-2.5 text-right">Faturamento Bruto</th>
                     <th className="px-4 py-2.5 text-right">Custo Mercadorias</th>
                     <th className="px-4 py-2.5 text-right">Lucro Bruto</th>
@@ -867,7 +868,7 @@ export default function FinanceiroView({
                   {weeklyChartData.map(row => (
                     <tr key={row.week} className="hover:bg-slate-50/50">
                       <td className="px-4 py-2.5 font-bold text-slate-900">
-                        {row.week}
+                        {monthWeekLabel(row.week)}
                         {row.salesMissingCost > 0 && (
                           <span className="ml-1 text-amber-600" title={`${row.salesMissingCost} venda(s) sem custo registrado`}>*</span>
                         )}
