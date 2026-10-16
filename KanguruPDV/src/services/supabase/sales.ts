@@ -19,7 +19,9 @@ export interface PaymentLine {
 export type PosSaleResult =
   | { status: 'OK' }
   | { status: 'INVALID_PASSWORD'; remainingAttempts: number }
-  | { status: 'LOCKED'; lockedUntil: string };
+  | { status: 'LOCKED'; lockedUntil: string }
+  // Codigo de vendedor ausente, inexistente, inativo, de outra loja ou sem permissao.
+  | { status: 'INVALID_SELLER' };
 
 export interface SaleItem {
   itemType: 'PRODUCT' | 'SERVICE';
@@ -58,6 +60,8 @@ export interface PosSaleTransaction {
   // So e exigida quando a RPC identificar itens acima do limite.
   adminPassword?: string | null;
   reservationId?: string | null;
+  // Codigo (2 digitos) de quem esta finalizando. Obrigatorio.
+  sellerCode: string;
 }
 
 export const saleRpc = {
@@ -86,6 +90,7 @@ export const saleRpc = {
       p_admin_password: transaction.adminPassword && transaction.adminPassword.length > 0
         ? transaction.adminPassword
         : null,
+      p_seller_code: transaction.sellerCode,
     });
 
     if (error) {

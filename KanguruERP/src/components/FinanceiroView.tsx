@@ -37,7 +37,13 @@ import {
 } from 'lucide-react';
 import {
   CONSOLIDATED,
+  DEPOSIT_PAYMENT_KEY,
   completedSales,
+  listDays,
+  parseLocalDateKey,
+  paymentBreakdown,
+  sellerBreakdown,
+  toLocalDateKey,
   formatMoney,
   inScope,
   isInRange,
@@ -51,6 +57,9 @@ import {
   weeksOfMonth,
   summarize,
 } from '../db/finance';
+
+type HistoryPreset = 'hoje' | 'semana' | 'personalizado';
+type HistoryMode = 'simplificado' | 'analitico' | 'detalhado';
 
 interface FinanceiroViewProps {
   currentUser: User;
@@ -87,12 +96,34 @@ export default function FinanceiroView({
   const [saleError, setSaleError] = useState('');
   const [saleSuccess, setSaleSuccess] = useState('');
   const [configSuccess, setConfigSuccess] = useState('');
-  const [searchSaleQuery, setSearchSaleQuery] = useState('');
 
   // Indicadores & DRE: usuario da central escolhe a loja; usuario de loja ve so a dele.
   const canChooseStore = currentUser.unitId === 'central';
   const [indicatorScope, setIndicatorScope] = useState<string>(CONSOLIDATED);
   const activeIndicatorScope = canChooseStore ? indicatorScope : currentUser.unitId;
+
+  // Historico de Vendas: data, loja e tipo de relatorio.
+  const [historyPreset, setHistoryPreset] = useState<HistoryPreset>('hoje');
+  const [historyFrom, setHistoryFrom] = useState(() => toLocalDateKey(new Date()));
+  const [historyTo, setHistoryTo] = useState(() => toLocalDateKey(new Date()));
+  const [historyScope, setHistoryScope] = useState<string>(CONSOLIDATED);
+  const [historyMode, setHistoryMode] = useState<HistoryMode>('detalhado');
+  const activeHistoryScope = canChooseStore ? historyScope : currentUser.unitId;
+  const historyRange = resolvePeriod(historyPreset, historyFrom, historyTo);
+  const historyDays = listDays(historyRange);
+  const historyRangeLabel = historyDays.length === 1
+    ? new Date(historyRange.start).toLocaleDateString('pt-BR')
+    : `${new Date(historyRange.start).toLocaleDateString('pt-BR')} a ${parseLocalDateKey(historyDays[historyDays.length - 1]).toLocaleDateString('pt-BR')}`;
+  const historySales = sales
+    .filter(sale => inScope(sale.unitId, activeHistoryScope) && isInRange(sale.timestamp, historyRange))
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  // Totais so com vendas concluidas; estornadas e pendentes aparecem a parte.
+  const historyCompleted = completedSales(historySales);
+  const historyTotal = historyCompleted.reduce((sum, sale) => sum + sale.grossAmount, 0);
+  const historyCanceledTotal = historySales.filter(sale => sale.status === 'CANCELADA').reduce((sum, sale) => sum + sale.grossAmount, 0);
+  const historyPendingTotal = historySales.filter(sale => sale.status === 'PENDENTE_APROVACAO').reduce((sum, sale) => sum + sale.grossAmount, 0);
+  const historyPayments = Array.from(paymentBreakdown(historyCompleted).entries()).sort((a, b) => b[1] - a[1]);
+  const historySellers = sellerBreakdown(historyCompleted);
 
   // DRE: mes escolhido + semana ('all' = mes inteiro)
   const [dreMonth, setDreMonth] = useState<string>(() => monthKeyOf(new Date().toISOString()));
@@ -291,46 +322,160 @@ export default function FinanceiroView({
 
       {/* 0. VIEW: Registro de Vendas por Forma de Pagamento */}
       {activeTab === 'vendas' && (
-        <div className="grid grid-cols-1 gap-6 font-sans">
-          {/* Histórico de Vendas */}
-          <div className="space-y-6">
-            {saleSuccess && (
-              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-lg flex items-start space-x-2 text-xs">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <span>{saleSuccess}</span>
+        <div className="space-y-4 font-sans text-xs">
+          {saleSuccess && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-lg flex items-start space-x-2">
+              <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <span>{saleSuccess}</span>
+            </div>
+          )}
+          {saleError && (
+            <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-lg flex items-start space-x-2">
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+              <span>{saleError}</span>
+            </div>
+          )}
+
+          {/* Seletores: data, loja e tipo de relatorio */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Histórico de Vendas</h3>
+              <p className="text-xs text-slate-400">Vendas registradas pelo PDV. O estorno é feito no relatório Detalhado.</p>
+            </div>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="space-y-1">
+                <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Data</span>
+                <select
+                  id="historico-periodo"
+                  value={historyPreset}
+                  onChange={(e) => setHistoryPreset(e.target.value as HistoryPreset)}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-semibold text-slate-800 outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="hoje">Hoje</option>
+                  <option value="semana">Esta semana</option>
+                  <option value="personalizado">Personalizado</option>
+                </select>
+              </label>
+              {historyPreset === 'personalizado' && (
+                <div className="flex items-end gap-2">
+                  <label className="space-y-1">
+                    <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">De</span>
+                    <input type="date" value={historyFrom} max={historyTo} onChange={(e) => e.target.value && setHistoryFrom(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-semibold text-slate-800 outline-none focus:ring-1 focus:ring-blue-500" />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Até</span>
+                    <input type="date" value={historyTo} min={historyFrom} onChange={(e) => e.target.value && setHistoryTo(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 font-semibold text-slate-800 outline-none focus:ring-1 focus:ring-blue-500" />
+                  </label>
+                </div>
+              )}
+              {canChooseStore && (
+                <label className="space-y-1">
+                  <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Loja</span>
+                  <select
+                    id="historico-loja"
+                    value={historyScope}
+                    onChange={(e) => setHistoryScope(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-semibold text-slate-800 outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value={CONSOLIDATED}>Consolidado (todas as lojas)</option>
+                    {stores.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.unitId}</option>)}
+                  </select>
+                </label>
+              )}
+              <label className="space-y-1">
+                <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Relatório</span>
+                <select
+                  id="historico-relatorio"
+                  value={historyMode}
+                  onChange={(e) => setHistoryMode(e.target.value as HistoryMode)}
+                  className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 font-semibold text-slate-800 outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="simplificado">Simplificado</option>
+                  <option value="analitico">Analítico</option>
+                  <option value="detalhado">Detalhado</option>
+                </select>
+              </label>
+              <p className="text-[11px] text-slate-500 pb-2">
+                {historyRangeLabel} · {activeHistoryScope === CONSOLIDATED ? 'Todas as lojas' : storeName(activeHistoryScope)}
+              </p>
+            </div>
+          </div>
+
+          {/* Formas de pagamento + total (todos os relatorios) */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+              <h4 className="text-[11px] font-bold text-slate-900 uppercase tracking-wider mb-3">Vendas por forma de pagamento</h4>
+              <table className="w-full text-left">
+                <tbody className="divide-y divide-slate-100">
+                  {historyPayments.map(([method, amount]) => (
+                    <tr key={method}>
+                      <td className="py-2 text-slate-600">{method === DEPOSIT_PAYMENT_KEY ? 'Sinal de reserva (recebido antes)' : (SALE_PAYMENT_METHOD_LABELS[method as keyof typeof SALE_PAYMENT_METHOD_LABELS] ?? method)}</td>
+                      <td className="py-2 text-right font-mono font-semibold text-slate-900">{formatMoney(amount)}</td>
+                    </tr>
+                  ))}
+                  {historyPayments.length === 0 && (
+                    <tr><td colSpan={2} className="py-6 text-center text-slate-400">Nenhuma venda concluída no período.</td></tr>
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-slate-200">
+                    <td className="pt-2 font-bold text-slate-900">Total ({historyCompleted.length} venda(s))</td>
+                    <td className="pt-2 text-right font-mono font-black text-slate-950">{formatMoney(historyTotal)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+              {(historyCanceledTotal > 0 || historyPendingTotal > 0) && (
+                <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-[11px]">
+                  {historyCanceledTotal > 0 && (
+                    <p className="flex justify-between text-slate-500"><span>Estornado no período (fora do total)</span><span className="font-mono">{formatMoney(historyCanceledTotal)}</span></p>
+                  )}
+                  {historyPendingTotal > 0 && (
+                    <p className="flex justify-between text-amber-700"><span>Estorno pendente de aprovação (fora do total)</span><span className="font-mono">{formatMoney(historyPendingTotal)}</span></p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {historyMode !== 'simplificado' && (
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <h4 className="text-[11px] font-bold text-slate-900 uppercase tracking-wider mb-3">Vendas por vendedor</h4>
+                <table className="w-full text-left">
+                  <thead className="text-[10px] text-slate-400 uppercase">
+                    <tr>
+                      <th className="pb-2">Vendedor</th>
+                      <th className="pb-2 text-center">Vendas</th>
+                      <th className="pb-2 text-right">Ticket médio</th>
+                      <th className="pb-2 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {historySellers.map(seller => (
+                      <tr key={seller.key}>
+                        <td className="py-2 text-slate-700 font-medium">{seller.label}</td>
+                        <td className="py-2 text-center font-mono text-slate-700">{seller.salesCount}</td>
+                        <td className="py-2 text-right font-mono text-slate-600">{formatMoney(seller.total / seller.salesCount)}</td>
+                        <td className="py-2 text-right font-mono font-semibold text-slate-900">{formatMoney(seller.total)}</td>
+                      </tr>
+                    ))}
+                    {historySellers.length === 0 && (
+                      <tr><td colSpan={4} className="py-6 text-center text-slate-400">Nenhuma venda concluída no período.</td></tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             )}
+          </div>
 
-            {saleError && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-lg flex items-start space-x-2 text-xs">
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <span>{saleError}</span>
-              </div>
-            )}
-            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-              <div className="flex justify-between items-center flex-wrap gap-2">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Histórico de Vendas</h3>
-                  <p className="text-xs text-slate-400 font-sans">Vendas registradas pelo PDV, por loja e data. O estorno é feito aqui.</p>
-                </div>
-
-                <div className="relative w-48 text-xs">
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Filtrar por código/loja..."
-                    value={searchSaleQuery}
-                    onChange={(e) => setSearchSaleQuery(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 p-2 outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="overflow-x-auto text-xs">
+          {/* Detalhado: venda por venda */}
+          {historyMode === 'detalhado' && (
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+              <h4 className="text-[11px] font-bold text-slate-900 uppercase tracking-wider mb-3">Venda por venda</h4>
+              <div className="overflow-x-auto">
                 <table className="w-full text-left text-slate-500">
                   <thead className="text-[10px] text-slate-400 uppercase bg-slate-50 font-bold">
                     <tr>
-                      <th className="px-3 py-2">Data Lançamento</th>
+                      <th className="px-3 py-2">Data</th>
+                      <th className="px-3 py-2">Vendedor</th>
                       <th className="px-3 py-2">Fatura / Doc</th>
                       <th className="px-3 py-2">Loja</th>
                       <th className="px-3 py-2 text-center">Forma Pagto</th>
@@ -341,118 +486,92 @@ export default function FinanceiroView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {sales
-                      .filter(s => {
-                        if (!searchSaleQuery) return true;
-                        const query = searchSaleQuery.toLowerCase();
-                        const storeLabel = s.unitId === 'loja_1' ? 'loja 1' : s.unitId === 'loja_2' ? 'loja 2' : s.unitId === 'loja_3' ? 'loja 3' : 'central';
-                        return (
-                          s.invoiceNumber.toLowerCase().includes(query) ||
-                          storeLabel.includes(query) ||
-                          s.paymentMethod.toLowerCase().includes(query) ||
-                          (SALE_PAYMENT_METHOD_LABELS[s.paymentMethod] ?? '').toLowerCase().includes(query) ||
-                          (s.payments ?? []).some(p => (SALE_PAYMENT_METHOD_LABELS[p.paymentMethod] ?? p.paymentMethod).toLowerCase().includes(query)) ||
-                          new Date(s.timestamp).toLocaleDateString('pt-BR').includes(query)
-                        );
-                      })
-                      .map((s) => {
-                        const storeLabel = s.unitId === 'loja_1' ? 'Loja 1' : s.unitId === 'loja_2' ? 'Loja 2' : s.unitId === 'loja_3' ? 'Loja 3' : 'Central';
-                        const isCancelPending = s.status === 'PENDENTE_APROVACAO';
-                        const isCanceled = s.status === 'CANCELADA';
-                        const isCompleted = s.status === 'CONCLUIDA';
-                        
-                        return (
-                          <tr key={s.id} className="hover:bg-slate-50/50">
-                            <td className="px-3 py-2.5 font-medium text-slate-700">
-                              {new Date(s.timestamp).toLocaleDateString('pt-BR')}
-                            </td>
-                            <td className="px-3 py-2.5 font-bold text-slate-900">
-                              {s.invoiceNumber}
-                            </td>
-                            <td className="px-3 py-2.5 font-medium text-slate-700">
-                              {storeLabel}
-                            </td>
-                            <td className="px-3 py-2.5 text-center">
-                              <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded font-semibold text-[10px]">
-                                {SALE_PAYMENT_METHOD_LABELS[s.paymentMethod] ?? s.paymentMethod}
-                              </span>
-                              {s.payments && s.payments.length > 1 && (
-                                <div className="mt-1 flex flex-col items-center gap-0.5 text-[10px] text-slate-500">
-                                  {s.payments.map((p, index) => (
-                                    <span key={`${s.id}-payment-${index}`}>
-                                      {SALE_PAYMENT_METHOD_LABELS[p.paymentMethod] ?? p.paymentMethod}: R$ {p.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2.5 text-right font-bold text-slate-950 font-mono">
-                              R$ {s.grossAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-3 py-2.5 text-right font-semibold text-emerald-700 font-mono">
-                              R$ {s.netAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                            </td>
-                            <td className="px-3 py-2.5 text-center">
-                              {isCompleted && (
-                                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[9px] font-bold">
-                                  Concluída
-                                </span>
-                              )}
-                              {isCancelPending && (
-                                <span className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-full text-[9px] font-bold animate-pulse">
-                                  Estorno Pendente
-                                </span>
-                              )}
-                              {isCanceled && (
-                                <span className="px-2 py-0.5 bg-slate-100 text-slate-500 border border-slate-200 rounded-full text-[9px] font-bold line-through">
-                                  Estornada
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2.5 text-center">
-                              {isCompleted && (
+                    {historySales.map((s) => {
+                      const isCancelPending = s.status === 'PENDENTE_APROVACAO';
+                      const isCanceled = s.status === 'CANCELADA';
+                      const isCompleted = s.status === 'CONCLUIDA';
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50/50">
+                          <td className="px-3 py-2.5 font-medium text-slate-700 whitespace-nowrap">
+                            {new Date(s.timestamp).toLocaleDateString('pt-BR')}
+                            <span className="block text-[10px] text-slate-400">{new Date(s.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+                          </td>
+                          <td className="px-3 py-2.5 text-slate-700">
+                            {s.sellerName ? `${s.sellerName} (${s.sellerCode})` : '—'}
+                            {s.finalizedByName && s.finalizedByName !== s.sellerName && (
+                              <span className="block text-[10px] text-slate-400">finalizada por {s.finalizedByName}</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 font-bold text-slate-900">{s.invoiceNumber}</td>
+                          <td className="px-3 py-2.5 font-medium text-slate-700">{storeName(s.unitId)}</td>
+                          <td className="px-3 py-2.5 text-center">
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded font-semibold text-[10px]">
+                              {SALE_PAYMENT_METHOD_LABELS[s.paymentMethod] ?? s.paymentMethod}
+                            </span>
+                            {s.payments && s.payments.length > 1 && (
+                              <div className="mt-1 flex flex-col items-center gap-0.5 text-[10px] text-slate-500">
+                                {s.payments.map((p, index) => (
+                                  <span key={`${s.id}-payment-${index}`}>
+                                    {SALE_PAYMENT_METHOD_LABELS[p.paymentMethod] ?? p.paymentMethod}: {formatMoney(p.amount)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-bold text-slate-950 font-mono">{formatMoney(s.grossAmount)}</td>
+                          <td className="px-3 py-2.5 text-right font-semibold text-emerald-700 font-mono">{formatMoney(s.netAmount)}</td>
+                          <td className="px-3 py-2.5 text-center">
+                            {isCompleted && (
+                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full text-[9px] font-bold">Concluída</span>
+                            )}
+                            {isCancelPending && (
+                              <span className="px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-full text-[9px] font-bold">Estorno Pendente</span>
+                            )}
+                            {isCanceled && (
+                              <span className="px-2 py-0.5 bg-slate-100 text-slate-500 border border-slate-200 rounded-full text-[9px] font-bold line-through">Estornada</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-center">
+                            {isCompleted && (
+                              <button
+                                type="button"
+                                onClick={() => handleCancelSale(s.id)}
+                                className="px-2.5 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold rounded-lg border border-rose-200 transition text-[10px]"
+                              >
+                                Estornar
+                              </button>
+                            )}
+                            {isCancelPending && (
+                              isAdmin ? (
                                 <button
                                   type="button"
-                                  onClick={() => handleCancelSale(s.id)}
-                                  className="px-2.5 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold rounded-lg border border-rose-200 transition text-[10px]"
+                                  onClick={() => handleApproveCancelSale(s.id)}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition text-[10px] shadow-sm flex items-center justify-center mx-auto"
                                 >
-                                  Estornar
+                                  <Check className="w-3 h-3 mr-0.5" />
+                                  Aprovar
                                 </button>
-                              )}
-                              {isCancelPending && (
-                                <div className="space-y-1">
-                                  {isAdmin ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleApproveCancelSale(s.id)}
-                                      className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition text-[10px] shadow-sm flex items-center justify-center mx-auto"
-                                    >
-                                      <Check className="w-3 h-3 mr-0.5" />
-                                      Aprovar
-                                    </button>
-                                  ) : (
-                                    <span className="text-[9px] text-amber-600 font-semibold block">Aguardando Admin</span>
-                                  )}
-                                </div>
-                              )}
-                              {isCanceled && (
-                                <span className="text-[10px] text-slate-400 font-medium">Estorno Aprovado</span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    
-                    {sales.length === 0 && (
+                              ) : (
+                                <span className="text-[9px] text-amber-600 font-semibold block">Aguardando Admin</span>
+                              )
+                            )}
+                            {isCanceled && (
+                              <span className="text-[10px] text-slate-400 font-medium">Estorno Aprovado</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {historySales.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="text-center text-slate-400 py-10">Nenhuma venda registrada recentemente.</td>
+                        <td colSpan={9} className="text-center text-slate-400 py-10">Nenhuma venda no período.</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

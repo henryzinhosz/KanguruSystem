@@ -10,10 +10,11 @@ import { Expense, Sale } from '../types';
 
 export const CONSOLIDATED = 'consolidado';
 
-export type PeriodPreset = 'hoje' | '7dias' | 'mes' | 'mes_passado' | 'personalizado';
+export type PeriodPreset = 'hoje' | 'semana' | '7dias' | 'mes' | 'mes_passado' | 'personalizado';
 
 export const PERIOD_LABELS: Record<PeriodPreset, string> = {
   hoje: 'Hoje',
+  semana: 'Esta semana',
   '7dias': 'Últimos 7 dias',
   mes: 'Este mês',
   mes_passado: 'Mês passado',
@@ -57,6 +58,11 @@ export function resolvePeriod(
   switch (preset) {
     case 'hoje':
       return { start: today, end: addDays(today, 1) };
+    case 'semana': {
+      // Segunda-feira desta semana ate hoje (mesma semana do DRE).
+      const mondayOffset = (today.getDay() + 6) % 7;
+      return { start: addDays(today, -mondayOffset), end: addDays(today, 1) };
+    }
     case '7dias':
       return { start: addDays(today, -6), end: addDays(today, 1) };
     case 'mes_passado':
@@ -218,6 +224,46 @@ export function weeksOfMonth(monthKey: string): string[] {
     keys.add(monthWeekKey(new Date(year, month - 1, day).toISOString()));
   }
   return Array.from(keys);
+}
+
+// Total por forma de pagamento. Venda com linhas (PDV): cada linha na sua forma;
+// a diferenca para o total e o sinal de reserva, recebido antes em outro registro.
+export const DEPOSIT_PAYMENT_KEY = 'SINAL DE RESERVA';
+export function paymentBreakdown(sales: Sale[]): Map<string, number> {
+  const totals = new Map<string, number>();
+  const add = (method: string, amount: number) => totals.set(method, (totals.get(method) || 0) + amount);
+  sales.forEach(sale => {
+    if (!sale.payments?.length) {
+      add(sale.paymentMethod, sale.grossAmount);
+      return;
+    }
+    const linesTotal = sale.payments.reduce((sum, payment) => sum + payment.amount, 0);
+    sale.payments.forEach(payment => add(payment.paymentMethod, payment.amount));
+    const deposit = Math.round((sale.grossAmount - linesTotal) * 100) / 100;
+    if (deposit > 0) add(DEPOSIT_PAYMENT_KEY, deposit);
+  });
+  return totals;
+}
+
+export interface SellerSummary {
+  key: string;
+  label: string;
+  salesCount: number;
+  total: number;
+}
+
+// Vendas por vendedor (o vendedor congelado na venda). Vendas sem vendedor: grupo proprio.
+export function sellerBreakdown(sales: Sale[]): SellerSummary[] {
+  const groups = new Map<string, SellerSummary>();
+  sales.forEach(sale => {
+    const key = sale.sellerCode ? `${sale.sellerCode}|${sale.sellerName || ''}` : '__none__';
+    const label = sale.sellerCode ? `${sale.sellerName || 'Vendedor'} (${sale.sellerCode})` : 'Sem vendedor (vendas antigas)';
+    const group = groups.get(key) || { key, label, salesCount: 0, total: 0 };
+    group.salesCount += 1;
+    group.total += sale.grossAmount;
+    groups.set(key, group);
+  });
+  return Array.from(groups.values()).sort((a, b) => b.total - a.total);
 }
 
 export const formatMoney = (value: number) =>

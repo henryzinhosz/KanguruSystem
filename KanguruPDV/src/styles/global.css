@@ -880,3 +880,24 @@ small {
     margin-left: auto;
   }
 }
+/* Codigo do vendedor (venda, reserva e conversao) */
+.seller-code-field {
+  margin: 0.75rem 0;
+}
+
+.seller-code-field input {
+  max-width: 7rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-align: center;
+}
+
+.seller-code-field .seller-code-ok {
+  color: #285e3a;
+  font-weight: 700;
+}
+
+.seller-code-field .seller-code-error {
+  color: #b42318;
+}

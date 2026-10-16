@@ -35,6 +35,7 @@ export interface PdvOperator {
   id: string;
   tenantId: string;
   unitId: string | null;
+  code: string | null; // 2 digitos (01-99), unico por loja entre os ativos
   name: string;
   permissions: PdvOperatorPermissions;
   isActive: boolean;
@@ -250,6 +251,11 @@ export interface Sale {
   status: SaleStatus;
   requiresApproval: boolean;
   approvedBy?: string; // admin who approved cancellation or high-value override
+  // Vendedor congelado na venda (PDV). Em reserva convertida e quem criou a reserva.
+  sellerCode?: string;
+  sellerName?: string;
+  // Quem finalizou no PDV (difere do vendedor so em reserva convertida).
+  finalizedByName?: string;
 }
 
 export interface Expense {

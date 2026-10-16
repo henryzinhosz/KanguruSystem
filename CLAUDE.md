@@ -275,6 +275,8 @@ Decisões do usuário:
 - Histórico de Vendas: coluna Vendedor entre Data e Fatura/Doc; seletores Data (Hoje/Esta semana/Personalizado),
   Loja (Consolidado/loja) e Relatório (Simplificado / Analítico / Detalhado); estornadas fora dos totais.
 - Dados atuais serão apagados, então vendedores antigos sem loja/código não são problema.
+- Conversão de reserva: quem finaliza **também digita o código** (opção A) → gravado em `finalized_by_*`; a venda continua do vendedor da reserva.
+- **Implementado em 2026-10-17 (migration `20261017_pos_sellers.sql` NÃO aplicada):** `pdv_operators.code` + índice único (tenant, loja, código) entre ativos; colunas de vendedor em `sales` e `product_reservations`; `resolve_pos_seller` (interna), `find_pos_seller` (PDV confere o nome); `reserve_pos_cart` 6→7 parâmetros, `list_pos_reservations` com vendedor, `process_pos_terminal_sale` 15→16 parâmetros (status `INVALID_SELLER`). Corpos copiados das versões vivas (md5 conferido 2026-10-16) e comparados linha a linha. **Aplicar a migration e atualizar o PDV juntos**: o PDV antigo deixa de vender/reservar depois dela.
 
 ---
 
@@ -363,6 +365,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-17** — Vendedores no PDV implementados (migration 20261017 + PDV + ERP: cadastro com código, Histórico de Vendas com Data/Loja/Relatório Simplificado-Analítico-Detalhado e coluna Vendedor). Builds do ERP e do PDV ok. Próximo passo: aplicar a migration (com aprovação) e testar.
 - **2026-10-16 (3)** — Usuário aplicou a 20261016 e aprovou todos os testes da Parte 1. Novo pedido em desenho: filtros/relatórios do Histórico de Vendas (Data, Loja, Simplificado/Analítico/Detalhado), coluna Vendedor e **código de vendedor no PDV** (único por tenant+loja).
 - **2026-10-16 (2)** — Ajustes pedidos nos testes: semanas como "Sem 01 - Out (01 a 04/10)"; DRE com seletor de mês/semana e total do mês; **decisão: vendas só pelo PDV** (removido o lançamento manual do Financeiro, que vira Histórico de Vendas/estorno); corrigido apagamento de formulários ao voltar para a janela (renovação do login). Migration `20261016_serial_entry_duplicate_message.sql` (mensagem de serial repetido) **ainda não aplicada**.
 - **2026-10-16** — Parte 1 implementada (migration + ERP), `tsc` e `vite build` ok. Próximo passo: usuário conferir o md5 (seção 7), aplicar a migration com aprovação e testar o roteiro da Parte 1.

@@ -60,6 +60,7 @@ function mapPdvOperator(operator: any): PdvOperator {
     id: operator.id,
     tenantId: operator.tenant_id,
     unitId: operator.unit_id ?? null,
+    code: operator.code ?? null,
     name: operator.name,
     permissions: { ...defaultPdvOperatorPermissions, ...(operator.permissions || {}) },
     isActive: operator.is_active,
@@ -1219,7 +1220,10 @@ export const supabaseService = {
       timestamp: s.timestamp,
       status: s.status,
       requiresApproval: s.requires_approval,
-      approvedBy: s.approved_by || undefined
+      approvedBy: s.approved_by || undefined,
+      sellerCode: s.seller_code || undefined,
+      sellerName: s.seller_name || undefined,
+      finalizedByName: s.finalized_by_name || undefined
     }));
   },
 
@@ -1449,13 +1453,20 @@ export const supabaseService = {
       .upsert({
         id: operator.id,
         unit_id: operator.unitId,
+        code: operator.code,
         name: operator.name,
         permissions: operator.permissions,
         is_active: operator.isActive
       })
       .select()
       .single();
-    if (error) throw error;
+    if (error) {
+      // Indice unico (tenant + loja + codigo, entre ativos): mensagem clara.
+      if (error.code === '23505' && String(error.message || '').includes('pdv_operators_tenant_unit_code_key')) {
+        throw new Error(`Já existe um vendedor ativo com o código ${operator.code} nesta loja.`);
+      }
+      throw error;
+    }
     return mapPdvOperator(data);
   },
 

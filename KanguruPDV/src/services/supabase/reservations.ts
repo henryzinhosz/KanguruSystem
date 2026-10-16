@@ -30,6 +30,8 @@ export interface PosReservation {
   createdAt: string;
   expired: boolean;
   items: PosReservationItem[];
+  sellerCode: string | null;
+  sellerName: string | null;
 }
 
 interface PosReservationRow {
@@ -42,6 +44,8 @@ interface PosReservationRow {
   created_at: string;
   is_expired: boolean;
   items: PosReservationItem[];
+  seller_code: string | null;
+  seller_name: string | null;
 }
 
 export async function createPosReservation(input: {
@@ -51,6 +55,8 @@ export async function createPosReservation(input: {
   depositAmount: number;
   depositPaymentMethod: string | null;
   items: ReservationLineInput[];
+  // Vendedor que fica com a venda quando a reserva for convertida.
+  sellerCode: string;
 }): Promise<string> {
   const { data, error } = await supabase.rpc('reserve_pos_cart', {
     p_customer_name: input.customerName,
@@ -65,6 +71,7 @@ export async function createPosReservation(input: {
       discountPercent: item.discountPercent,
       ...(item.serialUnitId ? { serialUnitId: item.serialUnitId } : {}),
     })),
+    p_seller_code: input.sellerCode,
   });
   if (error) throw error;
   return String(data);
@@ -83,6 +90,8 @@ export async function getPosReservations(): Promise<PosReservation[]> {
     createdAt: row.created_at,
     expired: row.is_expired,
     items: row.items ?? [],
+    sellerCode: row.seller_code ?? null,
+    sellerName: row.seller_name ?? null,
   }));
 }
 

@@ -29,6 +29,7 @@ import {
   getPosReservations,
   type PosReservation,
 } from '../services/supabase/reservations';
+import { findPosSeller, normalizeSellerCode, type PosSeller } from '../services/supabase/sellers';
 import {
   activateTerminal,
   getTerminalContext,
@@ -272,6 +273,13 @@ export function App() {
   const [adminApprovalOpen, setAdminApprovalOpen] = useState(false);
   const [adminApprovalPassword, setAdminApprovalPassword] = useState('');
   const [adminApprovalError, setAdminApprovalError] = useState<string | null>(null);
+  // Codigo do vendedor (obrigatorio): venda, nova reserva e conversao de reserva.
+  const [saleSellerCode, setSaleSellerCode] = useState('');
+  const [saleSeller, setSaleSeller] = useState<PosSeller | null>(null);
+  const [reservationSellerCode, setReservationSellerCode] = useState('');
+  const [reservationSeller, setReservationSeller] = useState<PosSeller | null>(null);
+  const [conversionSellerCode, setConversionSellerCode] = useState('');
+  const [conversionSeller, setConversionSeller] = useState<PosSeller | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -574,6 +582,10 @@ export function App() {
 
   async function finalizeSale() {
     if (!cashSession || cart.length === 0) return;
+    if (!saleSeller) {
+      setMessage('Informe o código do vendedor para finalizar a venda.');
+      return;
+    }
     const resolution = resolvePayments(paymentLines, grossAmount);
     if (resolution.error) {
       setMessage(resolution.error);
@@ -619,7 +631,15 @@ export function App() {
         status: 'CONCLUIDA',
         requiresApproval: false,
         adminPassword: needsApproval ? adminApprovalPassword : null,
+        sellerCode: saleSeller.code,
       });
+      if (result.status === 'INVALID_SELLER') {
+        const text = 'Código de vendedor inválido para esta loja. Confira o código e tente de novo.';
+        setSaleSeller(null);
+        setMessage(text);
+        if (adminApprovalOpen) setAdminApprovalError(text);
+        return;
+      }
       if (result.status === 'INVALID_PASSWORD') {
         setAdminApprovalPassword('');
         setAdminApprovalError(
@@ -638,6 +658,8 @@ export function App() {
       setCatalogItems([]);
       setQuery('');
       setPaymentLines([]);
+      setSaleSellerCode('');
+      setSaleSeller(null);
       setAdminApprovalPassword('');
       setAdminApprovalOpen(false);
       setMessage(
@@ -680,6 +702,10 @@ export function App() {
   async function submitReservation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!cashSession || cart.length === 0 || cart.some((item) => item.itemType !== 'PRODUCT')) return;
+    if (!reservationSeller) {
+      setMessage('Informe o código do vendedor que está fazendo a reserva.');
+      return;
+    }
     setBusy(true);
     setMessage(null);
     const depositAmount = valueAsNumber(reservationDeposit);
@@ -696,6 +722,7 @@ export function App() {
           discountPercent: item.discountPercent,
           ...(item.serialUnit ? { serialUnitId: item.serialUnit.serialUnitId } : {}),
         })),
+        sellerCode: reservationSeller.code,
       });
       setCart([]);
       setCatalogItems([]);
@@ -705,7 +732,9 @@ export function App() {
       setReservationCustomerName('');
       setReservationCustomerPhone('');
       setReservationDeposit('');
-      setMessage('Reserva registrada. O produto permanece separado até conversão ou cancelamento.');
+      setReservationSellerCode('');
+      setReservationSeller(null);
+      setMessage(`Reserva registrada para ${reservationSeller.name}. O produto permanece separado até conversão ou cancelamento.`);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -722,10 +751,14 @@ export function App() {
       setMessage(resolution.error);
       return;
     }
+    if (!conversionSeller) {
+      setMessage('Informe o seu código de vendedor para finalizar a conversão.');
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
-      await saleRpc.processTransaction({
+      const result = await saleRpc.processTransaction({
         saleId: crypto.randomUUID(),
         invoiceNumber: `PDV-${Date.now()}`,
         reservationId: reservation.id,
@@ -753,12 +786,24 @@ export function App() {
         timestamp: new Date().toISOString(),
         status: 'CONCLUIDA',
         requiresApproval: false,
+        sellerCode: conversionSeller.code,
       });
+      if (result.status === 'INVALID_SELLER') {
+        setConversionSeller(null);
+        setMessage('Código de vendedor inválido para esta loja. Confira o código e tente de novo.');
+        return;
+      }
+      if (result.status !== 'OK') {
+        setMessage('Não foi possível concluir a conversão. Tente novamente.');
+        return;
+      }
       setReservations(await getPosReservations());
       setConversionReservation(null);
       setConversionPaymentLines([]);
+      setConversionSellerCode('');
+      setConversionSeller(null);
       setMessage(
-        `Reserva de ${reservation.customerName} convertida em venda. Saldo pago: ${currency.format(remaining)}.`
+        `Reserva de ${reservation.customerName} convertida em venda${reservation.sellerName ? ` (venda de ${reservation.sellerName})` : ''}. Saldo pago: ${currency.format(remaining)}.`
           + (resolution && resolution.changeCents > 0 ? ` Troco: ${currency.format(resolution.changeCents / 100)}.` : '')
       );
     } catch (error) {
@@ -1108,6 +1153,9 @@ export function App() {
                       </span>
                     </div>
                     <p className="reservation-deadline">Prazo: {formatDateTime(reservation.expiresAt)}</p>
+                    <p className="reservation-deadline">
+                      Vendedor: {reservation.sellerName ? `${reservation.sellerName} (${reservation.sellerCode})` : 'não informado'}
+                    </p>
                     <ul className="reservation-items">
                       {reservation.items.map((item) => (
                         <li key={item.reservationItemId}>
@@ -1148,8 +1196,16 @@ export function App() {
             paymentLines={conversionPaymentLines}
             busy={busy}
             message={message}
+            sellerCode={conversionSellerCode}
+            seller={conversionSeller}
+            onSellerCode={setConversionSellerCode}
+            onSeller={setConversionSeller}
             onPaymentLines={setConversionPaymentLines}
-            onClose={() => setConversionReservation(null)}
+            onClose={() => {
+              setConversionReservation(null);
+              setConversionSellerCode('');
+              setConversionSeller(null);
+            }}
             onConfirm={() => void convertReservationToSale(conversionReservation, conversionPaymentLines)}
           />
         )}
@@ -1338,6 +1394,15 @@ export function App() {
             <strong>{currency.format(grossAmount)}</strong>
           </div>
 
+          <SellerCodeField
+            label="Código do vendedor"
+            value={saleSellerCode}
+            seller={saleSeller}
+            disabled={busy}
+            onValue={setSaleSellerCode}
+            onSeller={setSaleSeller}
+          />
+
           <button
             className="reserve-action"
             type="button"
@@ -1352,7 +1417,7 @@ export function App() {
           <button
             className="primary-action finish-button"
             type="button"
-            disabled={busy || cart.length === 0}
+            disabled={busy || cart.length === 0 || !saleSeller}
             onClick={() => void finalizeSale()}
           >
             <CreditCard size={20} />
@@ -1404,6 +1469,10 @@ export function App() {
           onExpiresOn={setReservationExpiresOn}
           onDeposit={setReservationDeposit}
           onPaymentMethod={(value) => setPaymentMethod(value as PaymentMethod)}
+          sellerCode={reservationSellerCode}
+          seller={reservationSeller}
+          onSellerCode={setReservationSellerCode}
+          onSeller={setReservationSeller}
           onClose={() => setReservationDialogOpen(false)}
           onSubmit={(event) => void submitReservation(event)}
         />
@@ -1425,6 +1494,10 @@ interface ReservationModalProps {
   onExpiresOn: (value: string) => void;
   onDeposit: (value: string) => void;
   onPaymentMethod: (value: PaymentMethod) => void;
+  sellerCode: string;
+  seller: PosSeller | null;
+  onSellerCode: (value: string) => void;
+  onSeller: (seller: PosSeller | null) => void;
   onClose: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
@@ -1442,6 +1515,10 @@ function ReservationModal({
   onExpiresOn,
   onDeposit,
   onPaymentMethod,
+  sellerCode,
+  seller,
+  onSellerCode,
+  onSeller,
   onClose,
   onSubmit,
 }: ReservationModalProps) {
@@ -1485,6 +1562,14 @@ function ReservationModal({
               </select>
             </label>
           )}
+          <SellerCodeField
+            label="Código do vendedor (fica com a venda)"
+            value={sellerCode}
+            seller={seller}
+            disabled={busy}
+            onValue={onSellerCode}
+            onSeller={onSeller}
+          />
           <div className="reservation-modal-summary">
             <span>Total reservado</span><strong>{currency.format(total)}</strong>
             <span>Sinal</span><strong>{currency.format(depositAmount)}</strong>
@@ -1492,7 +1577,7 @@ function ReservationModal({
           </div>
           <div className="modal-actions">
             <button className="text-action" type="button" onClick={onClose} disabled={busy}>Voltar</button>
-            <button className="primary-action modal-confirm" type="submit" disabled={busy || depositAmount > total}>
+            <button className="primary-action modal-confirm" type="submit" disabled={busy || depositAmount > total || !seller}>
               {busy ? 'Registrando...' : 'Confirmar reserva'}
             </button>
           </div>
@@ -1612,6 +1697,10 @@ interface ReservationPaymentModalProps {
   paymentLines: PaymentLine[];
   busy: boolean;
   message: string | null;
+  sellerCode: string;
+  seller: PosSeller | null;
+  onSellerCode: (value: string) => void;
+  onSeller: (seller: PosSeller | null) => void;
   onPaymentLines: (lines: PaymentLine[]) => void;
   onClose: () => void;
   onConfirm: () => void;
@@ -1622,6 +1711,10 @@ function ReservationPaymentModal({
   paymentLines,
   busy,
   message,
+  sellerCode,
+  seller,
+  onSellerCode,
+  onSeller,
   onPaymentLines,
   onClose,
   onConfirm,
@@ -1639,6 +1732,9 @@ function ReservationPaymentModal({
           <button className="icon-button" type="button" title="Fechar" onClick={onClose} disabled={busy}><X size={20} /></button>
         </div>
         <p className="modal-copy">Cliente: <strong>{reservation.customerName}</strong>. O sinal já recebido será abatido do total.</p>
+        <p className="modal-copy">
+          Venda de: <strong>{reservation.sellerName ? `${reservation.sellerName} (${reservation.sellerCode})` : 'quem finalizar (reserva sem vendedor)'}</strong>
+        </p>
         <div className="reservation-modal-summary">
           <span>Total da venda</span><strong>{currency.format(total)}</strong>
           <span>Sinal já recebido</span><strong>- {currency.format(reservation.depositAmount)}</strong>
@@ -1655,15 +1751,91 @@ function ReservationPaymentModal({
         ) : (
           <p className="modal-copy">Não há saldo pendente; a venda será concluída sem nova cobrança.</p>
         )}
+        <SellerCodeField
+          label="Seu código (quem está finalizando)"
+          value={sellerCode}
+          seller={seller}
+          disabled={busy}
+          onValue={onSellerCode}
+          onSeller={onSeller}
+        />
         <Notice message={message} />
         <div className="modal-actions">
           <button className="text-action" type="button" onClick={onClose} disabled={busy}>Voltar</button>
-          <button className="primary-action modal-confirm" type="button" onClick={onConfirm} disabled={busy}>
+          <button className="primary-action modal-confirm" type="button" onClick={onConfirm} disabled={busy || !seller}>
             {busy ? 'Processando...' : 'Confirmar venda'}
           </button>
         </div>
       </section>
     </div>
+  );
+}
+
+interface SellerCodeFieldProps {
+  label: string;
+  value: string;
+  seller: PosSeller | null;
+  disabled: boolean;
+  onValue: (value: string) => void;
+  onSeller: (seller: PosSeller | null) => void;
+}
+
+// Campo de 2 digitos que confere o codigo no servidor e mostra o nome do vendedor.
+function SellerCodeField({ label, value, seller, disabled, onValue, onSeller }: SellerCodeFieldProps) {
+  const [status, setStatus] = useState<'idle' | 'loading' | 'not-found' | 'error'>('idle');
+
+  useEffect(() => {
+    const normalized = normalizeSellerCode(value);
+    if (!normalized) {
+      onSeller(null);
+      setStatus('idle');
+      return;
+    }
+    if (seller?.code === normalized) return;
+    let cancelled = false;
+    setStatus('loading');
+    const timer = window.setTimeout(() => {
+      findPosSeller(normalized)
+        .then((found) => {
+          if (cancelled) return;
+          onSeller(found);
+          setStatus(found ? 'idle' : 'not-found');
+        })
+        .catch(() => {
+          if (cancelled) return;
+          onSeller(null);
+          setStatus('error');
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [value]);
+
+  return (
+    <label className="seller-code-field">
+      {label}
+      <input
+        inputMode="numeric"
+        maxLength={2}
+        placeholder="00"
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onValue(event.target.value.replace(/[^0-9]/g, '').slice(0, 2))}
+      />
+      <small className={seller ? 'seller-code-ok' : status === 'idle' ? '' : 'seller-code-error'}>
+        {seller
+          ? `Vendedor: ${seller.name}`
+          : status === 'loading'
+            ? 'Conferindo...'
+            : status === 'not-found'
+              ? 'Código não encontrado nesta loja (ou vendedor inativo/sem permissão de venda).'
+              : status === 'error'
+                ? 'Não foi possível conferir o código. Verifique a conexão.'
+                : 'Digite os 2 dígitos do seu código.'}
+      </small>
+    </label>
   );
 }
 
