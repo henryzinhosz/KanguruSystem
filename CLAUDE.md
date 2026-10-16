@@ -103,7 +103,7 @@ por operador (inspirado no Linx Degust).
 | 2.4 Produtos serializados (`product_serial_units` DISPONIVEL/VENDIDO/RESERVADO, `mark_serial_units_sold`) | ✅ |
 | 2.5 Serviços e carrinho (`services`, `max_item_discount_percent`, `search_pos_items`, desconto por linha) | ✅ |
 | 2.6 Reserva de produto (`product_reservations`, sinal em ledger próprio, preço/desconto congelado) | ✅ |
-| 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada e testada (a)–(g) em 2026-10-14; falta só o PR para `main` (seção 6) |
+| 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada, testada e na `main` (PR #1, 2026-10-17) |
 | 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) ✅ implementada, migrations 20261015 e 20261016 aplicadas e **testes aprovados** (2026-10-16). Partes 2–3 depois (seção 7) |
 | 2.8 Finalização da venda (fiscal, garantia) | ⚪ Não iniciada |
 | 2.9 Trocas e devoluções | ⚪ |
@@ -158,7 +158,7 @@ no SQL Editor com `20261014_drop_legacy_pos_terminal_sale.sql`; confirmado que s
 - ~~Aplicar a migration~~ (já aplicada). ~~Remover a versão antiga de 12 parâmetros~~ (feito em 2026-10-14).
 - Bundle Tauri não gerado (só `vite build`).
 - ✅ Testes manuais aprovados pelo usuário em 2026-10-14: (a) 1 método, (b) 2–3 métodos, (c) soma divergente rejeitada, (d) desconto acima do limite com senha correta/errada/bloqueio, (e) reserva com sinal + pagamento dividido, (f) fechamento com vendas novas e legadas juntas sem dupla contagem, (g) estorno de venda dividida.
-- Depois dos testes: PR de `feat/2.7-split-payments` para `main`.
+- ✅ Na `main` via PR #1 (junto com a 2.7b Parte 1 e vendedores), 2026-10-17.
 
 ---
 
@@ -365,6 +365,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-17 (4)** — PR #1 (`feat/2.7b-custos`, que contém 2.5–2.7, 2.7b Parte 1, vendedores e impressão do histórico) **mergeado na `main`** pelo usuário. Criado o branch `feat/2.7b-codigo-barras` a partir da `main` para a 2.7b Parte 2. Próximo passo: investigar e propor o desenho da Parte 2.
 - **2026-10-17 (3)** — Usuário concluiu e aprovou todo o roteiro de testes dos vendedores no PDV (venda com código certo/errado/sem código, reserva iniciada e finalizada por vendedores diferentes, mesmo código em lojas diferentes, relatórios do histórico). Próximo passo: levar `feat/2.7b-custos` (que já contém a 2.7) para a `main`, com aprovação.
 - **2026-10-17 (2)** — Botão **Imprimir** no Histórico de Vendas (aprovado): imprime/salva PDF do que está filtrado (Data, Loja, Relatório), com cabeçalho (empresa, loja, período, quem imprimiu), sem menu/botões/coluna Ações; Detalhado em A4 paisagem. Arquivo `KanguruERP/src/components/historyPrint.ts`. Sem mudança no banco. Usuário concluiu e pediu para voltar ao cronograma.
 - **2026-10-17** — Vendedores no PDV implementados (migration 20261017 + PDV + ERP: cadastro com código, Histórico de Vendas com Data/Loja/Relatório Simplificado-Analítico-Detalhado e coluna Vendedor). Builds do ERP e do PDV ok. Próximo passo: aplicar a migration (com aprovação) e testar.
