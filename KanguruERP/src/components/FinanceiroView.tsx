@@ -33,8 +33,10 @@ import {
   Search,
   AlertCircle,
   ShoppingBag,
-  Trash2
+  Trash2,
+  Printer
 } from 'lucide-react';
+import { printSalesHistory } from './historyPrint';
 import {
   CONSOLIDATED,
   DEPOSIT_PAYMENT_KEY,
@@ -124,6 +126,30 @@ export default function FinanceiroView({
   const historyPendingTotal = historySales.filter(sale => sale.status === 'PENDENTE_APROVACAO').reduce((sum, sale) => sum + sale.grossAmount, 0);
   const historyPayments = Array.from(paymentBreakdown(historyCompleted).entries()).sort((a, b) => b[1] - a[1]);
   const historySellers = sellerBreakdown(historyCompleted);
+  const historyScopeLabel = activeHistoryScope === CONSOLIDATED ? 'Consolidado – todas as lojas' : storeName(activeHistoryScope);
+
+  // Imprime exatamente o que esta filtrado (data, loja e tipo de relatorio).
+  const handlePrintHistory = () => {
+    const company = activeHistoryScope !== CONSOLIDATED
+      ? storeConfigs.find(store => store.unitId === activeHistoryScope)
+      : (storeConfigs.find(store => store.unitId === 'central') ?? stores[0]);
+    printSalesHistory({
+      companyName: company?.legalName || company?.tradeName || '',
+      companyDocument: company?.cnpj,
+      scopeLabel: historyScopeLabel,
+      rangeLabel: historyRangeLabel,
+      mode: historyMode,
+      printedBy: currentUser.name,
+      sales: historySales,
+      completedCount: historyCompleted.length,
+      total: historyTotal,
+      canceledTotal: historyCanceledTotal,
+      pendingTotal: historyPendingTotal,
+      payments: historyPayments,
+      sellers: historySellers,
+      storeName,
+    });
+  };
 
   // DRE: mes escolhido + semana ('all' = mes inteiro)
   const [dreMonth, setDreMonth] = useState<string>(() => monthKeyOf(new Date().toISOString()));
@@ -398,6 +424,14 @@ export default function FinanceiroView({
               <p className="text-[11px] text-slate-500 pb-2">
                 {historyRangeLabel} · {activeHistoryScope === CONSOLIDATED ? 'Todas as lojas' : storeName(activeHistoryScope)}
               </p>
+              <button
+                type="button"
+                onClick={handlePrintHistory}
+                className="ml-auto flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg shadow-sm transition"
+              >
+                <Printer className="w-4 h-4" />
+                Imprimir
+              </button>
             </div>
           </div>
 
