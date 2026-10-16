@@ -171,18 +171,53 @@ export function monthWeekKey(timestamp: string): string {
   return `${date.getFullYear()}-${month}-${String(week).padStart(2, '0')}`;
 }
 
-// 'Sem 01 - Out (01 a 05/10)'; o ano aparece quando nao e o ano atual.
-export function monthWeekLabel(key: string, now: Date = new Date()): string {
+const MONTH_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+const pad2 = (value: number) => String(value).padStart(2, '0');
+
+// Dias que uma semana do mes cobre.
+export function monthWeekRange(key: string): { year: number; month: number; week: number; startDay: number; endDay: number } {
   const [year, month, week] = key.split('-').map(Number);
   const firstDay = new Date(year, month - 1, 1);
   const lastDay = new Date(year, month, 0).getDate();
   const mondayOffset = (firstDay.getDay() + 6) % 7;
-  const startDay = Math.max(1, (week - 1) * 7 - mondayOffset + 1);
-  const endDay = Math.min(lastDay, week * 7 - mondayOffset);
+  return {
+    year,
+    month,
+    week,
+    startDay: Math.max(1, (week - 1) * 7 - mondayOffset + 1),
+    endDay: Math.min(lastDay, week * 7 - mondayOffset),
+  };
+}
+
+// 'Sem 01 - Out (01 a 05/10)'; o ano aparece quando nao e o ano atual.
+export function monthWeekLabel(key: string, now: Date = new Date()): string {
+  const { year, month, week, startDay, endDay } = monthWeekRange(key);
   const monthLabel = MONTH_ABBREVIATIONS[month - 1] + (year !== now.getFullYear() ? `/${year}` : '');
-  const pad = (value: number) => String(value).padStart(2, '0');
-  const days = startDay === endDay ? `${pad(startDay)}/${pad(month)}` : `${pad(startDay)} a ${pad(endDay)}/${pad(month)}`;
-  return `Sem ${pad(week)} - ${monthLabel} (${days})`;
+  const days = startDay === endDay ? `${pad2(startDay)}/${pad2(month)}` : `${pad2(startDay)} a ${pad2(endDay)}/${pad2(month)}`;
+  return `Sem ${pad2(week)} - ${monthLabel} (${days})`;
+}
+
+// Chave do mes ('YYYY-MM') e nome por extenso ('Outubro 2026').
+export const monthKeyOf = (timestamp: string) => toLocalDateKey(timestamp).slice(0, 7);
+export function monthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split('-').map(Number);
+  return `${MONTH_NAMES[month - 1]} ${year}`;
+}
+export function shiftMonthKey(monthKey: string, delta: number): string {
+  const [year, month] = monthKey.split('-').map(Number);
+  const date = new Date(year, month - 1 + delta, 1);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+}
+
+// Todas as semanas de um mes, em ordem.
+export function weeksOfMonth(monthKey: string): string[] {
+  const [year, month] = monthKey.split('-').map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  const keys = new Set<string>();
+  for (let day = 1; day <= lastDay; day += 1) {
+    keys.add(monthWeekKey(new Date(year, month - 1, day).toISOString()));
+  }
+  return Array.from(keys);
 }
 
 export const formatMoney = (value: number) =>

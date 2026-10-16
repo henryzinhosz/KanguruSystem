@@ -251,7 +251,6 @@ export default function App() {
               inventory={inventory}
               addExpense={addExpense}
               updateStoreConfig={updateStoreConfig}
-              registerSale={registerSale}
               cancelSale={cancelSale}
             />
           )}
