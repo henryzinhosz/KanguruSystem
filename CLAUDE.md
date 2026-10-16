@@ -104,7 +104,7 @@ por operador (inspirado no Linx Degust).
 | 2.5 Serviços e carrinho (`services`, `max_item_discount_percent`, `search_pos_items`, desconto por linha) | ✅ |
 | 2.6 Reserva de produto (`product_reservations`, sinal em ledger próprio, preço/desconto congelado) | ✅ |
 | 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada e testada (a)–(g) em 2026-10-14; falta só o PR para `main` (seção 6) |
-| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) implementada e migration aplicada; testes pendentes. Partes 2–3 depois (seção 7) |
+| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) ✅ implementada, migrations 20261015 e 20261016 aplicadas e **testes aprovados** (2026-10-16). Partes 2–3 depois (seção 7) |
 | 2.8 Finalização da venda (fiscal, garantia) | ⚪ Não iniciada |
 | 2.9 Trocas e devoluções | ⚪ |
 | 2.10 Interface para tablet | ⚪ (design visual adiado de propósito para o fim) |
@@ -349,6 +349,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-16 (3)** — Usuário aplicou a 20261016 e aprovou todos os testes da Parte 1. Novo pedido em desenho: filtros/relatórios do Histórico de Vendas (Data, Loja, Simplificado/Analítico/Detalhado), coluna Vendedor e **código de vendedor no PDV** (único por tenant+loja).
 - **2026-10-16 (2)** — Ajustes pedidos nos testes: semanas como "Sem 01 - Out (01 a 04/10)"; DRE com seletor de mês/semana e total do mês; **decisão: vendas só pelo PDV** (removido o lançamento manual do Financeiro, que vira Histórico de Vendas/estorno); corrigido apagamento de formulários ao voltar para a janela (renovação do login). Migration `20261016_serial_entry_duplicate_message.sql` (mensagem de serial repetido) **ainda não aplicada**.
 - **2026-10-16** — Parte 1 implementada (migration + ERP), `tsc` e `vite build` ok. Próximo passo: usuário conferir o md5 (seção 7), aplicar a migration com aprovação e testar o roteiro da Parte 1.
 
