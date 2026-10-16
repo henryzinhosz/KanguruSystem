@@ -264,6 +264,20 @@ Primeiro passo prático quando a Zebra chegar: teste de impressão ZPL a partir 
 
 ---
 
+### Vendedores no PDV + relatórios do Histórico de Vendas (desenho de 2026-10-16)
+Decisões do usuário:
+- Código de vendedor **obrigatório** em toda venda (sem código não finaliza) e **obrigatório no cadastro** do vendedor.
+- Código de **2 dígitos** (01 a 99). Único por **tenant + loja** (mesmo código pode existir em lojas diferentes e em
+  franqueados diferentes, nunca dois iguais na mesma loja). Vendedor com código precisa ter loja.
+- **Reserva convertida: a venda fica com quem INICIOU a reserva** (comissão de quem convenceu o cliente).
+- Código identifica, não é senha (aceito pelo usuário).
+- Venda guarda código e nome do vendedor do momento (congelado). Vendas antigas: sem vendedor.
+- Histórico de Vendas: coluna Vendedor entre Data e Fatura/Doc; seletores Data (Hoje/Esta semana/Personalizado),
+  Loja (Consolidado/loja) e Relatório (Simplificado / Analítico / Detalhado); estornadas fora dos totais.
+- Dados atuais serão apagados, então vendedores antigos sem loja/código não são problema.
+
+---
+
 ## 8. Pendências e ideias em aberto (não bloqueantes)
 
 1. **Terminologia/UX:** renomear "SKU" para "Código" na interface; leitor preenchendo o campo; código automático a partir de `10100` quando o franqueado esquecer.
