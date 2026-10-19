@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { terminalAuth } from '../services/supabase/auth';
 import {
+  findPosSerialUnit,
   getPosAvailableSerialUnits,
   searchPosItems,
   type PosCatalogItem,
@@ -201,6 +202,14 @@ function valueAsNumber(value: string): number {
 function normalizeSku(value: string): string {
   return value.trim().toUpperCase();
 }
+
+// Aviso quando o serial bipado existe mas nao pode ser vendido aqui.
+const SCANNED_SERIAL_MESSAGES: Record<string, string> = {
+  VENDIDO: 'já foi vendida',
+  RESERVADO: 'está reservada para um cliente (finalize pela tela de reservas)',
+  PERDIDO: 'está marcada como perdida no estoque',
+  OUTRA_LOJA: 'pertence ao estoque de outra loja',
+};
 
 function warrantyLabel(months: number | null): string {
   if (months === null) return 'Garantia nao cadastrada';
@@ -478,6 +487,21 @@ export function App() {
         );
       }
 
+      // Nao e codigo de produto: pode ser o serial (ou IMEI) de uma unidade bipada.
+      if (exactSkuMatches.length === 0 && !/\s/.test(trimmedQuery)) {
+        // Falha nesta consulta extra nao pode impedir a busca normal por nome.
+        const scanned = await findPosSerialUnit(trimmedQuery).catch(() => null);
+        if (scanned) {
+          if (scanned.serialUnit) {
+            addSerialUnitToCart(scanned.product, scanned.serialUnit);
+          } else {
+            setMessage(`A unidade ${scanned.serialNumber} (${scanned.product.name}) ${SCANNED_SERIAL_MESSAGES[scanned.status] ?? 'não está disponível para venda'}.`);
+            setCatalogItems([]);
+          }
+          return;
+        }
+      }
+
       setCatalogItems(found);
     } catch (error) {
       setMessage(errorMessage(error));
@@ -557,21 +581,26 @@ export function App() {
     setSerialUnitsError(null);
   }
 
+  function addSerialUnitToCart(product: PosCatalogItem, serialUnit: PosSerialUnit) {
+    const alreadyInCart = cart.some((item) => item.serialUnit?.serialUnitId === serialUnit.serialUnitId);
+    if (!alreadyInCart) {
+      setCart((current) => current.some((item) => item.serialUnit?.serialUnitId === serialUnit.serialUnitId)
+        ? current
+        : [...current, { ...product, quantity: 1, discountPercent: 0, serialUnit }]);
+    }
+    setCatalogItems([]);
+    setQuery('');
+    setMessage(alreadyInCart
+      ? 'Esta unidade serializada ja esta no carrinho.'
+      : `Unidade ${serialUnit.serialNumber} adicionada ao carrinho.`);
+  }
+
   function addSelectedSerialUnit() {
     if (!serialProduct || !selectedSerialUnitId) return;
     const serialUnit = serialUnits.find((unit) => unit.serialUnitId === selectedSerialUnitId);
     if (!serialUnit) return;
 
-    setCart((current) => {
-      if (current.some((item) => item.serialUnit?.serialUnitId === serialUnit.serialUnitId)) {
-        setMessage('Esta unidade serializada ja esta no carrinho.');
-        return current;
-      }
-      return [...current, { ...serialProduct, quantity: 1, discountPercent: 0, serialUnit }];
-    });
-    setCatalogItems([]);
-    setQuery('');
-    setMessage(`Unidade ${serialUnit.serialNumber} adicionada ao carrinho.`);
+    addSerialUnitToCart(serialProduct, serialUnit);
     closeSerialUnitModal();
   }
 
@@ -1267,7 +1296,7 @@ export function App() {
           <form className="search-form" onSubmit={handleSearch}>
             <input
               ref={searchInputRef}
-              placeholder="Buscar por nome, marca ou SKU"
+              placeholder="Bipe o código ou serial, ou busque por nome/marca"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               autoFocus

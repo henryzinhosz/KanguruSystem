@@ -943,7 +943,8 @@ export const supabaseService = {
     }));
   },
 
-  async upsertProduct(p: Product): Promise<void> {
+  // Devolve o codigo gravado: vazio vira o proximo numero automatico (trigger do banco).
+  async upsertProduct(p: Product): Promise<string> {
     const payload = {
       id: p.id,
       sku: p.sku,
@@ -962,11 +963,21 @@ export const supabaseService = {
       min_stock: p.minStock ?? null
     };
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('products')
-      .upsert(payload);
+      .upsert(payload)
+      .select('sku')
+      .single();
 
     if (error) throw error;
+    return data.sku;
+  },
+
+  // Proximo codigo automatico (so para mostrar no formulario).
+  async getNextItemCode(): Promise<string> {
+    const { data, error } = await supabase.rpc('get_next_item_code');
+    if (error) throw error;
+    return String(data ?? '');
   },
 
   async deleteProduct(id: string): Promise<void> {
@@ -987,16 +998,17 @@ export const supabaseService = {
     }));
   },
 
-  async upsertService(service: Service): Promise<void> {
-    const { error } = await supabase.from('services').upsert({
+  async upsertService(service: Service): Promise<string> {
+    const { data, error } = await supabase.from('services').upsert({
       id: service.id,
       sku: service.sku.trim(),
       name: service.name.trim(),
       category: service.category.trim(),
       sell_price: service.sellPrice,
       is_active: service.isActive
-    });
+    }).select('sku').single();
     if (error) throw error;
+    return data.sku;
   },
 
   async deleteService(id: string): Promise<void> {

@@ -106,7 +106,7 @@ export default function VendasView({
   // Open Approval details
   const handleOpenApproval = (trade: TradeIn) => {
     setTradeToApprove(trade);
-    setApproveSku(`USED-${trade.category.slice(0, 3).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
+    setApproveSku(`USED-${trade.category.normalize('NFD').replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
     setApproveSellPrice(trade.valuationAmount * 1.5); // auto mark up suggested
   };
 
@@ -401,7 +401,7 @@ export default function VendasView({
               </div>
 
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">SKU Sugerido (Gerado)</label>
+                <label className="font-bold text-slate-700">Código Sugerido (Gerado)</label>
                 <input
                   type="text"
                   required

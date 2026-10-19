@@ -1,6 +1,8 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Check, Pencil, Plus, Save, Trash2, Wrench } from 'lucide-react';
 import { Service } from '../types';
+import { supabaseService } from '../db/supabaseService';
+import { sanitizeItemCode } from '../db/itemCode';
 
 interface ServicosViewProps {
   services: Service[];
@@ -17,13 +19,25 @@ export default function ServicosView({ services, saveService, deleteService }: S
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [nextItemCode, setNextItemCode] = useState('');
+
+  // Proximo codigo automatico (produtos e servicos usam a mesma numeracao).
+  useEffect(() => {
+    if (editingId) return;
+    let active = true;
+    supabaseService.getNextItemCode()
+      .then(code => { if (active) setNextItemCode(code); })
+      .catch(() => { if (active) setNextItemCode(''); });
+    return () => { active = false; };
+  }, [editingId, services.length]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
     setMessage('');
-    if (!form.sku.trim() || !form.name.trim() || form.sellPrice < 0) {
-      setError('Informe código, nome e preço válido para o serviço.');
+    // Codigo em branco: o banco gera o proximo numero automatico.
+    if (!form.name.trim() || form.sellPrice < 0) {
+      setError('Informe nome e preço válido para o serviço.');
       return;
     }
 
@@ -106,7 +120,7 @@ export default function ServicosView({ services, saveService, deleteService }: S
           <div className="flex items-center gap-2"><Wrench className="w-5 h-5 text-blue-600" /><h3 className="text-sm font-bold text-slate-900">{editingId ? 'Editar serviço' : 'Novo serviço'}</h3></div>
           {error && <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{error}</p>}
           {message && <p role="status" className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-2"><Check className="w-4 h-4" />{message}</p>}
-          <label className="block text-xs font-bold text-slate-700">Código<input required value={form.sku} onChange={event => setForm({ ...form, sku: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono outline-none" /></label>
+          <label className="block text-xs font-bold text-slate-700">Código<input value={form.sku} placeholder={nextItemCode ? `Automático: ${nextItemCode}` : 'Automático'} onChange={event => setForm({ ...form, sku: sanitizeItemCode(event.target.value) })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono outline-none" /><span className="block mt-1 text-[10px] font-normal text-slate-400">Deixe em branco para gerar o próximo número. Só letras, números e hífen.</span></label>
           <label className="block text-xs font-bold text-slate-700">Nome<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 outline-none" /></label>
           <label className="block text-xs font-bold text-slate-700">Categoria<input required value={form.category} onChange={event => setForm({ ...form, category: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 outline-none" /></label>
           <label className="block text-xs font-bold text-slate-700">Preço de venda (R$)<input required type="number" min="0" step="0.01" value={form.sellPrice} onChange={event => setForm({ ...form, sellPrice: Number(event.target.value) })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 outline-none" /></label>

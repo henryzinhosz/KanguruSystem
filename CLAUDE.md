@@ -104,7 +104,7 @@ por operador (inspirado no Linx Degust).
 | 2.5 Serviços e carrinho (`services`, `max_item_discount_percent`, `search_pos_items`, desconto por linha) | ✅ |
 | 2.6 Reserva de produto (`product_reservations`, sinal em ledger próprio, preço/desconto congelado) | ✅ |
 | 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada, testada e na `main` (PR #1, 2026-10-17) |
-| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) ✅ implementada, migrations 20261015 e 20261016 aplicadas e **testes aprovados** (2026-10-16). Partes 2–3 depois (seção 7) |
+| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) ✅ testada e na `main`. Parte 2 (código de barras) implementada em 2026-10-18, migration 20261018 **não aplicada**. Parte 3 (Zebra) aguarda impressora (seção 7) |
 | 2.8 Finalização da venda (fiscal, garantia) | ⚪ Não iniciada |
 | 2.9 Trocas e devoluções | ⚪ |
 | 2.10 Interface para tablet | ⚪ (design visual adiado de propósito para o fim) |
@@ -262,6 +262,23 @@ Branch: `feat/2.7b-custos` (criado a partir de `feat/2.7-split-payments`, que ai
 
 Primeiro passo prático quando a Zebra chegar: teste de impressão ZPL a partir do Windows/PDV.
 
+### Parte 2 — código de barras (desenho APROVADO e implementado em 2026-10-18; migration `20261018_item_codes.sql` NÃO aplicada)
+Decisões: "SKU" vira **"Código"** nas telas (coluna `sku` continua no banco); **uma numeração só** para produtos e
+serviços do tenant; código só **letras, números e hífen**, maiúsculo, até 30; código em branco → banco gera o próximo
+número a partir de **10100**; código do fabricante não é usado (decisão de 2026-10-14). Teste com leitor físico fica
+para quando o usuário tiver o leitor em mãos (junto com a Zebra) — por ora testar digitando + Enter.
+- Migration: trigger `zz_item_code_trigger` (função `enforce_item_code`, sem GRANT) em `products` e `services` —
+  normaliza, valida, gera o número (lock por tenant) e impede código repetido entre as duas tabelas; não revalida código
+  antigo quando só outro campo muda (inclusive no upsert do ERP). Prefixo `zz_` = roda depois do trigger de tenant.
+  `next_item_code_for_tenant` (interna), `get_next_item_code()` (ERP, mostra o próximo), `find_pos_serial_unit(p_code)`
+  (PDV, sessão de terminal; serial ou IMEI → unidade da loja; status DISPONIVEL/VENDIDO/RESERVADO/PERDIDO/OUTRA_LOJA).
+  Nenhuma RPC de venda/reserva/caixa/estorno mudou. `search_pos_items` não mudou (md5 vivo 9daace98573cb66bab656122be988433).
+- ERP: cadastro de produto e de serviço com Código opcional ("Automático: 10105"), erro do banco aparece na tela (antes o
+  cadastro de produto falhava em silêncio); Entrada de Estoque: código exato + Enter seleciona o produto; Enter no
+  serial pula/cria a próxima linha. Regra no front: `src/db/itemCode.ts`.
+- PDV: código exato → carrinho (já existia); senão tenta serial/IMEI → unidade direto no carrinho ou aviso do motivo.
+  O PDV novo funciona mesmo antes da migration (a consulta extra falha em silêncio).
+
 ---
 
 ### Vendedores no PDV + relatórios do Histórico de Vendas (desenho de 2026-10-16)
@@ -365,6 +382,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-18** — 2.7b Parte 2 (código de barras) aprovada e implementada no branch `feat/2.7b-codigo-barras` (migration 20261018 + ERP + PDV; builds ok). Próximo passo: usuário conferir os triggers (consulta enviada), aplicar a migration com aprovação e testar. `KanguruPDV/.env.example` aparece apagado no git sem explicação — perguntado ao usuário, fora do commit.
 - **2026-10-17 (4)** — PR #1 (`feat/2.7b-custos`, que contém 2.5–2.7, 2.7b Parte 1, vendedores e impressão do histórico) **mergeado na `main`** pelo usuário. Criado o branch `feat/2.7b-codigo-barras` a partir da `main` para a 2.7b Parte 2. Próximo passo: investigar e propor o desenho da Parte 2.
 - **2026-10-17 (3)** — Usuário concluiu e aprovou todo o roteiro de testes dos vendedores no PDV (venda com código certo/errado/sem código, reserva iniciada e finalizada por vendedores diferentes, mesmo código em lojas diferentes, relatórios do histórico). Próximo passo: levar `feat/2.7b-custos` (que já contém a 2.7) para a `main`, com aprovação.
 - **2026-10-17 (2)** — Botão **Imprimir** no Histórico de Vendas (aprovado): imprime/salva PDF do que está filtrado (Data, Loja, Relatório), com cabeçalho (empresa, loja, período, quem imprimiu), sem menu/botões/coluna Ações; Detalhado em A4 paisagem. Arquivo `KanguruERP/src/components/historyPrint.ts`. Sem mudança no banco. Usuário concluiu e pediu para voltar ao cronograma.

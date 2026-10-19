@@ -18,6 +18,8 @@ import {
   StockEntryLine,
 } from '../types';
 import { formatMoney } from '../db/finance';
+import { supabaseService } from '../db/supabaseService';
+import { sanitizeItemCode } from '../db/itemCode';
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
 const DEFAULT_MIN_STOCK = 2;
@@ -67,7 +69,7 @@ interface EstoqueViewProps {
     initialStoreId?: string,
     initialQty?: number,
     initialSerials?: string[]
-  ) => Product;
+  ) => Promise<Product>;
   editProduct: (product: Product) => void;
   registerMovement: (
     productId: string,
@@ -138,6 +140,9 @@ export default function EstoqueView({
   const [newProdStore, setNewProdStore] = useState('');
   const [newProdQty, setNewProdQty] = useState(0);
   const [newProdMinStock, setNewProdMinStock] = useState('');
+  const [newProdError, setNewProdError] = useState('');
+  const [newProdSaving, setNewProdSaving] = useState(false);
+  const [nextItemCode, setNextItemCode] = useState('');
 
   // Form states: Stock Entry
   const [stockEntrySearch, setStockEntrySearch] = useState('');
@@ -228,19 +233,62 @@ export default function EstoqueView({
     return matchesSearch && matchesCategory;
   });
 
-  // Handle Add Product Submit
-  const handleAddProductSubmit = (e: React.FormEvent) => {
+  // Ao abrir o cadastro, mostra qual sera o proximo codigo automatico.
+  useEffect(() => {
+    if (!showAddProductModal) return;
+    setNewProdError('');
+    let active = true;
+    supabaseService.getNextItemCode()
+      .then(code => { if (active) setNextItemCode(code); })
+      .catch(() => { if (active) setNextItemCode(''); });
+    return () => { active = false; };
+  }, [showAddProductModal]);
+
+  // Leitor de codigo de barras na Entrada de Estoque: codigo exato + Enter seleciona o produto.
+  const handleStockEntrySearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
     e.preventDefault();
-    const trimmedSku = newProdSku.trim();
+    const code = stockEntrySearch.trim().toUpperCase();
+    if (!code) return;
+    const exact = products.filter(product => product.sku.toUpperCase() === code);
+    const match = exact.length === 1 ? exact[0] : (stockEntryResults.length === 1 ? stockEntryResults[0] : null);
+    if (match) {
+      setStockEntryProductId(match.id);
+      setStockEntrySearch('');
+    }
+  };
+
+  // Leitor nos campos de serial: cada bipe (Enter) vai para a proxima linha, criando-a se preciso.
+  const focusSerialInput = (index: number) => requestAnimationFrame(() => {
+    document.querySelector<HTMLInputElement>(`[data-serial-index="${index}"]`)?.focus();
+  });
+  const handleSerialKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, index: number) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (!serializedEntryUnits[index]?.serialNumber.trim()) return;
+    if (index === serializedEntryUnits.length - 1) {
+      setSerializedEntryUnits(previous => [...previous, { ...emptySerializedDraft(), unitCost: previous[previous.length - 1]?.unitCost ?? '' }]);
+    }
+    focusSerialInput(index + 1);
+  };
+
+  // Handle Add Product Submit
+  const handleAddProductSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setNewProdError('');
+    const trimmedSku = sanitizeItemCode(newProdSku.trim());
     const trimmedName = newProdName.trim();
     const trimmedBrand = newProdBrand.trim();
     const trimmedNcm = newProdNcm.trim();
 
-    if (!trimmedName || !trimmedSku) return;
+    // Codigo em branco: o banco gera o proximo numero automatico.
+    if (!trimmedName) return;
 
     const minStockValue = newProdMinStock.trim() === '' ? null : Math.max(0, parseInt(newProdMinStock, 10) || 0);
 
-    addProduct({
+    setNewProdSaving(true);
+    try {
+      await addProduct({
       sku: trimmedSku,
       name: trimmedName,
       category: newProdCategory,
@@ -252,7 +300,13 @@ export default function EstoqueView({
       isSerialized: newProdSerialized,
       isUsed: false,
       minStock: minStockValue
-    });
+      });
+    } catch (error: any) {
+      setNewProdError(error?.message || 'Não foi possível cadastrar o produto.');
+      return;
+    } finally {
+      setNewProdSaving(false);
+    }
 
     // Reset Form
     setNewProdName('');
@@ -564,7 +618,7 @@ export default function EstoqueView({
               <input
                 id="search-product"
                 type="text"
-                placeholder="Pesquisar por nome ou SKU..."
+                placeholder="Pesquisar por nome ou código..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-50 text-slate-800 text-xs rounded-lg pl-9 pr-4 py-2.5 border border-slate-200 outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
@@ -621,7 +675,7 @@ export default function EstoqueView({
                           Estoque: {totalStock} un
                         </span>
                         <h3 className="text-sm font-bold text-slate-900 mt-1 font-sans">{p.name}</h3>
-                        <p className="text-xs text-slate-400 font-mono mt-0.5">SKU: {p.sku}</p>
+                        <p className="text-xs text-slate-400 font-mono mt-0.5">Código: {p.sku}</p>
                       </div>
                       <div className="text-right">
                         <span className="text-[10px] text-slate-400 font-mono block">Preço de Venda</span>
@@ -748,14 +802,15 @@ export default function EstoqueView({
             )}
 
             <div className="space-y-1.5">
-              <label className="font-medium text-slate-700 text-xs">Buscar produto por SKU ou nome</label>
+              <label className="font-medium text-slate-700 text-xs">Buscar produto por código ou nome <span className="font-normal text-slate-400">(pode bipar o código)</span></label>
               <div className="relative">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={stockEntrySearch}
                   onChange={(e) => setStockEntrySearch(e.target.value)}
-                  placeholder="Digite o SKU ou nome do produto"
+                  onKeyDown={handleStockEntrySearchKeyDown}
+                  placeholder="Digite ou bipe o código, ou digite o nome do produto"
                   className="w-full bg-slate-50 text-slate-800 text-xs rounded-lg pl-9 pr-4 py-2.5 border border-slate-200 outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
                 />
               </div>
@@ -779,7 +834,7 @@ export default function EstoqueView({
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-bold text-slate-900">{product.name}</p>
-                        <p className="text-[11px] text-slate-500 font-mono">SKU: {product.sku}</p>
+                        <p className="text-[11px] text-slate-500 font-mono">Código: {product.sku}</p>
                       </div>
                       <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-500">
                         {productStock} un
@@ -802,7 +857,7 @@ export default function EstoqueView({
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Produto selecionado</p>
                     <h4 className="text-sm font-bold text-slate-900">{selectedStockEntryProduct.name}</h4>
-                    <p className="text-[11px] text-slate-500 font-mono">SKU: {selectedStockEntryProduct.sku}</p>
+                    <p className="text-[11px] text-slate-500 font-mono">Código: {selectedStockEntryProduct.sku}</p>
                   </div>
                   <button
                     type="button"
@@ -889,6 +944,8 @@ export default function EstoqueView({
                           <input
                             type="text"
                             value={unit.serialNumber}
+                            data-serial-index={index}
+                            onKeyDown={(e) => handleSerialKeyDown(e, index)}
                             onChange={(e) => setSerializedEntryUnits(previous => previous.map((current, currentIndex) => currentIndex === index ? { ...current, serialNumber: e.target.value } : current))}
                             placeholder="Ex: NB-X-0001"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
@@ -1092,7 +1149,7 @@ export default function EstoqueView({
                   <option value="">-- Selecione o Produto --</option>
                   {products.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.name} (SKU: {p.sku})
+                      {p.name} (Código: {p.sku})
                     </option>
                   ))}
                 </select>
@@ -1324,7 +1381,7 @@ export default function EstoqueView({
                   }`}>
                     <div>
                       <h4 className="font-bold text-sm">{warrantyQueryResult.product?.name}</h4>
-                      <p className="opacity-80 text-[10px] font-mono">SKU: {warrantyQueryResult.product?.sku} | S/N: {warrantyQuerySerial}</p>
+                      <p className="opacity-80 text-[10px] font-mono">Código: {warrantyQueryResult.product?.sku} | S/N: {warrantyQuerySerial}</p>
                     </div>
                     <span className="font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white/20 text-[10px]">
                       {warrantyQueryResult.status}
@@ -1404,17 +1461,20 @@ export default function EstoqueView({
             </div>
 
             <form onSubmit={handleAddProductSubmit} className="p-5 space-y-4 text-xs font-sans">
+              {newProdError && (
+                <p role="alert" className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-medium">{newProdError}</p>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700">SKU do Produto</label>
+                  <label className="font-bold text-slate-700">Código do Produto</label>
                   <input
                     type="text"
-                    required
-                    placeholder="Ex: GPU-ASUS-4070"
+                    placeholder={nextItemCode ? `Automático: ${nextItemCode}` : 'Automático'}
                     value={newProdSku}
-                    onChange={(e) => setNewProdSku(e.target.value)}
+                    onChange={(e) => setNewProdSku(sanitizeItemCode(e.target.value))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                   />
+                  <p className="text-[10px] text-slate-400">Deixe em branco para gerar o próximo número. Só letras, números e hífen.</p>
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Categoria</label>
@@ -1534,9 +1594,10 @@ export default function EstoqueView({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition"
+                  disabled={newProdSaving}
+                  className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition disabled:opacity-60"
                 >
-                  Confirmar Cadastro
+                  {newProdSaving ? 'Salvando...' : 'Confirmar Cadastro'}
                 </button>
               </div>
             </form>
