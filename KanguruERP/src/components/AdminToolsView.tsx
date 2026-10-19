@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { Supplier, SupplierInvoiceReminder } from '../types';
 import { supabaseService } from '../db/supabaseService';
+import ValueInput from './ValueInput';
 import { 
   Trash2, 
   AlertTriangle, 
@@ -429,12 +430,9 @@ export default function AdminToolsView({
                 {/* Amount (R$) */}
                 <div className="space-y-1">
                   <label className="font-bold text-slate-600 block">Valor da Fatura (R$)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={amount || ''}
-                    onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
+                  <ValueInput
+                    value={amount || null}
+                    onValueChange={(value) => setAmount(value ?? 0)}
                     className="w-full bg-white border border-slate-200 rounded-lg p-2 outline-none font-mono font-semibold"
                   />
                 </div>

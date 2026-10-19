@@ -3,6 +3,7 @@ import { Check, Pencil, Plus, Save, Trash2, Wrench } from 'lucide-react';
 import { Service } from '../types';
 import { supabaseService } from '../db/supabaseService';
 import { sanitizeItemCode } from '../db/itemCode';
+import ValueInput from './ValueInput';
 
 interface ServicosViewProps {
   services: Service[];
@@ -123,7 +124,7 @@ export default function ServicosView({ services, saveService, deleteService }: S
           <label className="block text-xs font-bold text-slate-700">Código<input value={form.sku} placeholder={nextItemCode ? `Automático: ${nextItemCode}` : 'Automático'} onChange={event => setForm({ ...form, sku: sanitizeItemCode(event.target.value) })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono outline-none" /><span className="block mt-1 text-[10px] font-normal text-slate-400">Deixe em branco para gerar o próximo número. Só letras, números e hífen.</span></label>
           <label className="block text-xs font-bold text-slate-700">Nome<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 outline-none" /></label>
           <label className="block text-xs font-bold text-slate-700">Categoria<input required value={form.category} onChange={event => setForm({ ...form, category: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 outline-none" /></label>
-          <label className="block text-xs font-bold text-slate-700">Preço de venda (R$)<input required type="number" min="0" step="0.01" value={form.sellPrice} onChange={event => setForm({ ...form, sellPrice: Number(event.target.value) })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 outline-none" /></label>
+          <label className="block text-xs font-bold text-slate-700">Preço de venda (R$)<ValueInput required value={form.sellPrice || null} onValueChange={value => setForm({ ...form, sellPrice: value ?? 0 })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 outline-none" /></label>
           <label className="flex items-center gap-2 text-xs font-bold text-slate-700"><input type="checkbox" checked={form.isActive} onChange={event => setForm({ ...form, isActive: event.target.checked })} className="w-4 h-4" />Serviço ativo para venda</label>
           <div className="flex gap-2 pt-1">
             {editingId && <button type="button" onClick={() => { setEditingId(null); setForm(emptyForm); }} className="px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg">Cancelar</button>}

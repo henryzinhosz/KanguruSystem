@@ -37,6 +37,7 @@ import {
   Printer
 } from 'lucide-react';
 import { printSalesHistory } from './historyPrint';
+import ValueInput from './ValueInput';
 import {
   CONSOLIDATED,
   DEPOSIT_PAYMENT_KEY,
@@ -679,13 +680,10 @@ export default function FinanceiroView({
 
               <div className="space-y-1">
                 <label className="font-bold text-slate-700">Valor da Saída (R$)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
+                <ValueInput
                   required
-                  value={expenseAmount || ''}
-                  onChange={(e) => setExpenseAmount(parseFloat(e.target.value) || 0)}
+                  value={expenseAmount || null}
+                  onValueChange={(value) => setExpenseAmount(value ?? 0)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 outline-none font-mono"
                 />
               </div>
@@ -1012,12 +1010,10 @@ export default function FinanceiroView({
                   <span>Custo Fixo Mensal (R$)</span>
                   <span className="text-[10px] text-slate-400">Aluguel + Contas + Salários + Custos fixos</span>
                 </label>
-                <input
-                  type="number"
-                  min="0"
+                <ValueInput
                   required
-                  value={editFixedCost || ''}
-                  onChange={(e) => setEditFixedCost(parseFloat(e.target.value) || 0)}
+                  value={editFixedCost || null}
+                  onValueChange={(value) => setEditFixedCost(value ?? 0)}
                   className="w-full bg-slate-50 border border-slate-200 rounded p-2 outline-none font-mono"
                 />
               </div>

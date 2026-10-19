@@ -20,6 +20,7 @@ import {
 import { formatMoney } from '../db/finance';
 import { supabaseService } from '../db/supabaseService';
 import { sanitizeItemCode } from '../db/itemCode';
+import ValueInput from './ValueInput';
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
 const DEFAULT_MIN_STOCK = 2;
@@ -453,6 +454,11 @@ export default function EstoqueView({
       return;
     }
 
+    if (transferQty < 1) {
+      setTransferError('Informe a quantidade a transferir.');
+      return;
+    }
+
     // Check inventory availability at transferFrom source
     const prodInv = inventory.find(i => i.productId === transferProductId);
     const sourceQty = prodInv?.quantities[transferFrom]?.qty || 0;
@@ -754,13 +760,11 @@ export default function EstoqueView({
                         {isAdmin ? (
                           <label className="flex items-center gap-1 text-slate-400" title="Abaixo deste número o produto entra nos alertas do Dashboard. Em branco = padrão (2).">
                             <span>Mínimo:</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={minStockDraft ?? (p.minStock == null ? '' : String(p.minStock))}
+                            <ValueInput
+                              decimals={0}
+                              value={minStockDraft !== undefined ? (minStockDraft === '' ? null : Number(minStockDraft)) : p.minStock}
                               placeholder={String(DEFAULT_MIN_STOCK)}
-                              onChange={(e) => setMinStockDrafts(previous => ({ ...previous, [p.id]: e.target.value }))}
+                              onValueChange={(value) => setMinStockDrafts(previous => ({ ...previous, [p.id]: value == null ? '' : String(value) }))}
                               onBlur={() => saveMinStock(p)}
                               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                               className="w-12 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-center font-mono text-slate-700 outline-none focus:ring-1 focus:ring-blue-500"
@@ -911,12 +915,9 @@ export default function EstoqueView({
                     <div className="flex flex-wrap items-end gap-2 bg-slate-50 border border-slate-200 rounded-xl p-3">
                       <div className="space-y-1">
                         <label className="font-medium text-slate-700">Mesmo custo para todas as unidades (R$)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={serializedApplyAllCost}
-                          onChange={(e) => setSerializedApplyAllCost(e.target.value)}
+                        <ValueInput
+                          value={parseMoneyInput(serializedApplyAllCost)}
+                          onValueChange={(value) => setSerializedApplyAllCost(value == null ? '' : String(value))}
                           placeholder="Ex: 4135,00"
                           className="w-40 bg-white border border-slate-200 rounded-lg p-2 outline-none font-mono"
                         />
@@ -957,12 +958,9 @@ export default function EstoqueView({
                             placeholder="Opcional"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                           />
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={unit.unitCost}
-                            onChange={(e) => setSerializedEntryUnits(previous => previous.map((current, currentIndex) => currentIndex === index ? { ...current, unitCost: e.target.value } : current))}
+                          <ValueInput
+                            value={parseMoneyInput(unit.unitCost)}
+                            onValueChange={(value) => setSerializedEntryUnits(previous => previous.map((current, currentIndex) => currentIndex === index ? { ...current, unitCost: value == null ? '' : String(value) } : current))}
                             placeholder="0,00"
                             aria-label="Custo de compra da unidade"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono text-right"
@@ -993,12 +991,9 @@ export default function EstoqueView({
                 <div className="space-y-3">
                 <div className="space-y-1 max-w-xs">
                   <label className="font-medium text-slate-700">Custo unitário desta compra (R$)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={stockEntryUnitCost}
-                    onChange={(e) => setStockEntryUnitCost(e.target.value)}
+                  <ValueInput
+                    value={parseMoneyInput(stockEntryUnitCost)}
+                    onValueChange={(value) => setStockEntryUnitCost(value == null ? '' : String(value))}
                     placeholder="Ex: 11,00"
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                   />
@@ -1043,13 +1038,12 @@ export default function EstoqueView({
                               )}
                             </td>
                             <td className="px-3 py-3 rounded-r-xl border border-slate-200 border-l-0">
-                              <input
-                                type="number"
-                                min="0"
-                                value={stockEntryQuantities[store.unitId] ?? ''}
-                                onChange={(e) => setStockEntryQuantities(previous => ({
+                              <ValueInput
+                                decimals={0}
+                                value={stockEntryQuantities[store.unitId] ? Number(stockEntryQuantities[store.unitId]) : null}
+                                onValueChange={(value) => setStockEntryQuantities(previous => ({
                                   ...previous,
-                                  [store.unitId]: e.target.value
+                                  [store.unitId]: value == null ? '' : String(value)
                                 }))}
                                 className="w-full bg-white border border-slate-200 rounded-lg p-2 outline-none text-center font-mono"
                               />
@@ -1186,11 +1180,10 @@ export default function EstoqueView({
               {/* Quantity */}
               <div className="space-y-1.5">
                 <label className="font-medium text-slate-700">Quantidade</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={transferQty}
-                  onChange={(e) => setTransferQty(parseInt(e.target.value) || 1)}
+                <ValueInput
+                  decimals={0}
+                  value={transferQty || null}
+                  onValueChange={(value) => setTransferQty(value ?? 0)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                 />
               </div>
@@ -1530,35 +1523,27 @@ export default function EstoqueView({
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700" title="Usado só quando a loja ainda não tem custo de compra registrado. O custo real vem da Entrada de Estoque.">Custo padrão (R$)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={newProdCost || ''}
-                    onChange={(e) => setNewProdCost(parseFloat(e.target.value) || 0)}
+                  <ValueInput
+                    value={newProdCost || null}
+                    onValueChange={(value) => setNewProdCost(value ?? 0)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Preço Venda (R$)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={newProdSell || ''}
-                    onChange={(e) => setNewProdSell(parseFloat(e.target.value) || 0)}
+                  <ValueInput
+                    value={newProdSell || null}
+                    onValueChange={(value) => setNewProdSell(value ?? 0)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Estoque mínimo</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={newProdMinStock}
+                  <ValueInput
+                    decimals={0}
+                    value={newProdMinStock === '' ? null : Number(newProdMinStock)}
                     placeholder={`Padrão: ${DEFAULT_MIN_STOCK}`}
-                    onChange={(e) => setNewProdMinStock(e.target.value)}
+                    onValueChange={(value) => setNewProdMinStock(value == null ? '' : String(value))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                   />
                 </div>

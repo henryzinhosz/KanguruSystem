@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Building2, Check, Pencil, Plus, Save, Store, Trash2, UserRound, Users } from 'lucide-react';
 import { PdvOperator, PdvOperatorPermissions, StoreConfig, User, UserRole } from '../types';
+import ValueInput from './ValueInput';
 
 interface ConfiguracoesViewProps {
   currentUser: User;
@@ -420,13 +421,9 @@ function StoreFields({ form, onChange }: {
       ))}
       <label className="block text-xs font-bold text-slate-700">
         Limite de desconto por item (%)
-        <input
-          type="number"
-          min="0"
-          max="100"
-          step="0.01"
-          value={form.maxItemDiscountPercent}
-          onChange={event => onChange('maxItemDiscountPercent', Number(event.target.value))}
+        <ValueInput
+          value={form.maxItemDiscountPercent || null}
+          onValueChange={value => onChange('maxItemDiscountPercent', Math.min(100, value ?? 0))}
           className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
         />
       </label>

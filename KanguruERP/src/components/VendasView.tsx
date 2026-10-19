@@ -18,6 +18,7 @@ import {
   Coins,
   ArrowRight
 } from 'lucide-react';
+import ValueInput from './ValueInput';
 
 interface VendasViewProps {
   currentUser: User;
@@ -268,12 +269,10 @@ export default function VendasView({
 
             <div className="space-y-1.5">
               <label className="font-bold text-slate-700">Valor Proposto da Compra (R$)</label>
-              <input
-                type="number"
-                min="0"
+              <ValueInput
                 required
-                value={tradeValuation || ''}
-                onChange={(e) => setTradeValuation(parseFloat(e.target.value) || 0)}
+                value={tradeValuation || null}
+                onValueChange={(value) => setTradeValuation(value ?? 0)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
               />
             </div>
@@ -413,12 +412,10 @@ export default function VendasView({
 
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700">Defina Preço de Venda (R$)</label>
-                <input
-                  type="number"
-                  min="0"
+                <ValueInput
                   required
-                  value={approveSellPrice || ''}
-                  onChange={(e) => setApproveSellPrice(parseFloat(e.target.value) || 0)}
+                  value={approveSellPrice || null}
+                  onValueChange={(value) => setApproveSellPrice(value ?? 0)}
                   className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono"
                 />
               </div>
@@ -426,12 +423,11 @@ export default function VendasView({
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
                   <label className="font-bold text-slate-700">Garantia (Meses)</label>
-                  <input
-                    type="number"
-                    min="0"
+                  <ValueInput
+                    decimals={0}
                     required
                     value={approveWarranty}
-                    onChange={(e) => setApproveWarranty(parseInt(e.target.value) || 3)}
+                    onValueChange={(value) => setApproveWarranty(value ?? 0)}
                     className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono"
                   />
                 </div>

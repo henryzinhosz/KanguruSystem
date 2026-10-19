@@ -16,6 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { terminalAuth } from '../services/supabase/auth';
+import ValueInput, { formatValueText, parseValueText } from './ValueInput';
 import {
   findPosSerialUnit,
   getPosAvailableSerialUnits,
@@ -247,7 +248,7 @@ export function App() {
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [cashNumber, setCashNumber] = useState('Caixa 01');
   const [responsibleName, setResponsibleName] = useState('');
-  const [openingFloat, setOpeningFloat] = useState('0,00');
+  const [openingFloat, setOpeningFloat] = useState('');
   const [movementType, setMovementType] = useState<MovementType>('SANGRIA');
   const [movementAmount, setMovementAmount] = useState('');
   const [movementReason, setMovementReason] = useState('');
@@ -993,10 +994,9 @@ export function App() {
           </label>
           <label>
             Troco inicial (R$)
-            <input
-              inputMode="decimal"
-              value={openingFloat}
-              onChange={(event) => setOpeningFloat(event.target.value)}
+            <ValueInput
+              value={parseValueText(openingFloat)}
+              onValueChange={(value) => setOpeningFloat(formatValueText(value, 2))}
               required
             />
           </label>
@@ -1031,10 +1031,9 @@ export function App() {
           </label>
           <label>
             Valor (R$)
-            <input
-              inputMode="decimal"
-              value={movementAmount}
-              onChange={(event) => setMovementAmount(event.target.value)}
+            <ValueInput
+              value={parseValueText(movementAmount)}
+              onValueChange={(value) => setMovementAmount(formatValueText(value, 2))}
               required
             />
           </label>
@@ -1365,14 +1364,11 @@ export function App() {
                     ) : null}
                     <label className="cart-discount-label">
                       Desconto (%)
-                      <input
+                      <ValueInput
                         aria-label={`Desconto percentual de ${item.name}`}
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={item.discountPercent}
-                        onChange={(event) => updateItemDiscount(item.id, item.itemType, Number(event.target.value))}
+                        placeholder="0"
+                        value={item.discountPercent || null}
+                        onValueChange={(value) => updateItemDiscount(item.id, item.itemType, Math.min(100, value ?? 0))}
                       />
                     </label>
                   </div>
@@ -1578,7 +1574,7 @@ function ReservationModal({
           </label>
           <label>
             Sinal / depósito (opcional)
-            <input type="number" min="0" max={total} step="0.01" value={deposit} onChange={(event) => onDeposit(event.target.value)} />
+            <ValueInput value={parseValueText(deposit)} onValueChange={(value) => onDeposit(formatValueText(value, 2))} />
           </label>
           {depositAmount > 0 && (
             <label>
@@ -1664,20 +1660,16 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
                   </option>
                 ))}
               </select>
-              <input
+              <ValueInput
                 aria-label={`Valor da forma ${index + 1}`}
-                type="number"
-                min="0"
-                step="0.01"
-                value={Number.isFinite(line.amount) ? line.amount : 0}
-                onChange={(event) => updateLine(index, { amount: Number(event.target.value) })}
-                onFocus={(event) => {
+                value={Number.isFinite(line.amount) && line.amount ? line.amount : null}
+                onValueChange={(value) => updateLine(index, { amount: value ?? 0 })}
+                onFocus={() => {
                   // Pre-preenche com o saldo restante quando o campo esta zerado.
                   if (!line.amount && totalCents > 0) {
                     const suggested = Math.max(0, totalCents - otherLinesCents) / 100;
                     if (suggested > 0) {
                       updateLine(index, { amount: suggested });
-                      event.currentTarget.value = String(suggested);
                     }
                   }
                 }}
@@ -2085,11 +2077,7 @@ function CashCount({
       </span>
       <label>
         Contado
-        <input
-          inputMode="decimal"
-          value={value.toFixed(2).replace('.', ',')}
-          onChange={(event) => onChange(valueAsNumber(event.target.value))}
-        />
+        <ValueInput value={value || null} onValueChange={(next) => onChange(next ?? 0)} />
       </label>
       <strong className={difference === 0 ? '' : difference > 0 ? 'positive' : 'negative'}>
         {difference === 0
