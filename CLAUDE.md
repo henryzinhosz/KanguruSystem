@@ -104,7 +104,7 @@ por operador (inspirado no Linx Degust).
 | 2.5 Serviços e carrinho (`services`, `max_item_discount_percent`, `search_pos_items`, desconto por linha) | ✅ |
 | 2.6 Reserva de produto (`product_reservations`, sinal em ledger próprio, preço/desconto congelado) | ✅ |
 | 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada, testada e na `main` (PR #1, 2026-10-17) |
-| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) ✅ testada e na `main`. Parte 2 (código de barras) implementada em 2026-10-18, migration 20261018 **não aplicada**. Parte 3 (Zebra) aguarda impressora (seção 7) |
+| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) ✅ testada e na `main`. Parte 2 (código de barras) ✅ migration 20261018 aplicada e testes aprovados (2026-10-19). Parte 3 (Zebra) aguarda impressora (seção 7) |
 | 2.8 Finalização da venda (fiscal, garantia) | ⚪ Não iniciada |
 | 2.9 Trocas e devoluções | ⚪ |
 | 2.10 Interface para tablet | ⚪ (design visual adiado de propósito para o fim) |
@@ -262,7 +262,7 @@ Branch: `feat/2.7b-custos` (criado a partir de `feat/2.7-split-payments`, que ai
 
 Primeiro passo prático quando a Zebra chegar: teste de impressão ZPL a partir do Windows/PDV.
 
-### Parte 2 — código de barras (desenho APROVADO e implementado em 2026-10-18; migration `20261018_item_codes.sql` NÃO aplicada)
+### Parte 2 — código de barras (desenho APROVADO e implementado em 2026-10-18; migration `20261018_item_codes.sql` APLICADA e testes aprovados pelo usuário em 2026-10-19)
 Decisões: "SKU" vira **"Código"** nas telas (coluna `sku` continua no banco); **uma numeração só** para produtos e
 serviços do tenant; código só **letras, números e hífen**, maiúsculo, até 30; código em branco → banco gera o próximo
 número a partir de **10100**; código do fabricante não é usado (decisão de 2026-10-14). Teste com leitor físico fica
@@ -382,6 +382,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-19 (2)** — Usuário aplicou a 20261018 e aprovou todos os testes da Parte 2 e dos campos de valor. Novo pedido em desenho: busca do PDV mostrar produtos sem estoque com "Sem estoque" em vermelho.
 - **2026-10-19** — Campos de valor padronizados (pedido e desenho aprovados pelo usuário): componente `ValueInput` (ERP `src/components/ValueInput.tsx`, PDV `src/app/ValueInput.tsx`) em todos os campos de dinheiro/percentual/quantidade (19 no ERP, 6 no PDV): começa vazio com dica "0,00", sem setinhas, **só vírgula** como decimal (ponto é ignorado, decisão do usuário), máx. 2 casas, sem zero à esquerda, vazio = 0; quantidades só inteiros. Sem mudança no banco. Resolvido também: tela branca no PDV em modo dev era cache antigo do WebView (DevTools > Rede > Desativar cache). Usuário confirmou que apagou `KanguruPDV/.env.example` (era modelo vazio).
 - **2026-10-18** — 2.7b Parte 2 (código de barras) aprovada e implementada no branch `feat/2.7b-codigo-barras` (migration 20261018 + ERP + PDV; builds ok). Próximo passo: usuário conferir os triggers (consulta enviada), aplicar a migration com aprovação e testar. `KanguruPDV/.env.example` aparece apagado no git sem explicação — perguntado ao usuário, fora do commit.
 - **2026-10-17 (4)** — PR #1 (`feat/2.7b-custos`, que contém 2.5–2.7, 2.7b Parte 1, vendedores e impressão do histórico) **mergeado na `main`** pelo usuário. Criado o branch `feat/2.7b-codigo-barras` a partir da `main` para a 2.7b Parte 2. Próximo passo: investigar e propor o desenho da Parte 2.
