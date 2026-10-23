@@ -279,6 +279,26 @@ para quando o usuário tiver o leitor em mãos (junto com a Zebra) — por ora t
 - PDV: código exato → carrinho (já existia); senão tenta serial/IMEI → unidade direto no carrinho ou aviso do motivo.
   O PDV novo funciona mesmo antes da migration (a consulta extra falha em silêncio).
 
+### Encomenda (reserva sem estoque) + voucher de reserva + busca com sem-estoque (desenho APROVADO 2026-10-23; migration `20261023_reservation_backorder_voucher.sql` NÃO aplicada)
+Decisões do usuário: busca mostra produto zerado com **"Sem estoque"** em vermelho e **"Possui estoque: <lojas>"** (só nomes);
+produto sem estoque **pode ser reservado** (encomenda — vendem antes de a mercadoria chegar); voucher impresso **ao criar a
+reserva**, A4 com via da loja (assinatura) + canhoto do cliente; valor: pagou tudo → só o valor; pagou parte → "Valor: X
+(Restante: Y)"; nada → "R$ 0,00 (Restante: total)", forma "A pagar na retirada"; NF só quando a reserva vira venda (2.8);
+data de retirada prevista = prazo da reserva; logo é única da rede (por ora texto "BeB GAMES"; **pedir o arquivo do logo**);
+regras do voucher editáveis por loja no ERP (texto padrão da foto). CPF **obrigatório** na reserva (recomendação aceita por
+omissão — usuário pode mudar).
+- Achado corrigido junto: a `search_pos_items` viva era a da 2.5 (não descontava reservas ativas).
+- Migration: `product_reservations.customer_cpf`, `product_reservation_items.is_backorder`, `store_configs.reservation_voucher_terms`;
+  `pos_store_available_qty` (interna) = estoque − linhas ativas sem unidade; `search_pos_items` (DROP+CREATE, retorno ganha
+  `stores_with_stock`); `get_pos_store_profile()`; `reserve_pos_cart` 7→8 parâmetros (`p_customer_cpf`, item `backorder`);
+  `list_pos_reservations` com CPF, `isBackorder`, `isSerialized`; `process_pos_terminal_sale` (mesma assinatura): linha de
+  encomenda com serial recebe na entrega a unidade escolhida (`item.serialUnitId`, precisa estar DISPONIVEL) e grava a unidade na
+  reserva. Funções copiadas da 20261017 por script e comparadas (diff só com os trechos novos).
+- Encomenda sem serial: quantidade fica segurada automaticamente quando a mercadoria chega. Com serial: unidade escolhida na
+  entrega (protege só na busca; vender o serial bipado direto ainda é possível — avisar o usuário se virar problema).
+- PDV: `src/app/reservationVoucher.ts` (impressão), CPF com validação, "Reimprimir voucher" na lista, seleção de serial na conversão.
+- **Aplicar a migration, PDV e ERP juntos** (PDV antigo deixa de reservar; ERP novo grava `reservation_voucher_terms`).
+
 ---
 
 ### Vendedores no PDV + relatórios do Histórico de Vendas (desenho de 2026-10-16)
@@ -382,6 +402,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-23** — Encomenda + voucher de reserva + busca com produtos sem estoque: desenho aprovado e implementado (migration 20261023 + PDV + ERP; builds ok; prévia do voucher conferida). Próximo passo: usuário conferir md5 das funções, aplicar e testar; enviar o arquivo do logo.
 - **2026-10-19 (2)** — Usuário aplicou a 20261018 e aprovou todos os testes da Parte 2 e dos campos de valor. Novo pedido em desenho: busca do PDV mostrar produtos sem estoque com "Sem estoque" em vermelho.
 - **2026-10-19** — Campos de valor padronizados (pedido e desenho aprovados pelo usuário): componente `ValueInput` (ERP `src/components/ValueInput.tsx`, PDV `src/app/ValueInput.tsx`) em todos os campos de dinheiro/percentual/quantidade (19 no ERP, 6 no PDV): começa vazio com dica "0,00", sem setinhas, **só vírgula** como decimal (ponto é ignorado, decisão do usuário), máx. 2 casas, sem zero à esquerda, vazio = 0; quantidades só inteiros. Sem mudança no banco. Resolvido também: tela branca no PDV em modo dev era cache antigo do WebView (DevTools > Rede > Desativar cache). Usuário confirmou que apagou `KanguruPDV/.env.example` (era modelo vazio).
 - **2026-10-18** — 2.7b Parte 2 (código de barras) aprovada e implementada no branch `feat/2.7b-codigo-barras` (migration 20261018 + ERP + PDV; builds ok). Próximo passo: usuário conferir os triggers (consulta enviada), aplicar a migration com aprovação e testar. `KanguruPDV/.env.example` aparece apagado no git sem explicação — perguntado ao usuário, fora do commit.

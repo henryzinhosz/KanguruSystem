@@ -5,6 +5,8 @@ export interface ReservationLineInput {
   quantity: number;
   discountPercent: number;
   serialUnitId?: string;
+  // Encomenda: produto sem estoque agora (serializado: sem unidade, escolhida na entrega).
+  backorder?: boolean;
 }
 
 export interface PosReservationItem {
@@ -18,6 +20,8 @@ export interface PosReservationItem {
   unitPrice: number;
   discountPercent: number;
   lineTotal: number;
+  isBackorder?: boolean;
+  isSerialized?: boolean;
 }
 
 export interface PosReservation {
@@ -32,6 +36,7 @@ export interface PosReservation {
   items: PosReservationItem[];
   sellerCode: string | null;
   sellerName: string | null;
+  customerCpf: string | null;
 }
 
 interface PosReservationRow {
@@ -46,11 +51,13 @@ interface PosReservationRow {
   items: PosReservationItem[];
   seller_code: string | null;
   seller_name: string | null;
+  customer_cpf?: string | null;
 }
 
 export async function createPosReservation(input: {
   customerName: string;
   customerPhone: string;
+  customerCpf: string;
   expiresAt: string;
   depositAmount: number;
   depositPaymentMethod: string | null;
@@ -70,8 +77,10 @@ export async function createPosReservation(input: {
       quantity: item.quantity,
       discountPercent: item.discountPercent,
       ...(item.serialUnitId ? { serialUnitId: item.serialUnitId } : {}),
+      ...(item.backorder ? { backorder: true } : {}),
     })),
     p_seller_code: input.sellerCode,
+    p_customer_cpf: input.customerCpf,
   });
   if (error) throw error;
   return String(data);
@@ -92,6 +101,7 @@ export async function getPosReservations(): Promise<PosReservation[]> {
     items: row.items ?? [],
     sellerCode: row.seller_code ?? null,
     sellerName: row.seller_name ?? null,
+    customerCpf: row.customer_cpf ?? null,
   }));
 }
 

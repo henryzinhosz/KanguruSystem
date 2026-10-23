@@ -11,6 +11,8 @@ export interface PosCatalogItem {
   warrantyMonths: number | null;
   requiresUnitSelection: boolean;
   maxItemDiscountPercent: number;
+  // Sem estoque nesta loja: nomes das outras lojas que tem o produto.
+  storesWithStock: string[];
 }
 
 export interface PosSerialUnit {
@@ -30,6 +32,7 @@ interface PosCatalogItemRow {
   warranty_months: number | string | null;
   requires_unit_selection: boolean | null;
   max_item_discount_percent: number | string;
+  stores_with_stock?: string[] | null;
 }
 
 interface PosSerialUnitRow {
@@ -56,6 +59,7 @@ export async function searchPosItems(query: string): Promise<PosCatalogItem[]> {
     warrantyMonths: item.warranty_months === null ? null : Number(item.warranty_months),
     requiresUnitSelection: item.requires_unit_selection === true,
     maxItemDiscountPercent: Number(item.max_item_discount_percent ?? 0),
+    storesWithStock: item.stores_with_stock ?? [],
   }));
 }
 
@@ -121,6 +125,7 @@ export async function findPosSerialUnit(code: string): Promise<PosScannedSerialU
       warrantyMonths: row.warranty_months === null ? null : Number(row.warranty_months),
       requiresUnitSelection: row.requires_unit_selection === true,
       maxItemDiscountPercent: Number(row.max_item_discount_percent ?? 0),
+      storesWithStock: [],
     },
     serialNumber: row.serial_number,
     status: row.unit_status,

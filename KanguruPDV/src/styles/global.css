@@ -901,3 +901,60 @@ small {
 .seller-code-field .seller-code-error {
   color: #b42318;
 }
+
+/* Busca: produto sem estoque nesta loja (pode entrar como encomenda). */
+.product-row.is-out-of-stock {
+  background: #fbf8f6;
+}
+
+.product-row .stock-out {
+  color: #b42318;
+  font-weight: 700;
+}
+
+.product-row .stock-elsewhere {
+  max-width: 260px;
+  margin-left: auto;
+  color: #5d6b5a;
+  font-size: 0.8rem;
+}
+
+/* Encomenda: item reservado sem estoque, entregue quando chegar. */
+.backorder-tag {
+  display: inline-block;
+  margin: 0.2rem 0 0.1rem 0.35rem;
+  border: 1px solid #e3b38f;
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  color: #923c21;
+  background: #fff4ec;
+  font-family: 'Trebuchet MS', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.cart-item .backorder-tag {
+  margin-left: 0;
+}
+
+.field-error {
+  display: block;
+  margin-top: 0.25rem;
+  color: #b42318;
+  font-family: 'Trebuchet MS', sans-serif;
+  font-size: 0.8rem;
+}
+
+.backorder-units {
+  display: grid;
+  gap: 0.6rem;
+  margin-bottom: 0.9rem;
+  border: 1px dashed #e3b38f;
+  border-radius: 6px;
+  padding: 0.75rem;
+  background: #fffaf6;
+}
+
+.reservation-reprint {
+  min-height: 42px;
+}

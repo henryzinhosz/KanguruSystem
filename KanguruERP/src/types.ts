@@ -316,6 +316,8 @@ export interface StoreConfig {
   address?: string;
   phone?: string;
   contactEmail?: string;
+  // Texto das regras impresso no voucher de reserva do PDV (vazio = texto padrao).
+  reservationVoucherTerms?: string;
   paymentFees: {
     DINHEIRO: number; // percentage (e.g. 0)
     PIX: number; // percentage (e.g. 0.005 = 0.5%)

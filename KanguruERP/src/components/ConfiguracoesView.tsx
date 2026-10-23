@@ -14,6 +14,12 @@ interface ConfiguracoesViewProps {
   deletePdvOperator: (id: string) => Promise<void>;
 }
 
+// Mesmo texto padrao do PDV (KanguruPDV/src/app/reservationVoucher.ts).
+const DEFAULT_VOUCHER_TERMS =
+  'Reserva de compra garantida. Para retirada do produto, apresente este voucher juntamente com a nota emitida. ' +
+  'Não será aceita desistência nem devolução de valores e itens negociados. ' +
+  'Através deste, o cliente declara estar ciente e de acordo.';
+
 const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   tradeName: '',
   legalName: '',
@@ -22,6 +28,7 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   address: '',
   phone: '',
   contactEmail: '',
+  reservationVoucherTerms: '',
   fixedCost: 0,
   maxItemDiscountPercent: 0,
   paymentFees: { DINHEIRO: 0, PIX: 0, CREDITO: 0, DEBITO: 0 }
@@ -135,6 +142,7 @@ export default function ConfiguracoesView({
       address: store.address || '',
       phone: store.phone || '',
       contactEmail: store.contactEmail || '',
+      reservationVoucherTerms: store.reservationVoucherTerms || '',
       fixedCost: store.fixedCost,
       maxItemDiscountPercent: store.maxItemDiscountPercent,
       paymentFees: store.paymentFees
@@ -424,6 +432,16 @@ function StoreFields({ form, onChange }: {
         <ValueInput
           value={form.maxItemDiscountPercent || null}
           onValueChange={value => onChange('maxItemDiscountPercent', Math.min(100, value ?? 0))}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Regras do voucher de reserva <span className="font-normal text-slate-400">(impressas no voucher do PDV; em branco usa o texto padrão)</span>
+        <textarea
+          rows={4}
+          value={form.reservationVoucherTerms || ''}
+          placeholder={DEFAULT_VOUCHER_TERMS}
+          onChange={event => onChange('reservationVoucherTerms', event.target.value)}
           className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
         />
       </label>

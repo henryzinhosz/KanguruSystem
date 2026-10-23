@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { terminalAuth } from '../services/supabase/auth';
 import ValueInput, { formatValueText, parseValueText } from './ValueInput';
+import { formatCpf, printReservationVoucher, type ReservationVoucherData } from './reservationVoucher';
 import {
   findPosSerialUnit,
   getPosAvailableSerialUnits,
@@ -30,13 +31,16 @@ import {
   createPosReservation,
   getPosReservations,
   type PosReservation,
+  type ReservationLineInput,
 } from '../services/supabase/reservations';
 import { findPosSeller, normalizeSellerCode, type PosSeller } from '../services/supabase/sellers';
 import {
   activateTerminal,
+  getPosStoreProfile,
   getTerminalContext,
   requireAdminPassword,
   setAdminPassword,
+  type PosStoreProfile,
   type TerminalContext,
 } from '../services/supabase/terminal';
 import {
@@ -76,6 +80,8 @@ interface CartItem extends PosCatalogItem {
   quantity: number;
   discountPercent: number;
   serialUnit?: PosSerialUnit;
+  // Encomenda: sem estoque agora; so pode ser reservado.
+  backorder?: boolean;
 }
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -87,6 +93,27 @@ const emptyCounts: CashCounts = {
   voucher: 0,
   creditAccount: 0,
 };
+
+// CPF valido: 11 digitos com os dois digitos verificadores certos.
+function isValidCpf(value: string): boolean {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length !== 11 || /^(\d)\1{10}$/.test(digits)) return false;
+  const check = (length: number) => {
+    let sum = 0;
+    for (let index = 0; index < length; index += 1) sum += Number(digits[index]) * (length + 1 - index);
+    const rest = (sum * 10) % 11;
+    return rest === 10 ? 0 : rest;
+  };
+  return check(9) === Number(digits[9]) && check(10) === Number(digits[10]);
+}
+
+function maskCpf(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 11);
+  return digits
+    .replace(/^(\d{3})(\d)/, '$1.$2')
+    .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+    .replace(/\.(\d{3})(\d)/, '.$1-$2');
+}
 
 function errorMessage(error: unknown): string {
   const message =
@@ -116,6 +143,18 @@ function errorMessage(error: unknown): string {
   }
   if (message.includes('Payment lines do not match the sale total')) {
     return 'A soma das formas de pagamento não confere com o total da venda.';
+  }
+  if (message.includes('Customer CPF is required')) {
+    return 'Informe um CPF válido do cliente para registrar a reserva.';
+  }
+  if (message.includes('Insufficient physical stock for reserved product')) {
+    return 'O produto desta reserva ainda não chegou no estoque da loja. Dê entrada no estoque antes de entregar.';
+  }
+  if (message.includes('Select the arrived unit for the backorder line')) {
+    return 'Escolha a unidade (serial) que chegou para cada item de encomenda.';
+  }
+  if (message.includes('Selected serialized unit is not available')) {
+    return 'A unidade escolhida não está mais disponível. Escolha outra.';
   }
 
   return message.includes('Anonymous sign-ins are disabled')
@@ -267,6 +306,11 @@ export function App() {
   const [reservationDialogOpen, setReservationDialogOpen] = useState(false);
   const [reservationCustomerName, setReservationCustomerName] = useState('');
   const [reservationCustomerPhone, setReservationCustomerPhone] = useState('');
+  const [reservationCustomerCpf, setReservationCustomerCpf] = useState('');
+  const [storeProfile, setStoreProfile] = useState<PosStoreProfile | null>(null);
+  // Entrega de encomenda com serial: unidade escolhida por linha da reserva.
+  const [conversionUnitChoices, setConversionUnitChoices] = useState<Record<string, string>>({});
+  const [conversionUnitOptions, setConversionUnitOptions] = useState<Record<string, PosSerialUnit[]>>({});
   const [reservationExpiresOn, setReservationExpiresOn] = useState(() => {
     const date = new Date();
     date.setDate(date.getDate() + 7);
@@ -512,6 +556,14 @@ export function App() {
   }
 
   async function selectProduct(product: PosCatalogItem) {
+    // Sem estoque nesta loja: entra como encomenda (so pode ser reservado).
+    if (product.itemType === 'PRODUCT' && product.availableQuantity <= 0) {
+      addBackorder(product);
+      setCatalogItems([]);
+      setQuery('');
+      setMessage(`"${product.name}" está sem estoque nesta loja: entrou como encomenda e só pode ser reservado.`);
+      return;
+    }
     if (product.itemType === 'PRODUCT' && product.requiresUnitSelection) {
       if (!terminal) {
         setMessage('O terminal precisa estar ativado para consultar unidades serializadas.');
@@ -541,7 +593,7 @@ export function App() {
 
   function addProduct(product: PosCatalogItem) {
     setCart((current) => {
-      const existing = current.find((item) => item.id === product.id && item.itemType === product.itemType && !item.serialUnit);
+      const existing = current.find((item) => item.id === product.id && item.itemType === product.itemType && !item.serialUnit && !item.backorder);
       if (!existing) return [...current, { ...product, quantity: 1, discountPercent: 0 }];
 
       if (product.itemType === 'PRODUCT' && existing.quantity >= product.availableQuantity) {
@@ -550,8 +602,16 @@ export function App() {
       }
 
       return current.map((item) =>
-        item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        item === existing ? { ...item, quantity: item.quantity + 1 } : item
       );
+    });
+  }
+
+  function addBackorder(product: PosCatalogItem) {
+    setCart((current) => {
+      const existing = current.find((item) => item.id === product.id && item.backorder);
+      if (!existing) return [...current, { ...product, quantity: 1, discountPercent: 0, backorder: true }];
+      return current.map((item) => (item === existing ? { ...item, quantity: item.quantity + 1 } : item));
     });
   }
 
@@ -561,7 +621,7 @@ export function App() {
         if (item.id !== productId || item.itemType !== itemType) return [item];
         const quantity = item.quantity + change;
         if (quantity <= 0) return [];
-        return item.itemType === 'PRODUCT' && quantity > item.availableQuantity ? [item] : [{ ...item, quantity }];
+        return item.itemType === 'PRODUCT' && !item.backorder && quantity > item.availableQuantity ? [item] : [{ ...item, quantity }];
       })
     );
   }
@@ -612,6 +672,10 @@ export function App() {
 
   async function finalizeSale() {
     if (!cashSession || cart.length === 0) return;
+    if (cart.some((item) => item.backorder)) {
+      setMessage('Itens de encomenda (sem estoque) só podem ser reservados.');
+      return;
+    }
     if (!saleSeller) {
       setMessage('Informe o código do vendedor para finalizar a venda.');
       return;
@@ -714,6 +778,42 @@ export function App() {
     await finalizeSale();
   }
 
+  async function loadStoreProfile(): Promise<PosStoreProfile | null> {
+    if (storeProfile) return storeProfile;
+    try {
+      const profile = await getPosStoreProfile();
+      setStoreProfile(profile);
+      return profile;
+    } catch {
+      return null;
+    }
+  }
+
+  async function printVoucher(data: ReservationVoucherData) {
+    printReservationVoucher(data, await loadStoreProfile());
+  }
+
+  function voucherFromReservation(reservation: PosReservation): ReservationVoucherData {
+    return {
+      reservationId: reservation.id,
+      customerName: reservation.customerName,
+      customerCpf: reservation.customerCpf,
+      customerPhone: reservation.customerPhone,
+      items: reservation.items.map((item) => ({
+        name: item.itemName,
+        quantity: item.quantity,
+        serialNumber: item.serialNumber,
+        isBackorder: item.isBackorder === true,
+      })),
+      total: reservation.items.reduce((sum, item) => sum + item.lineTotal, 0),
+      depositAmount: reservation.depositAmount,
+      depositPaymentMethod: reservation.depositPaymentMethod,
+      createdAt: reservation.createdAt,
+      expiresAt: reservation.expiresAt,
+      sellerName: reservation.sellerName,
+    };
+  }
+
   async function openReservations() {
     setBusy(true);
     setReservationsLoading(true);
@@ -736,24 +836,57 @@ export function App() {
       setMessage('Informe o código do vendedor que está fazendo a reserva.');
       return;
     }
+    if (!isValidCpf(reservationCustomerCpf)) {
+      setMessage('Informe um CPF válido do cliente para registrar a reserva.');
+      return;
+    }
     setBusy(true);
     setMessage(null);
     const depositAmount = valueAsNumber(reservationDeposit);
+    const expiresAt = reservationDeadlineIso(reservationExpiresOn);
     try {
-      await createPosReservation({
+      const reservationId = await createPosReservation({
         customerName: reservationCustomerName.trim(),
         customerPhone: reservationCustomerPhone.trim(),
-        expiresAt: reservationDeadlineIso(reservationExpiresOn),
+        customerCpf: reservationCustomerCpf.replace(/\D/g, ''),
+        expiresAt,
         depositAmount,
         depositPaymentMethod: depositAmount > 0 ? paymentMethod : null,
-        items: cart.map((item) => ({
-          productId: item.id,
-          quantity: item.quantity,
-          discountPercent: item.discountPercent,
-          ...(item.serialUnit ? { serialUnitId: item.serialUnit.serialUnitId } : {}),
-        })),
+        // Encomenda com serial: uma linha por unidade (o serial e escolhido na entrega).
+        items: cart.flatMap((item): ReservationLineInput[] => item.backorder && item.requiresUnitSelection
+          ? Array.from({ length: item.quantity }, () => ({
+              productId: item.id,
+              quantity: 1,
+              discountPercent: item.discountPercent,
+              backorder: true,
+            }))
+          : [{
+              productId: item.id,
+              quantity: item.quantity,
+              discountPercent: item.discountPercent,
+              ...(item.serialUnit ? { serialUnitId: item.serialUnit.serialUnitId } : {}),
+              ...(item.backorder ? { backorder: true } : {}),
+            }]),
         sellerCode: reservationSeller.code,
       });
+      const voucher: ReservationVoucherData = {
+        reservationId,
+        customerName: reservationCustomerName.trim(),
+        customerCpf: reservationCustomerCpf.replace(/\D/g, ''),
+        customerPhone: reservationCustomerPhone.trim() || null,
+        items: cart.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          serialNumber: item.serialUnit?.serialNumber ?? null,
+          isBackorder: item.backorder === true,
+        })),
+        total: grossAmount,
+        depositAmount,
+        depositPaymentMethod: depositAmount > 0 ? paymentMethod : null,
+        createdAt: new Date().toISOString(),
+        expiresAt,
+        sellerName: reservationSeller.name,
+      };
       setCart([]);
       setCatalogItems([]);
       setQuery('');
@@ -761,10 +894,12 @@ export function App() {
       setReservationDialogOpen(false);
       setReservationCustomerName('');
       setReservationCustomerPhone('');
+      setReservationCustomerCpf('');
       setReservationDeposit('');
       setReservationSellerCode('');
       setReservationSeller(null);
-      setMessage(`Reserva registrada para ${reservationSeller.name}. O produto permanece separado até conversão ou cancelamento.`);
+      setMessage(`Reserva registrada para ${reservationSeller.name}. Imprima o voucher: a via de cima fica na loja e o canhoto vai para o cliente.`);
+      void printVoucher(voucher);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -785,6 +920,16 @@ export function App() {
       setMessage('Informe o seu código de vendedor para finalizar a conversão.');
       return;
     }
+    const pendingUnits = reservation.items.filter((item) => item.isBackorder && item.isSerialized && !item.serialUnitId);
+    const chosenUnits = pendingUnits.map((item) => conversionUnitChoices[item.reservationItemId]).filter(Boolean);
+    if (chosenUnits.length !== pendingUnits.length) {
+      setMessage('Escolha a unidade (serial) que chegou para cada item de encomenda.');
+      return;
+    }
+    if (new Set(chosenUnits).size !== chosenUnits.length) {
+      setMessage('Escolha unidades diferentes para cada item de encomenda.');
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -792,18 +937,27 @@ export function App() {
         saleId: crypto.randomUUID(),
         invoiceNumber: `PDV-${Date.now()}`,
         reservationId: reservation.id,
-        items: reservation.items.map((item) => ({
-          itemType: 'PRODUCT',
-          productId: item.productId,
-          reservationItemId: item.reservationItemId,
-          itemSku: item.itemSku,
-          itemName: item.itemName,
-          quantity: item.quantity,
-          discountPercent: item.discountPercent,
-          unitPrice: item.unitPrice,
-          lineTotal: item.lineTotal,
-          ...(item.serialNumber ? { serials: [item.serialNumber] } : {}),
-        })),
+        items: reservation.items.map((item) => {
+          const chosenUnitId = conversionUnitChoices[item.reservationItemId];
+          const chosenUnit = chosenUnitId
+            ? conversionUnitOptions[item.productId]?.find((unit) => unit.serialUnitId === chosenUnitId)
+            : undefined;
+          return {
+            itemType: 'PRODUCT' as const,
+            productId: item.productId,
+            reservationItemId: item.reservationItemId,
+            itemSku: item.itemSku,
+            itemName: item.itemName,
+            quantity: item.quantity,
+            discountPercent: item.discountPercent,
+            unitPrice: item.unitPrice,
+            lineTotal: item.lineTotal,
+            ...(item.serialNumber ? { serials: [item.serialNumber] } : {}),
+            ...(!item.serialNumber && chosenUnit
+              ? { serialUnitId: chosenUnit.serialUnitId, serials: [chosenUnit.serialNumber] }
+              : {}),
+          };
+        }),
         paymentMethod: resolution
           ? legacyPaymentMethod(resolution.applied)
           : reservation.depositPaymentMethod ?? 'DINHEIRO',
@@ -829,6 +983,7 @@ export function App() {
       }
       setReservations(await getPosReservations());
       setConversionReservation(null);
+      setConversionUnitChoices({});
       setConversionPaymentLines([]);
       setConversionSellerCode('');
       setConversionSeller(null);
@@ -864,6 +1019,23 @@ export function App() {
   }
 
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
+  const cartHasBackorder = cart.some((item) => item.backorder);
+
+  useEffect(() => {
+    if (!conversionReservation || !terminal) return;
+    const productIds = Array.from(new Set(conversionReservation.items
+      .filter((item) => item.isBackorder && item.isSerialized && !item.serialUnitId)
+      .map((item) => item.productId)));
+    setConversionUnitChoices({});
+    setConversionUnitOptions({});
+    if (productIds.length === 0) return;
+    let active = true;
+    Promise.all(productIds.map(async (productId) =>
+      [productId, await getPosAvailableSerialUnits(productId, terminal.unitId)] as const))
+      .then((entries) => { if (active) setConversionUnitOptions(Object.fromEntries(entries)); })
+      .catch((error) => { if (active) setMessage(errorMessage(error)); });
+    return () => { active = false; };
+  }, [conversionReservation, terminal]);
 
   if (screen === 'loading') {
     return <main className="loading-screen">Preparando dispositivo...</main>;
@@ -1175,6 +1347,7 @@ export function App() {
                       <div>
                         <h2>{reservation.customerName}</h2>
                         {reservation.customerPhone && <small>{reservation.customerPhone}</small>}
+                        {reservation.customerCpf && <small>CPF {formatCpf(reservation.customerCpf)}</small>}
                       </div>
                       <span className={`reservation-status${reservation.expired ? ' expired' : ''}`}>
                         {reservation.expired ? 'VENCIDA · RESERVA ATIVA' : 'ATIVA'}
@@ -1189,7 +1362,10 @@ export function App() {
                         <li key={item.reservationItemId}>
                           <span>
                             <strong>{item.itemName}</strong>
-                            <small>{item.itemSku}{item.serialNumber ? ` | Série ${item.serialNumber}` : ` | ${item.quantity} un.`}</small>
+                            <small>
+                              {item.itemSku}{item.serialNumber ? ` | Série ${item.serialNumber}` : ` | ${item.quantity} un.`}
+                              {item.isBackorder && !item.serialNumber && <span className="backorder-tag">Encomenda</span>}
+                            </small>
                           </span>
                           <strong>{currency.format(item.lineTotal)}</strong>
                         </li>
@@ -1207,6 +1383,9 @@ export function App() {
                         setConversionReservation(reservation);
                       }}>
                         <CreditCard size={18} /> Converter em venda
+                      </button>
+                      <button className="text-action reservation-reprint" type="button" disabled={busy} onClick={() => void printVoucher(voucherFromReservation(reservation))}>
+                        Reimprimir voucher
                       </button>
                       <button className="reservation-cancel" type="button" disabled={busy} onClick={() => void cancelReservation(reservation)}>
                         Cancelar reserva
@@ -1229,8 +1408,13 @@ export function App() {
             onSellerCode={setConversionSellerCode}
             onSeller={setConversionSeller}
             onPaymentLines={setConversionPaymentLines}
+            unitOptions={conversionUnitOptions}
+            unitChoices={conversionUnitChoices}
+            onUnitChoice={(reservationItemId, unitId) =>
+              setConversionUnitChoices((current) => ({ ...current, [reservationItemId]: unitId }))}
             onClose={() => {
               setConversionReservation(null);
+              setConversionUnitChoices({});
               setConversionSellerCode('');
               setConversionSeller(null);
             }}
@@ -1310,7 +1494,7 @@ export function App() {
           <div className="product-list">
             {catalogItems.map((item) => (
               <button
-                className="product-row"
+                className={`product-row${item.itemType === 'PRODUCT' && item.availableQuantity <= 0 ? ' is-out-of-stock' : ''}`}
                 type="button"
                 key={`${item.itemType}-${item.id}`}
                 onClick={() => void selectProduct(item)}
@@ -1326,7 +1510,18 @@ export function App() {
                 </span>
                 <span>
                   <strong>{currency.format(item.sellPrice)}</strong>
-                  <small>{item.itemType === 'SERVICE' ? 'Sem estoque físico' : `${item.availableQuantity} em estoque`}</small>
+                  {item.itemType === 'SERVICE' ? (
+                    <small>Sem estoque físico</small>
+                  ) : item.availableQuantity > 0 ? (
+                    <small>{item.availableQuantity} em estoque</small>
+                  ) : (
+                    <>
+                      <small className="stock-out">Sem estoque</small>
+                      {item.storesWithStock.length > 0 && (
+                        <small className="stock-elsewhere">Possui estoque: {item.storesWithStock.join(', ')}</small>
+                      )}
+                    </>
+                  )}
                 </span>
               </button>
             ))}
@@ -1352,9 +1547,10 @@ export function App() {
               <p className="empty-state">Adicione um produto para iniciar.</p>
             ) : (
               cart.map((item) => (
-                <div className="cart-item" key={item.serialUnit?.serialUnitId ?? `${item.itemType}-${item.id}`}>
+                <div className="cart-item" key={item.serialUnit?.serialUnitId ?? `${item.itemType}-${item.id}${item.backorder ? '-encomenda' : ''}`}>
                   <div>
                     <strong>{item.name}</strong>
+                    {item.backorder && <span className="backorder-tag">Encomenda · sem estoque</span>}
                     <small>{item.itemType === 'SERVICE' ? 'Serviço' : 'Produto'} | {currency.format(item.sellPrice)} cada</small>
                     {item.serialUnit ? (
                       <>
@@ -1439,10 +1635,13 @@ export function App() {
           {cart.some((item) => item.itemType !== 'PRODUCT') && (
             <small className="reserve-hint">Remova os serviços para reservar os produtos do carrinho.</small>
           )}
+          {cartHasBackorder && (
+            <small className="reserve-hint">Itens de encomenda (sem estoque) só podem ser reservados.</small>
+          )}
           <button
             className="primary-action finish-button"
             type="button"
-            disabled={busy || cart.length === 0 || !saleSeller}
+            disabled={busy || cart.length === 0 || !saleSeller || cartHasBackorder}
             onClick={() => void finalizeSale()}
           >
             <CreditCard size={20} />
@@ -1484,6 +1683,9 @@ export function App() {
         <ReservationModal
           customerName={reservationCustomerName}
           customerPhone={reservationCustomerPhone}
+          customerCpf={reservationCustomerCpf}
+          onCustomerCpf={(value) => setReservationCustomerCpf(maskCpf(value))}
+          hasBackorder={cartHasBackorder}
           expiresOn={reservationExpiresOn}
           deposit={reservationDeposit}
           paymentMethod={paymentMethod}
@@ -1509,6 +1711,9 @@ export function App() {
 interface ReservationModalProps {
   customerName: string;
   customerPhone: string;
+  customerCpf: string;
+  onCustomerCpf: (value: string) => void;
+  hasBackorder: boolean;
   expiresOn: string;
   deposit: string;
   paymentMethod: PaymentMethod;
@@ -1530,6 +1735,9 @@ interface ReservationModalProps {
 function ReservationModal({
   customerName,
   customerPhone,
+  customerCpf,
+  onCustomerCpf,
+  hasBackorder,
   expiresOn,
   deposit,
   paymentMethod,
@@ -1548,6 +1756,8 @@ function ReservationModal({
   onSubmit,
 }: ReservationModalProps) {
   const depositAmount = valueAsNumber(deposit);
+  const cpfComplete = customerCpf.replace(/\D/g, '').length === 11;
+  const cpfValid = isValidCpf(customerCpf);
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="serial-unit-modal reservation-modal" role="dialog" aria-modal="true" aria-labelledby="reservation-title">
@@ -1558,18 +1768,28 @@ function ReservationModal({
           </div>
           <button className="icon-button" type="button" title="Fechar" onClick={onClose} disabled={busy}><X size={20} /></button>
         </div>
-        <p className="modal-copy">O produto ficará indisponível para outras vendas até conversão ou cancelamento.</p>
+        <p className="modal-copy">
+          {hasBackorder
+            ? 'Há itens de encomenda (sem estoque): ficam reservados para este cliente assim que chegarem.'
+            : 'O produto ficará indisponível para outras vendas até conversão ou cancelamento.'}
+          {' '}Ao confirmar, o voucher é impresso.
+        </p>
         <form onSubmit={onSubmit}>
           <label>
             Nome do cliente
             <input autoFocus required maxLength={160} value={customerName} onChange={(event) => onCustomerName(event.target.value)} />
           </label>
           <label>
+            CPF do cliente
+            <input required inputMode="numeric" placeholder="000.000.000-00" value={customerCpf} onChange={(event) => onCustomerCpf(event.target.value)} />
+            {cpfComplete && !cpfValid && <small className="field-error">CPF inválido. Confira os números.</small>}
+          </label>
+          <label>
             Telefone (opcional)
             <input type="tel" maxLength={40} value={customerPhone} onChange={(event) => onCustomerPhone(event.target.value)} />
           </label>
           <label>
-            Data limite
+            Data de retirada prevista
             <input type="date" required min={localDateInputValue()} value={expiresOn} onChange={(event) => onExpiresOn(event.target.value)} />
           </label>
           <label>
@@ -1602,7 +1822,7 @@ function ReservationModal({
           </div>
           <div className="modal-actions">
             <button className="text-action" type="button" onClick={onClose} disabled={busy}>Voltar</button>
-            <button className="primary-action modal-confirm" type="submit" disabled={busy || depositAmount > total || !seller}>
+            <button className="primary-action modal-confirm" type="submit" disabled={busy || depositAmount > total || !seller || !cpfValid}>
               {busy ? 'Registrando...' : 'Confirmar reserva'}
             </button>
           </div>
@@ -1715,6 +1935,9 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
 
 interface ReservationPaymentModalProps {
   reservation: PosReservation;
+  unitOptions: Record<string, PosSerialUnit[]>;
+  unitChoices: Record<string, string>;
+  onUnitChoice: (reservationItemId: string, unitId: string) => void;
   paymentLines: PaymentLine[];
   busy: boolean;
   message: string | null;
@@ -1729,6 +1952,9 @@ interface ReservationPaymentModalProps {
 
 function ReservationPaymentModal({
   reservation,
+  unitOptions,
+  unitChoices,
+  onUnitChoice,
   paymentLines,
   busy,
   message,
@@ -1741,6 +1967,8 @@ function ReservationPaymentModal({
   onConfirm,
 }: ReservationPaymentModalProps) {
   const { total, remaining } = reservationAmounts(reservation);
+  const pendingUnits = reservation.items.filter((item) => item.isBackorder && item.isSerialized && !item.serialUnitId);
+  const unitsReady = pendingUnits.every((item) => unitChoices[item.reservationItemId]);
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -1756,6 +1984,37 @@ function ReservationPaymentModal({
         <p className="modal-copy">
           Venda de: <strong>{reservation.sellerName ? `${reservation.sellerName} (${reservation.sellerCode})` : 'quem finalizar (reserva sem vendedor)'}</strong>
         </p>
+        {pendingUnits.length > 0 && (
+          <div className="backorder-units">
+            <p className="modal-copy"><strong>Encomenda:</strong> escolha a unidade que chegou para cada item.</p>
+            {pendingUnits.map((item) => {
+              const options = unitOptions[item.productId] ?? [];
+              const takenElsewhere = new Set(Object.entries(unitChoices)
+                .filter(([lineId]) => lineId !== item.reservationItemId)
+                .map(([, unitId]) => unitId));
+              return (
+                <label key={item.reservationItemId}>
+                  {item.itemName}
+                  {options.length === 0 ? (
+                    <small className="field-error">Nenhuma unidade disponível: o produto ainda não chegou no estoque.</small>
+                  ) : (
+                    <select
+                      value={unitChoices[item.reservationItemId] ?? ''}
+                      onChange={(event) => onUnitChoice(item.reservationItemId, event.target.value)}
+                    >
+                      <option value="">Selecione o serial</option>
+                      {options.filter((unit) => !takenElsewhere.has(unit.serialUnitId)).map((unit) => (
+                        <option key={unit.serialUnitId} value={unit.serialUnitId}>
+                          {unit.serialNumber}{unit.imei ? ` · IMEI ${unit.imei}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        )}
         <div className="reservation-modal-summary">
           <span>Total da venda</span><strong>{currency.format(total)}</strong>
           <span>Sinal já recebido</span><strong>- {currency.format(reservation.depositAmount)}</strong>
@@ -1783,7 +2042,7 @@ function ReservationPaymentModal({
         <Notice message={message} />
         <div className="modal-actions">
           <button className="text-action" type="button" onClick={onClose} disabled={busy}>Voltar</button>
-          <button className="primary-action modal-confirm" type="button" onClick={onConfirm} disabled={busy || !seller}>
+          <button className="primary-action modal-confirm" type="button" onClick={onConfirm} disabled={busy || !seller || !unitsReady}>
             {busy ? 'Processando...' : 'Confirmar venda'}
           </button>
         </div>

@@ -1417,7 +1417,8 @@ export const supabaseService = {
       stateRegistration: c.state_registration || undefined,
       address: c.address || undefined,
       phone: c.phone || undefined,
-      contactEmail: c.contact_email || undefined
+      contactEmail: c.contact_email || undefined,
+      reservationVoucherTerms: c.reservation_voucher_terms || undefined
     }));
   },
 
@@ -1433,7 +1434,8 @@ export const supabaseService = {
       state_registration: c.stateRegistration || null,
       address: c.address || null,
       phone: c.phone || null,
-      contact_email: c.contactEmail || null
+      contact_email: c.contactEmail || null,
+      reservation_voucher_terms: c.reservationVoucherTerms?.trim() || null
     };
 
     const { error } = await supabase.from('store_configs').upsert(payload);
