@@ -299,6 +299,22 @@ omissão — usuário pode mudar).
 - PDV: `src/app/reservationVoucher.ts` (impressão), CPF com validação, "Reimprimir voucher" na lista, seleção de serial na conversão.
 - **Aplicar a migration, PDV e ERP juntos** (PDV antigo deixa de reservar; ERP novo grava `reservation_voucher_terms`).
 
+### Clientes + consulta de garantia no PDV (desenho APROVADO 2026-10-24; migration `20261024_customers_warranty.sql` NÃO aplicada — depende da 20261023)
+Decisões: cliente **sempre opcional** na venda; cadastro único por franqueado com código automático; campos: CPF (único,
+validado), nome, celular, consentimento LGPD (obrigatórios), e-mail, CEP, endereço, número, complemento, bairro, cidade, UF,
+observação (opcionais) — **sem** data de nascimento, pai/mãe, sexo, CSOSN, crédito bloqueado; CEP preenche endereço via
+**ViaCEP**; no PDV o vendedor cadastra e corrige contato/endereço, **CPF e nome só no ERP**; consulta de garantia no PDV
+(pedido do usuário; desenho da IA: busca por serial/IMEI/CPF, qualquer loja do tenant, "garantia até" + selo).
+- Migration: `is_valid_cpf`, tabela `customers` (RLS ERP, triggers de tenant e `zz_customer_fields_trigger`: normaliza,
+  valida, código sequencial com lock), `sales.customer_id`/`product_reservations.customer_id` preenchidos por trigger a partir
+  do CPF já gravado (nenhuma RPC de venda/reserva mudou), RPCs `search_pos_customers`, `save_pos_customer`, `find_pos_warranty`.
+- PDV: bloco "Cliente (opcional)" no carrinho (lista/cadastro/edição), venda envia `clientCpf/clientName` (parâmetros já
+  existentes), conversão envia o CPF da reserva, Reservar pré-preenche com o cliente, botão **Garantia** no topo
+  (`src/app/CustomerModals.tsx`, `WarrantyPanel.tsx`, `cpf.ts`, `services/supabase/customers.ts`).
+- ERP: menu **Clientes** (`ClientesView.tsx`): lista, busca, cadastro/edição completa, histórico de compras com garantia.
+- Voucher refeito no layout da foto (2026-10-24) com o logo (`KanguruPDV/src/assets/beb-games-logo.png`, fundo removido por
+  script a partir do print; pedir arquivo original em alta se a impressão ficar serrilhada).
+
 ---
 
 ### Vendedores no PDV + relatórios do Histórico de Vendas (desenho de 2026-10-16)
@@ -402,6 +418,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-24** — Voucher no layout idêntico ao da foto, com logo. Clientes (PDV + ERP) e consulta de garantia no PDV implementados (migration 20261024). Builds ok. Pendente: md5 da 20261023, aplicar 20261023 e depois 20261024, testar.
 - **2026-10-23** — Encomenda + voucher de reserva + busca com produtos sem estoque: desenho aprovado e implementado (migration 20261023 + PDV + ERP; builds ok; prévia do voucher conferida). Próximo passo: usuário conferir md5 das funções, aplicar e testar; enviar o arquivo do logo.
 - **2026-10-19 (2)** — Usuário aplicou a 20261018 e aprovou todos os testes da Parte 2 e dos campos de valor. Novo pedido em desenho: busca do PDV mostrar produtos sem estoque com "Sem estoque" em vermelho.
 - **2026-10-19** — Campos de valor padronizados (pedido e desenho aprovados pelo usuário): componente `ValueInput` (ERP `src/components/ValueInput.tsx`, PDV `src/app/ValueInput.tsx`) em todos os campos de dinheiro/percentual/quantidade (19 no ERP, 6 no PDV): começa vazio com dica "0,00", sem setinhas, **só vírgula** como decimal (ponto é ignorado, decisão do usuário), máx. 2 casas, sem zero à esquerda, vazio = 0; quantidades só inteiros. Sem mudança no banco. Resolvido também: tela branca no PDV em modo dev era cache antigo do WebView (DevTools > Rede > Desativar cache). Usuário confirmou que apagou `KanguruPDV/.env.example` (era modelo vazio).

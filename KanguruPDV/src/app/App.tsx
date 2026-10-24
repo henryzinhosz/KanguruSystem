@@ -11,13 +11,19 @@ import {
   Plus,
   ScanBarcode,
   Search,
+  ShieldCheck,
   Trash2,
+  UserRound,
   WalletCards,
   X,
 } from 'lucide-react';
 import { terminalAuth } from '../services/supabase/auth';
 import ValueInput, { formatValueText, parseValueText } from './ValueInput';
 import { formatCpf, printReservationVoucher, type ReservationVoucherData } from './reservationVoucher';
+import { isValidCpf, maskCpf } from './cpf';
+import { CustomerFormModal, CustomerPickerModal } from './CustomerModals';
+import { WarrantyPanel } from './WarrantyPanel';
+import type { PosCustomer } from '../services/supabase/customers';
 import {
   findPosSerialUnit,
   getPosAvailableSerialUnits,
@@ -62,6 +68,7 @@ type Screen =
   | 'cash-open'
   | 'sale'
   | 'reservations'
+  | 'warranty'
   | 'cash-movement'
   | 'cash-close';
 type PaymentMethod = PaymentMethodKey;
@@ -93,27 +100,6 @@ const emptyCounts: CashCounts = {
   voucher: 0,
   creditAccount: 0,
 };
-
-// CPF valido: 11 digitos com os dois digitos verificadores certos.
-function isValidCpf(value: string): boolean {
-  const digits = value.replace(/\D/g, '');
-  if (digits.length !== 11 || /^(\d)\1{10}$/.test(digits)) return false;
-  const check = (length: number) => {
-    let sum = 0;
-    for (let index = 0; index < length; index += 1) sum += Number(digits[index]) * (length + 1 - index);
-    const rest = (sum * 10) % 11;
-    return rest === 10 ? 0 : rest;
-  };
-  return check(9) === Number(digits[9]) && check(10) === Number(digits[10]);
-}
-
-function maskCpf(value: string): string {
-  const digits = value.replace(/\D/g, '').slice(0, 11);
-  return digits
-    .replace(/^(\d{3})(\d)/, '$1.$2')
-    .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
-    .replace(/\.(\d{3})(\d)/, '.$1-$2');
-}
 
 function errorMessage(error: unknown): string {
   const message =
@@ -308,6 +294,10 @@ export function App() {
   const [reservationCustomerPhone, setReservationCustomerPhone] = useState('');
   const [reservationCustomerCpf, setReservationCustomerCpf] = useState('');
   const [storeProfile, setStoreProfile] = useState<PosStoreProfile | null>(null);
+  // Cliente da venda (opcional): identifica a compra para nota e garantia.
+  const [saleCustomer, setSaleCustomer] = useState<PosCustomer | null>(null);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [customerForm, setCustomerForm] = useState<{ customer: PosCustomer | null; cpf: string } | null>(null);
   // Entrega de encomenda com serial: unidade escolhida por linha da reserva.
   const [conversionUnitChoices, setConversionUnitChoices] = useState<Record<string, string>>({});
   const [conversionUnitOptions, setConversionUnitOptions] = useState<Record<string, PosSerialUnit[]>>({});
@@ -719,8 +709,8 @@ export function App() {
         grossAmount,
         feeAmount: 0,
         netAmount: grossAmount,
-        clientCpf: null,
-        clientName: null,
+        clientCpf: saleCustomer?.cpf ?? null,
+        clientName: saleCustomer?.name ?? null,
         timestamp: new Date().toISOString(),
         status: 'CONCLUIDA',
         requiresApproval: false,
@@ -754,6 +744,7 @@ export function App() {
       setPaymentLines([]);
       setSaleSellerCode('');
       setSaleSeller(null);
+      setSaleCustomer(null);
       setAdminApprovalPassword('');
       setAdminApprovalOpen(false);
       setMessage(
@@ -895,6 +886,7 @@ export function App() {
       setReservationCustomerName('');
       setReservationCustomerPhone('');
       setReservationCustomerCpf('');
+      setSaleCustomer(null);
       setReservationDeposit('');
       setReservationSellerCode('');
       setReservationSeller(null);
@@ -965,7 +957,7 @@ export function App() {
         grossAmount: total,
         feeAmount: 0,
         netAmount: total,
-        clientCpf: null,
+        clientCpf: reservation.customerCpf,
         clientName: reservation.customerName,
         timestamp: new Date().toISOString(),
         status: 'CONCLUIDA',
@@ -1305,6 +1297,28 @@ export function App() {
     );
   }
 
+  if (screen === 'warranty') {
+    return (
+      <main className="sale-shell">
+        <header className="sale-header">
+          <div>
+            <Brand compact />
+            <div>
+              <strong>Garantia</strong>
+              <span>{terminal?.tradeName ?? terminal?.unitId}</span>
+            </div>
+          </div>
+          <div className="header-actions">
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('sale')}>
+              Voltar para venda
+            </button>
+          </div>
+        </header>
+        <WarrantyPanel />
+      </main>
+    );
+  }
+
   if (screen === 'reservations') {
     return (
       <main className="sale-shell">
@@ -1440,6 +1454,9 @@ export function App() {
         <div className="header-actions">
           <button className="reservation-nav" type="button" onClick={() => void openReservations()} disabled={busy}>
             <ClipboardList size={18} /> Reservas
+          </button>
+          <button className="reservation-nav" type="button" onClick={() => setScreen('warranty')} disabled={busy}>
+            <ShieldCheck size={18} /> Garantia
           </button>
           <button
             className="icon-button"
@@ -1602,6 +1619,27 @@ export function App() {
             )}
           </div>
 
+          <div className="sale-customer">
+            <span className="sale-customer-label"><UserRound size={16} /> Cliente (opcional)</span>
+            {saleCustomer ? (
+              <div className="sale-customer-selected">
+                <div>
+                  <strong>{saleCustomer.name}</strong>
+                  <small>CPF {formatCpf(saleCustomer.cpf)} | {saleCustomer.phone}</small>
+                </div>
+                <div className="sale-customer-actions">
+                  <button className="text-action" type="button" onClick={() => setCustomerForm({ customer: saleCustomer, cpf: '' })}>Editar</button>
+                  <button className="text-action" type="button" onClick={() => setCustomerPickerOpen(true)}>Trocar</button>
+                  <button className="text-action" type="button" onClick={() => setSaleCustomer(null)}>Remover</button>
+                </div>
+              </div>
+            ) : (
+              <button className="customer-pick" type="button" disabled={busy} onClick={() => setCustomerPickerOpen(true)}>
+                <Search size={16} /> Selecionar ou cadastrar cliente
+              </button>
+            )}
+          </div>
+
           <PaymentLinesEditor
             lines={paymentLines}
             total={grossAmount}
@@ -1628,7 +1666,14 @@ export function App() {
             className="reserve-action"
             type="button"
             disabled={busy || cart.length === 0 || cart.some((item) => item.itemType !== 'PRODUCT')}
-            onClick={() => setReservationDialogOpen(true)}
+            onClick={() => {
+              if (saleCustomer) {
+                setReservationCustomerName(saleCustomer.name);
+                setReservationCustomerCpf(maskCpf(saleCustomer.cpf));
+                setReservationCustomerPhone(saleCustomer.phone);
+              }
+              setReservationDialogOpen(true);
+            }}
           >
             Reservar
           </button>
@@ -1677,6 +1722,31 @@ export function App() {
             }
           }}
           onConfirm={() => void confirmDiscountApproval()}
+        />
+      )}
+      {customerPickerOpen && (
+        <CustomerPickerModal
+          onSelect={(customer) => {
+            setSaleCustomer(customer);
+            setCustomerPickerOpen(false);
+          }}
+          onNew={(cpf) => {
+            setCustomerPickerOpen(false);
+            setCustomerForm({ customer: null, cpf });
+          }}
+          onClose={() => setCustomerPickerOpen(false)}
+        />
+      )}
+      {customerForm && (
+        <CustomerFormModal
+          customer={customerForm.customer}
+          initialCpf={customerForm.cpf}
+          onSaved={(customer) => {
+            setSaleCustomer(customer);
+            setCustomerForm(null);
+            setMessage(`Cliente ${customer.name} vinculado à venda.`);
+          }}
+          onClose={() => setCustomerForm(null)}
         />
       )}
       {reservationDialogOpen && (

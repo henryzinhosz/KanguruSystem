@@ -22,7 +22,8 @@ import {
   SerializedStockEntryUnit,
   ProductStoreCost,
   StockEntryLine,
-  SaleStatus
+  SaleStatus,
+  Customer
 } from '../types';
 
 // Helper to check if an error is due to a missing table (relation does not exist)
@@ -913,6 +914,61 @@ export const supabaseService = {
       };
     } catch (e: any) {
       return { connected: false, error: e.message || 'Erro desconhecido ao conectar' };
+    }
+  },
+
+  // === CLIENTES ===
+  async getCustomers(): Promise<Customer[]> {
+    const { data, error } = await supabase.from('customers').select('*').order('name');
+    if (error) throw error;
+    return (data || []).map(c => ({
+      id: c.id,
+      code: Number(c.code),
+      cpf: c.cpf,
+      name: c.name,
+      phone: c.phone,
+      email: c.email ?? null,
+      cep: c.cep ?? null,
+      address: c.address ?? null,
+      addressNumber: c.address_number ?? null,
+      complement: c.complement ?? null,
+      district: c.district ?? null,
+      city: c.city ?? null,
+      state: c.state ?? null,
+      lgpdConsent: Boolean(c.lgpd_consent),
+      lgpdConsentAt: c.lgpd_consent_at ?? null,
+      notes: c.notes ?? null,
+      isActive: Boolean(c.is_active),
+      createdAt: c.created_at
+    }));
+  },
+
+  // Sem id: cadastra (o banco gera o codigo). Com id: atualiza todos os campos.
+  async saveCustomer(customer: Omit<Customer, 'code' | 'lgpdConsentAt' | 'createdAt'> & { id: string | null }): Promise<void> {
+    const payload = {
+      cpf: customer.cpf,
+      name: customer.name,
+      phone: customer.phone,
+      email: customer.email,
+      cep: customer.cep,
+      address: customer.address,
+      address_number: customer.addressNumber,
+      complement: customer.complement,
+      district: customer.district,
+      city: customer.city,
+      state: customer.state,
+      lgpd_consent: customer.lgpdConsent,
+      notes: customer.notes,
+      is_active: customer.isActive
+    };
+    const { error } = customer.id
+      ? await supabase.from('customers').update(payload).eq('id', customer.id)
+      : await supabase.from('customers').insert(payload);
+    if (error) {
+      if (error.code === '23505' && String(error.message || '').includes('customers_tenant_cpf_key')) {
+        throw new Error('Já existe um cliente com este CPF.');
+      }
+      throw error;
     }
   },
 

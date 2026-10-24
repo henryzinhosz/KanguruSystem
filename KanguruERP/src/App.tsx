@@ -16,6 +16,7 @@ import AssistênciaView from './components/AssistênciaView';
 import AdminToolsView from './components/AdminToolsView';
 import ConfiguracoesView from './components/ConfiguracoesView';
 import ServicosView from './components/ServicosView';
+import ClientesView from './components/ClientesView';
 import UcpView from './components/UcpView';
 import { UserRole } from './types';
 import { 
@@ -28,7 +29,8 @@ import {
   Layers,
   ArrowUpRight,
   Coins,
-  Settings
+  Settings,
+  Users
 } from 'lucide-react';
 
 export default function App() {
@@ -76,7 +78,7 @@ export default function App() {
   } = useErpStore();
 
   // Active Main View Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'servicos' | 'vendas' | 'assistencia' | 'financeiro' | 'admin' | 'configuracoes'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'servicos' | 'clientes' | 'vendas' | 'assistencia' | 'financeiro' | 'admin' | 'configuracoes'>('dashboard');
 
   if (!currentUser) {
     return <LoginScreen accessError={authProfileError} />;
@@ -113,6 +115,7 @@ export default function App() {
     { id: 'dashboard', name: 'Dashboard Geral', icon: LayoutDashboard },
     { id: 'estoque', name: 'Catálogo & Estoque', icon: Package },
     { id: 'servicos', name: 'Serviços', icon: Wrench },
+    { id: 'clientes', name: 'Clientes', icon: Users },
     { id: 'vendas', name: 'Trade-In (Usados)', icon: Coins },
     { id: 'assistencia', name: 'Assistência / OS', icon: Wrench },
     { id: 'financeiro', name: 'Livro Caixa & DRE', icon: DollarSign },
@@ -216,6 +219,10 @@ export default function App() {
 
           {activeTab === 'servicos' && (
             <ServicosView services={services} saveService={saveService} deleteService={deleteService} />
+          )}
+
+          {activeTab === 'clientes' && (
+            <ClientesView sales={sales} products={products} storeConfigs={storeConfigs} />
           )}
 
           {activeTab === 'vendas' && (

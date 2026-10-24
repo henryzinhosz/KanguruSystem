@@ -192,6 +192,28 @@ export interface StockMovement {
   reason: string;
 }
 
+// Cliente do franqueado (todas as lojas). CPF e nome so mudam pelo ERP.
+export interface Customer {
+  id: string;
+  code: number;
+  cpf: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  cep: string | null;
+  address: string | null;
+  addressNumber: string | null;
+  complement: string | null;
+  district: string | null;
+  city: string | null;
+  state: string | null;
+  lgpdConsent: boolean;
+  lgpdConsentAt: string | null;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export interface SaleItem {
   itemType?: 'PRODUCT' | 'SERVICE';
   productId?: string;
@@ -202,6 +224,9 @@ export interface SaleItem {
   discountPercent?: number;
   lineTotal?: number;
   serials?: string[]; // serials linked to this item
+  // Congelados pelo servidor na venda.
+  itemSku?: string;
+  itemName?: string;
   cardCondition?: CardCondition;
   // Custo congelado pelo servidor no momento da venda (a partir da 2.7b).
   unitCost?: number;
