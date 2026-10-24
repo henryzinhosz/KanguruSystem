@@ -1,5 +1,5 @@
 import { FormEvent, useState } from 'react';
-import { Building2, Check, Pencil, Plus, Save, Store, Trash2, UserRound, Users } from 'lucide-react';
+import { Building2, Check, Pencil, Plus, Save, Store, Trash2, UserRound, Users, X } from 'lucide-react';
 import { PdvOperator, PdvOperatorPermissions, StoreConfig, User, UserRole } from '../types';
 import ValueInput from './ValueInput';
 
@@ -75,6 +75,8 @@ export default function ConfiguracoesView({
   const [profileMessage, setProfileMessage] = useState('');
   const [profileError, setProfileError] = useState('');
   const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
+  // Cadastro/edicao de loja em janela (modal) sobre o ERP.
+  const [storeModalOpen, setStoreModalOpen] = useState(false);
   const [storeForm, setStoreForm] = useState<Omit<StoreConfig, 'unitId'>>(EMPTY_STORE);
   const [storeMessage, setStoreMessage] = useState('');
   const [storeError, setStoreError] = useState('');
@@ -127,12 +129,29 @@ export default function ConfiguracoesView({
       setStoreMessage(editingUnitId ? 'Dados da loja atualizados.' : 'Loja cadastrada com sucesso.');
       setEditingUnitId(null);
       setStoreForm(EMPTY_STORE);
+      setStoreModalOpen(false);
     } catch (error: any) {
       setStoreError(error?.message || 'Não foi possível salvar os dados da loja.');
     }
   };
 
+  const openNewStore = () => {
+    setEditingUnitId(null);
+    setStoreForm(EMPTY_STORE);
+    setStoreError('');
+    setStoreMessage('');
+    setStoreModalOpen(true);
+  };
+
+  const closeStoreModal = () => {
+    setStoreModalOpen(false);
+    setEditingUnitId(null);
+    setStoreForm(EMPTY_STORE);
+    setStoreError('');
+  };
+
   const editStore = (store: StoreConfig) => {
+    setStoreModalOpen(true);
     setEditingUnitId(store.unitId);
     setStoreForm({
       tradeName: store.tradeName || '',
@@ -250,12 +269,17 @@ export default function ConfiguracoesView({
       </div>
 
       <section className="bg-white border border-slate-200 rounded-lg p-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <UserRound className="w-5 h-5 text-blue-600" />
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">Perfil do usuário</h3>
-            <p className="text-xs text-slate-500">Este nome aparece no cabeçalho e nos novos registros criados por você.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <UserRound className="w-5 h-5 text-blue-600" />
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">Perfil do usuário</h3>
+              <p className="text-xs text-slate-500">Este nome aparece no cabeçalho e nos novos registros criados por você.</p>
+            </div>
           </div>
+          <button type="button" onClick={openNewStore} className="px-4 py-2.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 shrink-0">
+            <Building2 className="w-4 h-4" />Criar loja
+          </button>
         </div>
 
         {profileError && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{profileError}</p>}
@@ -277,8 +301,10 @@ export default function ConfiguracoesView({
         </form>
       </section>
 
-      <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6">
+      <section>
         <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-4">
+          {storeMessage && <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-2"><Check className="w-4 h-4" />{storeMessage}</p>}
+          {storeError && !storeModalOpen && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{storeError}</p>}
           <div className="flex items-center gap-2">
             <Store className="w-5 h-5 text-blue-600" />
             <div>
@@ -338,26 +364,33 @@ export default function ConfiguracoesView({
           </div>
         </div>
 
-        <form onSubmit={handleStoreSubmit} className="bg-white border border-slate-200 rounded-lg p-5 space-y-3 h-fit">
-          <div className="flex items-center gap-2">
-            <Building2 className="w-5 h-5 text-blue-600" />
-            <h3 className="text-sm font-bold text-slate-900">{editingUnitId ? 'Editar loja' : 'Cadastrar loja'}</h3>
-          </div>
-
-          {storeError && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{storeError}</p>}
-          {storeMessage && <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3">{storeMessage}</p>}
-
-          <StoreFields form={storeForm} onChange={updateStoreField} />
-
-          <div className="flex gap-2 pt-1">
-            {editingUnitId && <button type="button" onClick={() => { setEditingUnitId(null); setStoreForm(EMPTY_STORE); }} className="px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg">Cancelar</button>}
-            <button type="submit" className="ml-auto px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2">
-              {editingUnitId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-              {editingUnitId ? 'Salvar alterações' : 'Cadastrar loja'}
-            </button>
-          </div>
-        </form>
       </section>
+
+      {storeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="presentation" onKeyDown={event => { if (event.key === 'Escape') closeStoreModal(); }}>
+          <form onSubmit={handleStoreSubmit} role="dialog" aria-modal="true" aria-labelledby="store-modal-title" className="w-full max-w-lg max-h-[90vh] overflow-y-auto bg-white border border-slate-200 rounded-xl shadow-2xl p-5 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-blue-600" />
+                <h3 id="store-modal-title" className="text-sm font-bold text-slate-900">{editingUnitId ? `Editar loja · ${storeForm.tradeName || editingUnitId}` : 'Criar loja'}</h3>
+              </div>
+              <button type="button" onClick={closeStoreModal} title="Fechar" aria-label="Fechar" className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg"><X className="w-4 h-4" /></button>
+            </div>
+
+            {storeError && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{storeError}</p>}
+
+            <StoreFields form={storeForm} onChange={updateStoreField} />
+
+            <div className="flex gap-2 pt-1">
+              <button type="button" onClick={closeStoreModal} className="px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg">Cancelar</button>
+              <button type="submit" className="ml-auto px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2">
+                {editingUnitId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                {editingUnitId ? 'Salvar alterações' : 'Criar loja'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {canManageOperators && (
         <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6">
@@ -436,7 +469,7 @@ function StoreFields({ form, onChange }: {
         />
       </label>
       <label className="block text-xs font-bold text-slate-700">
-        Regras do voucher de reserva <span className="font-normal text-slate-400">(impressas no voucher do PDV; em branco usa o texto padrão)</span>
+        Regras do voucher de reserva desta loja <span className="font-normal text-slate-400">(impressas nos vouchers do PDV desta loja; cada loja tem o seu texto; em branco usa o texto padrão)</span>
         <textarea
           rows={4}
           value={form.reservationVoucherTerms || ''}
