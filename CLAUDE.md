@@ -115,6 +115,19 @@ como no Linx: **NFC-e** (enviada à Fazenda) e **"Não Fiscal"** (mesmo cupom, s
 por produto (CFOP, CST/CSOSN, NCM, ICMS). Impressão de cupom térmico ESC/POS entra aqui.
 
 **2.10:** referência visual Linx Degust, com liberdade para ser mais moderno; aceita refazer o CSS.
+**2.10 — modelo de MULTI TELAS (pedido do usuário em 2026-10-24, referência: prints do Linx Degust 5.9):** hoje o PDV tem
+só 3 telas (abertura de caixa, venda, fechamento) e informação demais na de venda. Reorganizar assim:
+- **Menu inicial em mosaico de botões grandes coloridos** por grupo (estilo Degust): verde = venda (Balcão/Nova venda,
+  Cliente, Reservas, Garantia, Nota Fiscal), azul = caixa (Suprimento, Sangria, Abrir gaveta), laranja = Operacional
+  (abertura, fechamento, caixa parcial/diário, reimpressões), vermelho = Consultas/Relatórios, roxo = Configurações e
+  Cadastros, Comunicação, Trocar usuário. Barra superior fixa: PDV nº, data do caixa, abertura nº, operador, hora.
+- Botões de grupo abrem **sub-menu em janela** com opções numeradas (ex.: "Operacional" e "Consultas/Relatórios").
+- **Venda em sequência de telas:** (1) tela de lançamento — itens à esquerda com total, produtos/categorias no centro e à
+  direita, botões de ação embaixo com atalhos (F2 código/nome, F5 finalizar, F6 cancelar, Esc sair); (2) **Finalizar
+  venda** — formas de pagamento em grade + teclado numérico + atalhos de valor, resumo (subtotal, desconto, total, pago,
+  troco); (3) **Identificar consumidor** (CPF/CNPJ/estrangeiro, nome) antes de concluir.
+- Tudo usável no toque (tablet) e por teclado. Liga com o item 3 da seção 8 (Grupos Restritos/senha Gestor por grupo).
+- Não implementar agora: fica para a 2.10 (ou antes, se o usuário pedir).
 
 ### Fase 3 — Licenciamento e cobrança: ⏸ ADIADA DE PROPÓSITO
 Bloqueio real por `subscription_status` (RLS + tela de aviso): desenhado, não implementado, aguarda o PDV ficar pronto.
