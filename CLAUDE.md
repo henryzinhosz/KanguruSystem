@@ -292,7 +292,7 @@ para quando o usuário tiver o leitor em mãos (junto com a Zebra) — por ora t
 - PDV: código exato → carrinho (já existia); senão tenta serial/IMEI → unidade direto no carrinho ou aviso do motivo.
   O PDV novo funciona mesmo antes da migration (a consulta extra falha em silêncio).
 
-### Encomenda (reserva sem estoque) + voucher de reserva + busca com sem-estoque (desenho APROVADO 2026-10-23; migration `20261023_reservation_backorder_voucher.sql` NÃO aplicada)
+### Encomenda (reserva sem estoque) + voucher de reserva + busca com sem-estoque (desenho APROVADO 2026-10-23; migration `20261023_reservation_backorder_voucher.sql` APLICADA + `20261025_reservation_stock_ready.sql` APLICADA; testes aprovados 2026-10-25)
 Decisões do usuário: busca mostra produto zerado com **"Sem estoque"** em vermelho e **"Possui estoque: <lojas>"** (só nomes);
 produto sem estoque **pode ser reservado** (encomenda — vendem antes de a mercadoria chegar); voucher impresso **ao criar a
 reserva**, A4 com via da loja (assinatura) + canhoto do cliente; valor: pagou tudo → só o valor; pagou parte → "Valor: X
@@ -312,7 +312,7 @@ omissão — usuário pode mudar).
 - PDV: `src/app/reservationVoucher.ts` (impressão), CPF com validação, "Reimprimir voucher" na lista, seleção de serial na conversão.
 - **Aplicar a migration, PDV e ERP juntos** (PDV antigo deixa de reservar; ERP novo grava `reservation_voucher_terms`).
 
-### Clientes + consulta de garantia no PDV (desenho APROVADO 2026-10-24; migration `20261024_customers_warranty.sql` NÃO aplicada — depende da 20261023)
+### Clientes + consulta de garantia no PDV (desenho APROVADO 2026-10-24; migration `20261024_customers_warranty.sql` APLICADA; testes aprovados 2026-10-25)
 Decisões: cliente **sempre opcional** na venda; cadastro único por franqueado com código automático; campos: CPF (único,
 validado), nome, celular, consentimento LGPD (obrigatórios), e-mail, CEP, endereço, número, complemento, bairro, cidade, UF,
 observação (opcionais) — **sem** data de nascimento, pai/mãe, sexo, CSOSN, crédito bloqueado; CEP preenche endereço via
@@ -431,6 +431,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-25 (3)** — Usuário aplicou a 20261025 e aprovou **todos os testes** (busca/encomenda, voucher, entrega, clientes PDV/ERP, garantia, não-regressão). Pergunta do usuário: por que o limite de desconto continua na loja — esclarecido que limite por produto estava só ADIADO (seção 8 item 2); proposta enviada (limite no produto com padrão da loja, ou só por produto), aguardando decisão.
 - **2026-10-25 (2)** — ERP Configurações: cadastro/edição de loja saiu da lateral e virou janela (modal) aberta pelo botão **"Criar loja"** no card do perfil e pelo lápis da lista; regras do voucher continuam **por loja** (campo da loja, rótulo deixa isso claro). Sem mudança no banco.
 - **2026-10-25** — Usuário conferiu md5 e aplicou 20261023 e 20261024. Ajustes dos testes: código exato de produto zerado mostra o card com "Sem estoque" (não adiciona direto); reserva de encomenda sem mercadoria mostra aviso no card e trava "Converter em venda" (migration `20261025_reservation_stock_ready.sql`, só `list_pos_reservations` + `stockReady`, NÃO aplicada; md5 vivo esperado 442e7e4250adbe11be3ba4255317d4e8 ou 7976a2a2ab5e6265d837b38f0b3ee51c).
 - **2026-10-24** — Voucher no layout idêntico ao da foto, com logo. Clientes (PDV + ERP) e consulta de garantia no PDV implementados (migration 20261024). Builds ok. Pendente: md5 da 20261023, aplicar 20261023 e depois 20261024, testar.
