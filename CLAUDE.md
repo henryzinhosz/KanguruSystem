@@ -431,6 +431,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-25** — Usuário conferiu md5 e aplicou 20261023 e 20261024. Ajustes dos testes: código exato de produto zerado mostra o card com "Sem estoque" (não adiciona direto); reserva de encomenda sem mercadoria mostra aviso no card e trava "Converter em venda" (migration `20261025_reservation_stock_ready.sql`, só `list_pos_reservations` + `stockReady`, NÃO aplicada; md5 vivo esperado 442e7e4250adbe11be3ba4255317d4e8 ou 7976a2a2ab5e6265d837b38f0b3ee51c).
 - **2026-10-24** — Voucher no layout idêntico ao da foto, com logo. Clientes (PDV + ERP) e consulta de garantia no PDV implementados (migration 20261024). Builds ok. Pendente: md5 da 20261023, aplicar 20261023 e depois 20261024, testar.
 - **2026-10-23** — Encomenda + voucher de reserva + busca com produtos sem estoque: desenho aprovado e implementado (migration 20261023 + PDV + ERP; builds ok; prévia do voucher conferida). Próximo passo: usuário conferir md5 das funções, aplicar e testar; enviar o arquivo do logo.
 - **2026-10-19 (2)** — Usuário aplicou a 20261018 e aprovou todos os testes da Parte 2 e dos campos de valor. Novo pedido em desenho: busca do PDV mostrar produtos sem estoque com "Sem estoque" em vermelho.

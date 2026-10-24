@@ -133,7 +133,7 @@ function errorMessage(error: unknown): string {
   if (message.includes('Customer CPF is required')) {
     return 'Informe um CPF válido do cliente para registrar a reserva.';
   }
-  if (message.includes('Insufficient physical stock for reserved product')) {
+  if (message.includes('Insufficient physical stock for reserved product') || /Product .+ was not found in inventory/.test(message)) {
     return 'O produto desta reserva ainda não chegou no estoque da loja. Dê entrada no estoque antes de entregar.';
   }
   if (message.includes('Select the arrived unit for the backorder line')) {
@@ -511,8 +511,10 @@ export function App() {
       const normalizedQuery = normalizeSku(trimmedQuery);
       const exactSkuMatches = found.filter((item) => normalizeSku(item.sku) === normalizedQuery);
 
-      if (exactSkuMatches.length === 1) {
-        await selectProduct(exactSkuMatches[0]);
+      // Codigo exato com estoque: direto no carrinho. Sem estoque: mostra o card ("Sem estoque").
+      const exactMatch = exactSkuMatches.length === 1 ? exactSkuMatches[0] : null;
+      if (exactMatch && !(exactMatch.itemType === 'PRODUCT' && exactMatch.availableQuantity <= 0)) {
+        await selectProduct(exactMatch);
         return;
       }
 
@@ -1355,6 +1357,7 @@ export function App() {
             <div className="reservation-list">
               {reservations.map((reservation) => {
                 const total = reservation.items.reduce((sum, item) => sum + item.lineTotal, 0);
+                const waitingStock = reservation.items.some((item) => item.stockReady === false);
                 return (
                   <article className={`reservation-entry${reservation.expired ? ' is-expired' : ''}`} key={reservation.id}>
                     <div className="reservation-entry-heading">
@@ -1390,8 +1393,13 @@ export function App() {
                       <span>Sinal {currency.format(reservation.depositAmount)}</span>
                       <strong>Saldo {currency.format(Math.max(0, total - reservation.depositAmount))}</strong>
                     </div>
+                    {waitingStock && (
+                      <p className="reservation-waiting">
+                        <CircleAlert size={16} /> Produto ainda sem estoque: não é possível finalizar a venda. Dê entrada no estoque quando a mercadoria chegar.
+                      </p>
+                    )}
                     <div className="reservation-actions">
-                      <button className="primary-action reservation-convert" type="button" disabled={busy} onClick={() => {
+                      <button className="primary-action reservation-convert" type="button" disabled={busy || waitingStock} onClick={() => {
                         setConversionPaymentLines([]);
                         setMessage(null);
                         setConversionReservation(reservation);

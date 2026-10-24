@@ -22,6 +22,8 @@ export interface PosReservationItem {
   lineTotal: number;
   isBackorder?: boolean;
   isSerialized?: boolean;
+  // Encomenda: a mercadoria ja chegou no estoque da loja (ausente = versao antiga, trata como pronta).
+  stockReady?: boolean;
 }
 
 export interface PosReservation {

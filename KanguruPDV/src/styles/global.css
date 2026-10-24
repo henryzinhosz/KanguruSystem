@@ -1091,3 +1091,13 @@ small {
 .warranty-details dd {
   margin: 0;
 }
+
+/* Reserva de encomenda aguardando a mercadoria chegar */
+.reservation-waiting {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0;
+  color: #b42318;
+  font: 700 0.85rem 'Trebuchet MS', sans-serif;
+}
