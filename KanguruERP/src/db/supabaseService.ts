@@ -995,7 +995,8 @@ export const supabaseService = {
       variations: p.variations || undefined,
       isKit: p.is_kit,
       kitItems: p.kit_items || undefined,
-      minStock: p.min_stock ?? null
+      minStock: p.min_stock ?? null,
+      maxDiscountPercent: p.max_discount_percent == null ? null : Number(p.max_discount_percent)
     }));
   },
 
@@ -1016,7 +1017,8 @@ export const supabaseService = {
       variations: p.variations || null,
       is_kit: p.isKit || false,
       kit_items: p.kitItems || null,
-      min_stock: p.minStock ?? null
+      min_stock: p.minStock ?? null,
+      max_discount_percent: p.maxDiscountPercent ?? null
     };
 
     const { data, error } = await supabase

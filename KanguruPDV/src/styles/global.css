@@ -1101,3 +1101,9 @@ small {
   color: #b42318;
   font: 700 0.85rem 'Trebuchet MS', sans-serif;
 }
+
+.cart-discount-label .discount-limit {
+  display: inline;
+  color: #647366;
+  font-weight: 400;
+}

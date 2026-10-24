@@ -141,6 +141,8 @@ export default function EstoqueView({
   const [newProdStore, setNewProdStore] = useState('');
   const [newProdQty, setNewProdQty] = useState(0);
   const [newProdMinStock, setNewProdMinStock] = useState('');
+  const [newProdMaxDiscount, setNewProdMaxDiscount] = useState<number | null>(null);
+  const [maxDiscountDrafts, setMaxDiscountDrafts] = useState<Record<string, number | null>>({});
   const [newProdError, setNewProdError] = useState('');
   const [newProdSaving, setNewProdSaving] = useState(false);
   const [nextItemCode, setNextItemCode] = useState('');
@@ -300,7 +302,8 @@ export default function EstoqueView({
       warrantyMonths: newProdWarranty,
       isSerialized: newProdSerialized,
       isUsed: false,
-      minStock: minStockValue
+      minStock: minStockValue,
+      maxDiscountPercent: newProdMaxDiscount
       });
     } catch (error: any) {
       setNewProdError(error?.message || 'Não foi possível cadastrar o produto.');
@@ -321,6 +324,7 @@ export default function EstoqueView({
     setNewProdStore(defaultStoreId);
     setNewProdQty(0);
     setNewProdMinStock('');
+    setNewProdMaxDiscount(null);
     setShowAddProductModal(false);
   };
 
@@ -436,6 +440,21 @@ export default function EstoqueView({
       editProduct({ ...product, minStock: value });
     }
     clearDraft();
+  };
+
+  // Limite de desconto do produto (vazio = usa o padrao da loja). Grava ao sair do campo.
+  const saveMaxDiscount = (product: Product) => {
+    if (!(product.id in maxDiscountDrafts)) return;
+    const value = maxDiscountDrafts[product.id];
+    setMaxDiscountDrafts(previous => {
+      const next = { ...previous };
+      delete next[product.id];
+      return next;
+    });
+    if (value !== null && (value < 0 || value > 100)) return;
+    if (value !== (product.maxDiscountPercent ?? null)) {
+      editProduct({ ...product, maxDiscountPercent: value });
+    }
   };
 
   // Handle Transfer Submit (Atomic operation)
@@ -772,6 +791,21 @@ export default function EstoqueView({
                           </label>
                         ) : (
                           <span className="font-mono text-slate-400">Mínimo: {minStock}</span>
+                        )}
+                        {isAdmin ? (
+                          <label className="flex items-center gap-1 text-slate-400" title="Desconto máximo sem senha no PDV. Em branco = limite padrão da loja.">
+                            <span>Desc. máx. %:</span>
+                            <ValueInput
+                              value={p.id in maxDiscountDrafts ? maxDiscountDrafts[p.id] : (p.maxDiscountPercent ?? null)}
+                              placeholder="loja"
+                              onValueChange={(value) => setMaxDiscountDrafts(previous => ({ ...previous, [p.id]: value == null ? null : Math.min(100, value) }))}
+                              onBlur={() => saveMaxDiscount(p)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                              className="w-14 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-center font-mono text-slate-700 outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </label>
+                        ) : (
+                          <span className="font-mono text-slate-400">Desc. máx.: {p.maxDiscountPercent != null ? `${p.maxDiscountPercent}%` : 'padrão da loja'}</span>
                         )}
                         <span className="font-mono text-slate-400">Garantia: {p.warrantyMonths}m</span>
                       </div>
@@ -1547,6 +1581,17 @@ export default function EstoqueView({
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">Limite de desconto (%)</label>
+                <ValueInput
+                  value={newProdMaxDiscount}
+                  placeholder="Em branco = limite padrão da loja"
+                  onValueChange={(value) => setNewProdMaxDiscount(value == null ? null : Math.min(100, value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
+                />
+                <p className="text-[10px] text-slate-400">Desconto máximo que o vendedor pode dar no PDV sem a senha administrativa.</p>
               </div>
 
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mt-2 text-[11px] text-slate-500">

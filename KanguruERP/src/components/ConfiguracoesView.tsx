@@ -461,7 +461,7 @@ function StoreFields({ form, onChange }: {
         </label>
       ))}
       <label className="block text-xs font-bold text-slate-700">
-        Limite de desconto por item (%)
+        Limite de desconto padrão (%) <span className="font-normal text-slate-400">(usado quando o produto não tem limite próprio; vale também para serviços)</span>
         <ValueInput
           value={form.maxItemDiscountPercent || null}
           onValueChange={value => onChange('maxItemDiscountPercent', Math.min(100, value ?? 0))}

@@ -114,7 +114,7 @@ function errorMessage(error: unknown): string {
 
   const discountLimitError = message.match(/Discount exceeds the store limit of ([\d.]+) percent/i);
   if (discountLimitError) {
-    return `Desconto bloqueado. O limite desta loja é ${discountLimitError[1]}%.`;
+    return `Desconto bloqueado. O limite deste item é ${discountLimitError[1]}%.`;
   }
 
   const passwordLockedError = message.match(/Administrative password locked until (.+)$/i);
@@ -282,7 +282,6 @@ export function App() {
   const [closureNotes, setClosureNotes] = useState('');
   const [query, setQuery] = useState('');
   const [catalogItems, setCatalogItems] = useState<PosCatalogItem[]>([]);
-  const [maxItemDiscountPercent, setMaxItemDiscountPercent] = useState(0);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [reservations, setReservations] = useState<PosReservation[]>([]);
   const [reservationsLoading, setReservationsLoading] = useState(false);
@@ -507,7 +506,6 @@ export function App() {
     setMessage(null);
     try {
       const found = await searchPosItems(trimmedQuery);
-      if (found[0]) setMaxItemDiscountPercent(found[0].maxItemDiscountPercent);
       const normalizedQuery = normalizeSku(trimmedQuery);
       const exactSkuMatches = found.filter((item) => normalizeSku(item.sku) === normalizedQuery);
 
@@ -657,9 +655,10 @@ export function App() {
     closeSerialUnitModal();
   }
 
-  // Limite 0% significa "nenhum desconto sem senha" (mesma regra do servidor).
+  // Limite de cada item (produto; sem limite proprio, o padrao da loja). 0% = nenhum
+  // desconto sem senha (mesma regra do servidor).
   function cartHasOverLimitDiscount(): boolean {
-    return cart.some((item) => item.discountPercent > maxItemDiscountPercent);
+    return cart.some((item) => item.discountPercent > item.maxItemDiscountPercent);
   }
 
   async function finalizeSale() {
@@ -1560,7 +1559,6 @@ export function App() {
         <aside className="cart-panel">
           <div className="cart-heading">
             <h2>Carrinho</h2>
-            <small>Limite por item: {maxItemDiscountPercent}%</small>
             {cartHasOverLimitDiscount() && (
               <small className="discount-warning">
                 Itens acima do limite exigem a senha administrativa na finalização.
@@ -1584,7 +1582,7 @@ export function App() {
                       </>
                     ) : null}
                     <label className="cart-discount-label">
-                      Desconto (%)
+                      Desconto (%) <small className="discount-limit">limite {item.maxItemDiscountPercent}%</small>
                       <ValueInput
                         aria-label={`Desconto percentual de ${item.name}`}
                         placeholder="0"
@@ -1720,7 +1718,6 @@ export function App() {
           error={adminApprovalError}
           busy={busy}
           cartItems={cart}
-          maxItemDiscountPercent={maxItemDiscountPercent}
           onPassword={setAdminApprovalPassword}
           onClose={() => {
             if (!busy) {
@@ -2278,7 +2275,6 @@ interface AdminApprovalModalProps {
   error: string | null;
   busy: boolean;
   cartItems: CartItem[];
-  maxItemDiscountPercent: number;
   onPassword: (value: string) => void;
   onClose: () => void;
   onConfirm: () => void;
@@ -2289,12 +2285,11 @@ function AdminApprovalModal({
   error,
   busy,
   cartItems,
-  maxItemDiscountPercent,
   onPassword,
   onClose,
   onConfirm,
 }: AdminApprovalModalProps) {
-  const overLimit = cartItems.filter((item) => item.discountPercent > maxItemDiscountPercent);
+  const overLimit = cartItems.filter((item) => item.discountPercent > item.maxItemDiscountPercent);
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="serial-unit-modal" role="dialog" aria-modal="true" aria-labelledby="admin-approval-title">
@@ -2309,8 +2304,8 @@ function AdminApprovalModal({
         </div>
         <p className="modal-copy">
           {overLimit.length === 1
-            ? 'Um item deste carrinho excede o limite de desconto da loja.'
-            : `${overLimit.length} itens deste carrinho excedem o limite de desconto da loja.`}
+            ? 'Um item deste carrinho excede o limite de desconto.'
+            : `${overLimit.length} itens deste carrinho excedem o limite de desconto.`}
           Informe a senha administrativa para liberar a venda.
         </p>
         <ul className="admin-approval-list">
@@ -2320,7 +2315,7 @@ function AdminApprovalModal({
                 <strong>{item.name}</strong>
                 <small>
                   {item.itemType === 'SERVICE' ? 'Servico' : 'Produto'} | Desconto aplicado{' '}
-                  {item.discountPercent.toFixed(2)}% (limite {maxItemDiscountPercent}%)
+                  {item.discountPercent.toFixed(2)}% (limite {item.maxItemDiscountPercent}%)
                 </small>
               </span>
             </li>

@@ -131,6 +131,7 @@ export interface Product {
   isKit?: boolean;
   kitItems?: KitItem[];
   minStock?: number | null; // estoque minimo para alertas; null = nao definido (usa o padrao)
+  maxDiscountPercent?: number | null; // limite de desconto do produto no PDV; null = usa o padrao da loja
 }
 
 // Custo medio de um produto em uma loja (sem serial: media ponderada;
