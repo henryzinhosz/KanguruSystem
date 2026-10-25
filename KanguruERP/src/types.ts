@@ -131,6 +131,7 @@ export interface Product {
   isKit?: boolean;
   kitItems?: KitItem[];
   minStock?: number | null; // estoque minimo para alertas; null = nao definido (usa o padrao)
+  maxDiscountPercent?: number | null; // limite de desconto do produto no PDV; null = usa o padrao da loja
 }
 
 // Custo medio de um produto em uma loja (sem serial: media ponderada;
@@ -192,6 +193,28 @@ export interface StockMovement {
   reason: string;
 }
 
+// Cliente do franqueado (todas as lojas). CPF e nome so mudam pelo ERP.
+export interface Customer {
+  id: string;
+  code: number;
+  cpf: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  cep: string | null;
+  address: string | null;
+  addressNumber: string | null;
+  complement: string | null;
+  district: string | null;
+  city: string | null;
+  state: string | null;
+  lgpdConsent: boolean;
+  lgpdConsentAt: string | null;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
 export interface SaleItem {
   itemType?: 'PRODUCT' | 'SERVICE';
   productId?: string;
@@ -202,6 +225,9 @@ export interface SaleItem {
   discountPercent?: number;
   lineTotal?: number;
   serials?: string[]; // serials linked to this item
+  // Congelados pelo servidor na venda.
+  itemSku?: string;
+  itemName?: string;
   cardCondition?: CardCondition;
   // Custo congelado pelo servidor no momento da venda (a partir da 2.7b).
   unitCost?: number;
@@ -316,6 +342,8 @@ export interface StoreConfig {
   address?: string;
   phone?: string;
   contactEmail?: string;
+  // Texto das regras impresso no voucher de reserva do PDV (vazio = texto padrao).
+  reservationVoucherTerms?: string;
   paymentFees: {
     DINHEIRO: number; // percentage (e.g. 0)
     PIX: number; // percentage (e.g. 0.005 = 0.5%)

@@ -901,3 +901,209 @@ small {
 .seller-code-field .seller-code-error {
   color: #b42318;
 }
+
+/* Busca: produto sem estoque nesta loja (pode entrar como encomenda). */
+.product-row.is-out-of-stock {
+  background: #fbf8f6;
+}
+
+.product-row .stock-out {
+  color: #b42318;
+  font-weight: 700;
+}
+
+.product-row .stock-elsewhere {
+  max-width: 260px;
+  margin-left: auto;
+  color: #5d6b5a;
+  font-size: 0.8rem;
+}
+
+/* Encomenda: item reservado sem estoque, entregue quando chegar. */
+.backorder-tag {
+  display: inline-block;
+  margin: 0.2rem 0 0.1rem 0.35rem;
+  border: 1px solid #e3b38f;
+  border-radius: 999px;
+  padding: 0 0.5rem;
+  color: #923c21;
+  background: #fff4ec;
+  font-family: 'Trebuchet MS', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.cart-item .backorder-tag {
+  margin-left: 0;
+}
+
+.field-error {
+  display: block;
+  margin-top: 0.25rem;
+  color: #b42318;
+  font-family: 'Trebuchet MS', sans-serif;
+  font-size: 0.8rem;
+}
+
+.backorder-units {
+  display: grid;
+  gap: 0.6rem;
+  margin-bottom: 0.9rem;
+  border: 1px dashed #e3b38f;
+  border-radius: 6px;
+  padding: 0.75rem;
+  background: #fffaf6;
+}
+
+.reservation-reprint {
+  min-height: 42px;
+}
+
+/* Cliente da venda (opcional) */
+.sale-customer {
+  margin: 0.9rem 0;
+  border: 1px solid #d0dacd;
+  border-radius: 6px;
+  padding: 0.7rem 0.8rem;
+  background: #fbfcf7;
+}
+
+.sale-customer-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.45rem;
+  color: #3b4a3c;
+  font: 700 0.8rem 'Trebuchet MS', sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sale-customer-selected strong,
+.sale-customer-selected small {
+  display: block;
+}
+
+.sale-customer-selected small {
+  color: #5d6b5a;
+}
+
+.sale-customer-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+}
+
+.customer-pick {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 40px;
+  border: 1px dashed #9db59a;
+  border-radius: 5px;
+  color: #285e3a;
+  background: #fff;
+  font: 700 0.85rem 'Trebuchet MS', sans-serif;
+  cursor: pointer;
+}
+
+.customer-modal {
+  width: min(100%, 720px);
+}
+
+.customer-results {
+  max-height: 340px;
+  overflow: auto;
+  margin: 0.8rem 0;
+}
+
+.customer-form-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem 0.9rem;
+  margin: 0.8rem 0;
+}
+
+.customer-form-grid label {
+  display: block;
+}
+
+.customer-form-grid .span-2 {
+  grid-column: span 2;
+}
+
+.customer-form-grid .span-3 {
+  grid-column: span 3;
+}
+
+.customer-form-grid input[readonly] {
+  color: #5d6b5a;
+  background: #eef2ea;
+}
+
+.field-hint {
+  display: block;
+  margin-top: 0.25rem;
+  color: #5d6b5a;
+  font: 0.78rem 'Trebuchet MS', sans-serif;
+}
+
+/* Consulta de garantia */
+.warranty-panel h1 {
+  margin-top: 0;
+}
+
+.warranty-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  border-radius: 4px;
+  padding: 0.35rem 0.55rem;
+  font: 700 0.75rem 'Trebuchet MS', sans-serif;
+}
+
+.warranty-status.valid {
+  color: #1f6a3a;
+  background: #ddf0df;
+}
+
+.warranty-status.expired {
+  color: #b42318;
+  background: #fbe4e1;
+}
+
+.warranty-details {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 0.3rem 1rem;
+  margin: 0.8rem 0 0;
+  font: 0.88rem 'Trebuchet MS', sans-serif;
+}
+
+.warranty-details dt {
+  color: #647366;
+  font-weight: 700;
+}
+
+.warranty-details dd {
+  margin: 0;
+}
+
+/* Reserva de encomenda aguardando a mercadoria chegar */
+.reservation-waiting {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.6rem 0 0;
+  color: #b42318;
+  font: 700 0.85rem 'Trebuchet MS', sans-serif;
+}
+
+.cart-discount-label .discount-limit {
+  display: inline;
+  color: #647366;
+  font-weight: 400;
+}

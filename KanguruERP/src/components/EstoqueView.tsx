@@ -18,6 +18,9 @@ import {
   StockEntryLine,
 } from '../types';
 import { formatMoney } from '../db/finance';
+import { supabaseService } from '../db/supabaseService';
+import { sanitizeItemCode } from '../db/itemCode';
+import ValueInput from './ValueInput';
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
 const DEFAULT_MIN_STOCK = 2;
@@ -67,7 +70,7 @@ interface EstoqueViewProps {
     initialStoreId?: string,
     initialQty?: number,
     initialSerials?: string[]
-  ) => Product;
+  ) => Promise<Product>;
   editProduct: (product: Product) => void;
   registerMovement: (
     productId: string,
@@ -138,6 +141,11 @@ export default function EstoqueView({
   const [newProdStore, setNewProdStore] = useState('');
   const [newProdQty, setNewProdQty] = useState(0);
   const [newProdMinStock, setNewProdMinStock] = useState('');
+  const [newProdMaxDiscount, setNewProdMaxDiscount] = useState<number | null>(null);
+  const [maxDiscountDrafts, setMaxDiscountDrafts] = useState<Record<string, number | null>>({});
+  const [newProdError, setNewProdError] = useState('');
+  const [newProdSaving, setNewProdSaving] = useState(false);
+  const [nextItemCode, setNextItemCode] = useState('');
 
   // Form states: Stock Entry
   const [stockEntrySearch, setStockEntrySearch] = useState('');
@@ -228,19 +236,62 @@ export default function EstoqueView({
     return matchesSearch && matchesCategory;
   });
 
-  // Handle Add Product Submit
-  const handleAddProductSubmit = (e: React.FormEvent) => {
+  // Ao abrir o cadastro, mostra qual sera o proximo codigo automatico.
+  useEffect(() => {
+    if (!showAddProductModal) return;
+    setNewProdError('');
+    let active = true;
+    supabaseService.getNextItemCode()
+      .then(code => { if (active) setNextItemCode(code); })
+      .catch(() => { if (active) setNextItemCode(''); });
+    return () => { active = false; };
+  }, [showAddProductModal]);
+
+  // Leitor de codigo de barras na Entrada de Estoque: codigo exato + Enter seleciona o produto.
+  const handleStockEntrySearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
     e.preventDefault();
-    const trimmedSku = newProdSku.trim();
+    const code = stockEntrySearch.trim().toUpperCase();
+    if (!code) return;
+    const exact = products.filter(product => product.sku.toUpperCase() === code);
+    const match = exact.length === 1 ? exact[0] : (stockEntryResults.length === 1 ? stockEntryResults[0] : null);
+    if (match) {
+      setStockEntryProductId(match.id);
+      setStockEntrySearch('');
+    }
+  };
+
+  // Leitor nos campos de serial: cada bipe (Enter) vai para a proxima linha, criando-a se preciso.
+  const focusSerialInput = (index: number) => requestAnimationFrame(() => {
+    document.querySelector<HTMLInputElement>(`[data-serial-index="${index}"]`)?.focus();
+  });
+  const handleSerialKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, index: number) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (!serializedEntryUnits[index]?.serialNumber.trim()) return;
+    if (index === serializedEntryUnits.length - 1) {
+      setSerializedEntryUnits(previous => [...previous, { ...emptySerializedDraft(), unitCost: previous[previous.length - 1]?.unitCost ?? '' }]);
+    }
+    focusSerialInput(index + 1);
+  };
+
+  // Handle Add Product Submit
+  const handleAddProductSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setNewProdError('');
+    const trimmedSku = sanitizeItemCode(newProdSku.trim());
     const trimmedName = newProdName.trim();
     const trimmedBrand = newProdBrand.trim();
     const trimmedNcm = newProdNcm.trim();
 
-    if (!trimmedName || !trimmedSku) return;
+    // Codigo em branco: o banco gera o proximo numero automatico.
+    if (!trimmedName) return;
 
     const minStockValue = newProdMinStock.trim() === '' ? null : Math.max(0, parseInt(newProdMinStock, 10) || 0);
 
-    addProduct({
+    setNewProdSaving(true);
+    try {
+      await addProduct({
       sku: trimmedSku,
       name: trimmedName,
       category: newProdCategory,
@@ -251,8 +302,15 @@ export default function EstoqueView({
       warrantyMonths: newProdWarranty,
       isSerialized: newProdSerialized,
       isUsed: false,
-      minStock: minStockValue
-    });
+      minStock: minStockValue,
+      maxDiscountPercent: newProdMaxDiscount
+      });
+    } catch (error: any) {
+      setNewProdError(error?.message || 'Não foi possível cadastrar o produto.');
+      return;
+    } finally {
+      setNewProdSaving(false);
+    }
 
     // Reset Form
     setNewProdName('');
@@ -266,6 +324,7 @@ export default function EstoqueView({
     setNewProdStore(defaultStoreId);
     setNewProdQty(0);
     setNewProdMinStock('');
+    setNewProdMaxDiscount(null);
     setShowAddProductModal(false);
   };
 
@@ -383,6 +442,21 @@ export default function EstoqueView({
     clearDraft();
   };
 
+  // Limite de desconto do produto (vazio = usa o padrao da loja). Grava ao sair do campo.
+  const saveMaxDiscount = (product: Product) => {
+    if (!(product.id in maxDiscountDrafts)) return;
+    const value = maxDiscountDrafts[product.id];
+    setMaxDiscountDrafts(previous => {
+      const next = { ...previous };
+      delete next[product.id];
+      return next;
+    });
+    if (value !== null && (value < 0 || value > 100)) return;
+    if (value !== (product.maxDiscountPercent ?? null)) {
+      editProduct({ ...product, maxDiscountPercent: value });
+    }
+  };
+
   // Handle Transfer Submit (Atomic operation)
   const handleTransferSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -396,6 +470,11 @@ export default function EstoqueView({
 
     if (transferFrom === transferTo) {
       setTransferError('A unidade de origem e destino não podem ser iguais.');
+      return;
+    }
+
+    if (transferQty < 1) {
+      setTransferError('Informe a quantidade a transferir.');
       return;
     }
 
@@ -564,7 +643,7 @@ export default function EstoqueView({
               <input
                 id="search-product"
                 type="text"
-                placeholder="Pesquisar por nome ou SKU..."
+                placeholder="Pesquisar por nome ou código..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full bg-slate-50 text-slate-800 text-xs rounded-lg pl-9 pr-4 py-2.5 border border-slate-200 outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
@@ -621,7 +700,7 @@ export default function EstoqueView({
                           Estoque: {totalStock} un
                         </span>
                         <h3 className="text-sm font-bold text-slate-900 mt-1 font-sans">{p.name}</h3>
-                        <p className="text-xs text-slate-400 font-mono mt-0.5">SKU: {p.sku}</p>
+                        <p className="text-xs text-slate-400 font-mono mt-0.5">Código: {p.sku}</p>
                       </div>
                       <div className="text-right">
                         <span className="text-[10px] text-slate-400 font-mono block">Preço de Venda</span>
@@ -700,13 +779,11 @@ export default function EstoqueView({
                         {isAdmin ? (
                           <label className="flex items-center gap-1 text-slate-400" title="Abaixo deste número o produto entra nos alertas do Dashboard. Em branco = padrão (2).">
                             <span>Mínimo:</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="1"
-                              value={minStockDraft ?? (p.minStock == null ? '' : String(p.minStock))}
+                            <ValueInput
+                              decimals={0}
+                              value={minStockDraft !== undefined ? (minStockDraft === '' ? null : Number(minStockDraft)) : p.minStock}
                               placeholder={String(DEFAULT_MIN_STOCK)}
-                              onChange={(e) => setMinStockDrafts(previous => ({ ...previous, [p.id]: e.target.value }))}
+                              onValueChange={(value) => setMinStockDrafts(previous => ({ ...previous, [p.id]: value == null ? '' : String(value) }))}
                               onBlur={() => saveMinStock(p)}
                               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
                               className="w-12 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-center font-mono text-slate-700 outline-none focus:ring-1 focus:ring-blue-500"
@@ -714,6 +791,21 @@ export default function EstoqueView({
                           </label>
                         ) : (
                           <span className="font-mono text-slate-400">Mínimo: {minStock}</span>
+                        )}
+                        {isAdmin ? (
+                          <label className="flex items-center gap-1 text-slate-400" title="Desconto máximo sem senha no PDV. Em branco = limite padrão da loja.">
+                            <span>Desc. máx. %:</span>
+                            <ValueInput
+                              value={p.id in maxDiscountDrafts ? maxDiscountDrafts[p.id] : (p.maxDiscountPercent ?? null)}
+                              placeholder="loja"
+                              onValueChange={(value) => setMaxDiscountDrafts(previous => ({ ...previous, [p.id]: value == null ? null : Math.min(100, value) }))}
+                              onBlur={() => saveMaxDiscount(p)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+                              className="w-14 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 text-center font-mono text-slate-700 outline-none focus:ring-1 focus:ring-blue-500"
+                            />
+                          </label>
+                        ) : (
+                          <span className="font-mono text-slate-400">Desc. máx.: {p.maxDiscountPercent != null ? `${p.maxDiscountPercent}%` : 'padrão da loja'}</span>
                         )}
                         <span className="font-mono text-slate-400">Garantia: {p.warrantyMonths}m</span>
                       </div>
@@ -748,14 +840,15 @@ export default function EstoqueView({
             )}
 
             <div className="space-y-1.5">
-              <label className="font-medium text-slate-700 text-xs">Buscar produto por SKU ou nome</label>
+              <label className="font-medium text-slate-700 text-xs">Buscar produto por código ou nome <span className="font-normal text-slate-400">(pode bipar o código)</span></label>
               <div className="relative">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={stockEntrySearch}
                   onChange={(e) => setStockEntrySearch(e.target.value)}
-                  placeholder="Digite o SKU ou nome do produto"
+                  onKeyDown={handleStockEntrySearchKeyDown}
+                  placeholder="Digite ou bipe o código, ou digite o nome do produto"
                   className="w-full bg-slate-50 text-slate-800 text-xs rounded-lg pl-9 pr-4 py-2.5 border border-slate-200 outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
                 />
               </div>
@@ -779,7 +872,7 @@ export default function EstoqueView({
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-bold text-slate-900">{product.name}</p>
-                        <p className="text-[11px] text-slate-500 font-mono">SKU: {product.sku}</p>
+                        <p className="text-[11px] text-slate-500 font-mono">Código: {product.sku}</p>
                       </div>
                       <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-500">
                         {productStock} un
@@ -802,7 +895,7 @@ export default function EstoqueView({
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Produto selecionado</p>
                     <h4 className="text-sm font-bold text-slate-900">{selectedStockEntryProduct.name}</h4>
-                    <p className="text-[11px] text-slate-500 font-mono">SKU: {selectedStockEntryProduct.sku}</p>
+                    <p className="text-[11px] text-slate-500 font-mono">Código: {selectedStockEntryProduct.sku}</p>
                   </div>
                   <button
                     type="button"
@@ -856,12 +949,9 @@ export default function EstoqueView({
                     <div className="flex flex-wrap items-end gap-2 bg-slate-50 border border-slate-200 rounded-xl p-3">
                       <div className="space-y-1">
                         <label className="font-medium text-slate-700">Mesmo custo para todas as unidades (R$)</label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={serializedApplyAllCost}
-                          onChange={(e) => setSerializedApplyAllCost(e.target.value)}
+                        <ValueInput
+                          value={parseMoneyInput(serializedApplyAllCost)}
+                          onValueChange={(value) => setSerializedApplyAllCost(value == null ? '' : String(value))}
                           placeholder="Ex: 4135,00"
                           className="w-40 bg-white border border-slate-200 rounded-lg p-2 outline-none font-mono"
                         />
@@ -889,6 +979,8 @@ export default function EstoqueView({
                           <input
                             type="text"
                             value={unit.serialNumber}
+                            data-serial-index={index}
+                            onKeyDown={(e) => handleSerialKeyDown(e, index)}
                             onChange={(e) => setSerializedEntryUnits(previous => previous.map((current, currentIndex) => currentIndex === index ? { ...current, serialNumber: e.target.value } : current))}
                             placeholder="Ex: NB-X-0001"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
@@ -900,12 +992,9 @@ export default function EstoqueView({
                             placeholder="Opcional"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                           />
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            value={unit.unitCost}
-                            onChange={(e) => setSerializedEntryUnits(previous => previous.map((current, currentIndex) => currentIndex === index ? { ...current, unitCost: e.target.value } : current))}
+                          <ValueInput
+                            value={parseMoneyInput(unit.unitCost)}
+                            onValueChange={(value) => setSerializedEntryUnits(previous => previous.map((current, currentIndex) => currentIndex === index ? { ...current, unitCost: value == null ? '' : String(value) } : current))}
                             placeholder="0,00"
                             aria-label="Custo de compra da unidade"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono text-right"
@@ -936,12 +1025,9 @@ export default function EstoqueView({
                 <div className="space-y-3">
                 <div className="space-y-1 max-w-xs">
                   <label className="font-medium text-slate-700">Custo unitário desta compra (R$)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={stockEntryUnitCost}
-                    onChange={(e) => setStockEntryUnitCost(e.target.value)}
+                  <ValueInput
+                    value={parseMoneyInput(stockEntryUnitCost)}
+                    onValueChange={(value) => setStockEntryUnitCost(value == null ? '' : String(value))}
                     placeholder="Ex: 11,00"
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                   />
@@ -986,13 +1072,12 @@ export default function EstoqueView({
                               )}
                             </td>
                             <td className="px-3 py-3 rounded-r-xl border border-slate-200 border-l-0">
-                              <input
-                                type="number"
-                                min="0"
-                                value={stockEntryQuantities[store.unitId] ?? ''}
-                                onChange={(e) => setStockEntryQuantities(previous => ({
+                              <ValueInput
+                                decimals={0}
+                                value={stockEntryQuantities[store.unitId] ? Number(stockEntryQuantities[store.unitId]) : null}
+                                onValueChange={(value) => setStockEntryQuantities(previous => ({
                                   ...previous,
-                                  [store.unitId]: e.target.value
+                                  [store.unitId]: value == null ? '' : String(value)
                                 }))}
                                 className="w-full bg-white border border-slate-200 rounded-lg p-2 outline-none text-center font-mono"
                               />
@@ -1092,7 +1177,7 @@ export default function EstoqueView({
                   <option value="">-- Selecione o Produto --</option>
                   {products.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.name} (SKU: {p.sku})
+                      {p.name} (Código: {p.sku})
                     </option>
                   ))}
                 </select>
@@ -1129,11 +1214,10 @@ export default function EstoqueView({
               {/* Quantity */}
               <div className="space-y-1.5">
                 <label className="font-medium text-slate-700">Quantidade</label>
-                <input
-                  type="number"
-                  min="1"
-                  value={transferQty}
-                  onChange={(e) => setTransferQty(parseInt(e.target.value) || 1)}
+                <ValueInput
+                  decimals={0}
+                  value={transferQty || null}
+                  onValueChange={(value) => setTransferQty(value ?? 0)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                 />
               </div>
@@ -1324,7 +1408,7 @@ export default function EstoqueView({
                   }`}>
                     <div>
                       <h4 className="font-bold text-sm">{warrantyQueryResult.product?.name}</h4>
-                      <p className="opacity-80 text-[10px] font-mono">SKU: {warrantyQueryResult.product?.sku} | S/N: {warrantyQuerySerial}</p>
+                      <p className="opacity-80 text-[10px] font-mono">Código: {warrantyQueryResult.product?.sku} | S/N: {warrantyQuerySerial}</p>
                     </div>
                     <span className="font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white/20 text-[10px]">
                       {warrantyQueryResult.status}
@@ -1404,17 +1488,20 @@ export default function EstoqueView({
             </div>
 
             <form onSubmit={handleAddProductSubmit} className="p-5 space-y-4 text-xs font-sans">
+              {newProdError && (
+                <p role="alert" className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg text-[11px] font-medium">{newProdError}</p>
+              )}
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700">SKU do Produto</label>
+                  <label className="font-bold text-slate-700">Código do Produto</label>
                   <input
                     type="text"
-                    required
-                    placeholder="Ex: GPU-ASUS-4070"
+                    placeholder={nextItemCode ? `Automático: ${nextItemCode}` : 'Automático'}
                     value={newProdSku}
-                    onChange={(e) => setNewProdSku(e.target.value)}
+                    onChange={(e) => setNewProdSku(sanitizeItemCode(e.target.value))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                   />
+                  <p className="text-[10px] text-slate-400">Deixe em branco para gerar o próximo número. Só letras, números e hífen.</p>
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Categoria</label>
@@ -1470,38 +1557,41 @@ export default function EstoqueView({
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700" title="Usado só quando a loja ainda não tem custo de compra registrado. O custo real vem da Entrada de Estoque.">Custo padrão (R$)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={newProdCost || ''}
-                    onChange={(e) => setNewProdCost(parseFloat(e.target.value) || 0)}
+                  <ValueInput
+                    value={newProdCost || null}
+                    onValueChange={(value) => setNewProdCost(value ?? 0)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Preço Venda (R$)</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={newProdSell || ''}
-                    onChange={(e) => setNewProdSell(parseFloat(e.target.value) || 0)}
+                  <ValueInput
+                    value={newProdSell || null}
+                    onValueChange={(value) => setNewProdSell(value ?? 0)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Estoque mínimo</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    value={newProdMinStock}
+                  <ValueInput
+                    decimals={0}
+                    value={newProdMinStock === '' ? null : Number(newProdMinStock)}
                     placeholder={`Padrão: ${DEFAULT_MIN_STOCK}`}
-                    onChange={(e) => setNewProdMinStock(e.target.value)}
+                    onValueChange={(value) => setNewProdMinStock(value == null ? '' : String(value))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="font-bold text-slate-700">Limite de desconto (%)</label>
+                <ValueInput
+                  value={newProdMaxDiscount}
+                  placeholder="Em branco = limite padrão da loja"
+                  onValueChange={(value) => setNewProdMaxDiscount(value == null ? null : Math.min(100, value))}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
+                />
+                <p className="text-[10px] text-slate-400">Desconto máximo que o vendedor pode dar no PDV sem a senha administrativa.</p>
               </div>
 
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mt-2 text-[11px] text-slate-500">
@@ -1534,9 +1624,10 @@ export default function EstoqueView({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition"
+                  disabled={newProdSaving}
+                  className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition disabled:opacity-60"
                 >
-                  Confirmar Cadastro
+                  {newProdSaving ? 'Salvando...' : 'Confirmar Cadastro'}
                 </button>
               </div>
             </form>

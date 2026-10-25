@@ -11,6 +11,8 @@ export interface PosCatalogItem {
   warrantyMonths: number | null;
   requiresUnitSelection: boolean;
   maxItemDiscountPercent: number;
+  // Sem estoque nesta loja: nomes das outras lojas que tem o produto.
+  storesWithStock: string[];
 }
 
 export interface PosSerialUnit {
@@ -30,6 +32,7 @@ interface PosCatalogItemRow {
   warranty_months: number | string | null;
   requires_unit_selection: boolean | null;
   max_item_discount_percent: number | string;
+  stores_with_stock?: string[] | null;
 }
 
 interface PosSerialUnitRow {
@@ -56,6 +59,7 @@ export async function searchPosItems(query: string): Promise<PosCatalogItem[]> {
     warrantyMonths: item.warranty_months === null ? null : Number(item.warranty_months),
     requiresUnitSelection: item.requires_unit_selection === true,
     maxItemDiscountPercent: Number(item.max_item_discount_percent ?? 0),
+    storesWithStock: item.stores_with_stock ?? [],
   }));
 }
 
@@ -83,4 +87,50 @@ export async function getPosAvailableSerialUnits(
       imei: serialUnit.imei,
     };
   });
+}
+// Unidade pelo serial (ou IMEI) bipado. status: DISPONIVEL | VENDIDO | RESERVADO | PERDIDO | OUTRA_LOJA.
+// serialUnit so vem quando a unidade esta disponivel nesta loja.
+export interface PosScannedSerialUnit {
+  product: PosCatalogItem;
+  serialNumber: string;
+  status: string;
+  serialUnit: PosSerialUnit | null;
+}
+
+interface PosScannedSerialUnitRow extends PosCatalogItemRow {
+  serial_unit_id: string | null;
+  serial_number: string;
+  imei: string | null;
+  unit_status: string;
+}
+
+export async function findPosSerialUnit(code: string): Promise<PosScannedSerialUnit | null> {
+  const { data, error } = await supabase.rpc('find_pos_serial_unit', { p_code: code });
+  if (error) {
+    throw error;
+  }
+
+  const row = ((data ?? []) as PosScannedSerialUnitRow[])[0];
+  if (!row) return null;
+
+  return {
+    product: {
+      id: row.item_id,
+      itemType: row.item_type,
+      sku: row.sku,
+      name: row.name,
+      brand: row.brand,
+      sellPrice: Number(row.sell_price),
+      availableQuantity: Number(row.available_quantity),
+      warrantyMonths: row.warranty_months === null ? null : Number(row.warranty_months),
+      requiresUnitSelection: row.requires_unit_selection === true,
+      maxItemDiscountPercent: Number(row.max_item_discount_percent ?? 0),
+      storesWithStock: [],
+    },
+    serialNumber: row.serial_number,
+    status: row.unit_status,
+    serialUnit: row.serial_unit_id
+      ? { serialUnitId: row.serial_unit_id, serialNumber: row.serial_number, imei: row.imei }
+      : null,
+  };
 }

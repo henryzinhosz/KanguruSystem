@@ -103,8 +103,8 @@ por operador (inspirado no Linx Degust).
 | 2.4 Produtos serializados (`product_serial_units` DISPONIVEL/VENDIDO/RESERVADO, `mark_serial_units_sold`) | ✅ |
 | 2.5 Serviços e carrinho (`services`, `max_item_discount_percent`, `search_pos_items`, desconto por linha) | ✅ |
 | 2.6 Reserva de produto (`product_reservations`, sinal em ledger próprio, preço/desconto congelado) | ✅ |
-| 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada e testada (a)–(g) em 2026-10-14; falta só o PR para `main` (seção 6) |
-| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) ✅ implementada, migrations 20261015 e 20261016 aplicadas e **testes aprovados** (2026-10-16). Partes 2–3 depois (seção 7) |
+| 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada, testada e na `main` (PR #1, 2026-10-17) |
+| 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) ✅ testada e na `main`. Parte 2 (código de barras) ✅ migration 20261018 aplicada e testes aprovados (2026-10-19). Parte 3 (Zebra) aguarda impressora (seção 7) |
 | 2.8 Finalização da venda (fiscal, garantia) | ⚪ Não iniciada |
 | 2.9 Trocas e devoluções | ⚪ |
 | 2.10 Interface para tablet | ⚪ (design visual adiado de propósito para o fim) |
@@ -115,6 +115,19 @@ como no Linx: **NFC-e** (enviada à Fazenda) e **"Não Fiscal"** (mesmo cupom, s
 por produto (CFOP, CST/CSOSN, NCM, ICMS). Impressão de cupom térmico ESC/POS entra aqui.
 
 **2.10:** referência visual Linx Degust, com liberdade para ser mais moderno; aceita refazer o CSS.
+**2.10 — modelo de MULTI TELAS (pedido do usuário em 2026-10-24, referência: prints do Linx Degust 5.9):** hoje o PDV tem
+só 3 telas (abertura de caixa, venda, fechamento) e informação demais na de venda. Reorganizar assim:
+- **Menu inicial em mosaico de botões grandes coloridos** por grupo (estilo Degust): verde = venda (Balcão/Nova venda,
+  Cliente, Reservas, Garantia, Nota Fiscal), azul = caixa (Suprimento, Sangria, Abrir gaveta), laranja = Operacional
+  (abertura, fechamento, caixa parcial/diário, reimpressões), vermelho = Consultas/Relatórios, roxo = Configurações e
+  Cadastros, Comunicação, Trocar usuário. Barra superior fixa: PDV nº, data do caixa, abertura nº, operador, hora.
+- Botões de grupo abrem **sub-menu em janela** com opções numeradas (ex.: "Operacional" e "Consultas/Relatórios").
+- **Venda em sequência de telas:** (1) tela de lançamento — itens à esquerda com total, produtos/categorias no centro e à
+  direita, botões de ação embaixo com atalhos (F2 código/nome, F5 finalizar, F6 cancelar, Esc sair); (2) **Finalizar
+  venda** — formas de pagamento em grade + teclado numérico + atalhos de valor, resumo (subtotal, desconto, total, pago,
+  troco); (3) **Identificar consumidor** (CPF/CNPJ/estrangeiro, nome) antes de concluir.
+- Tudo usável no toque (tablet) e por teclado. Liga com o item 3 da seção 8 (Grupos Restritos/senha Gestor por grupo).
+- Não implementar agora: fica para a 2.10 (ou antes, se o usuário pedir).
 
 ### Fase 3 — Licenciamento e cobrança: ⏸ ADIADA DE PROPÓSITO
 Bloqueio real por `subscription_status` (RLS + tela de aviso): desenhado, não implementado, aguarda o PDV ficar pronto.
@@ -158,7 +171,7 @@ no SQL Editor com `20261014_drop_legacy_pos_terminal_sale.sql`; confirmado que s
 - ~~Aplicar a migration~~ (já aplicada). ~~Remover a versão antiga de 12 parâmetros~~ (feito em 2026-10-14).
 - Bundle Tauri não gerado (só `vite build`).
 - ✅ Testes manuais aprovados pelo usuário em 2026-10-14: (a) 1 método, (b) 2–3 métodos, (c) soma divergente rejeitada, (d) desconto acima do limite com senha correta/errada/bloqueio, (e) reserva com sinal + pagamento dividido, (f) fechamento com vendas novas e legadas juntas sem dupla contagem, (g) estorno de venda dividida.
-- Depois dos testes: PR de `feat/2.7-split-payments` para `main`.
+- ✅ Na `main` via PR #1 (junto com a 2.7b Parte 1 e vendedores), 2026-10-17.
 
 ---
 
@@ -262,6 +275,59 @@ Branch: `feat/2.7b-custos` (criado a partir de `feat/2.7-split-payments`, que ai
 
 Primeiro passo prático quando a Zebra chegar: teste de impressão ZPL a partir do Windows/PDV.
 
+### Parte 2 — código de barras (desenho APROVADO e implementado em 2026-10-18; migration `20261018_item_codes.sql` APLICADA e testes aprovados pelo usuário em 2026-10-19)
+Decisões: "SKU" vira **"Código"** nas telas (coluna `sku` continua no banco); **uma numeração só** para produtos e
+serviços do tenant; código só **letras, números e hífen**, maiúsculo, até 30; código em branco → banco gera o próximo
+número a partir de **10100**; código do fabricante não é usado (decisão de 2026-10-14). Teste com leitor físico fica
+para quando o usuário tiver o leitor em mãos (junto com a Zebra) — por ora testar digitando + Enter.
+- Migration: trigger `zz_item_code_trigger` (função `enforce_item_code`, sem GRANT) em `products` e `services` —
+  normaliza, valida, gera o número (lock por tenant) e impede código repetido entre as duas tabelas; não revalida código
+  antigo quando só outro campo muda (inclusive no upsert do ERP). Prefixo `zz_` = roda depois do trigger de tenant.
+  `next_item_code_for_tenant` (interna), `get_next_item_code()` (ERP, mostra o próximo), `find_pos_serial_unit(p_code)`
+  (PDV, sessão de terminal; serial ou IMEI → unidade da loja; status DISPONIVEL/VENDIDO/RESERVADO/PERDIDO/OUTRA_LOJA).
+  Nenhuma RPC de venda/reserva/caixa/estorno mudou. `search_pos_items` não mudou (md5 vivo 9daace98573cb66bab656122be988433).
+- ERP: cadastro de produto e de serviço com Código opcional ("Automático: 10105"), erro do banco aparece na tela (antes o
+  cadastro de produto falhava em silêncio); Entrada de Estoque: código exato + Enter seleciona o produto; Enter no
+  serial pula/cria a próxima linha. Regra no front: `src/db/itemCode.ts`.
+- PDV: código exato → carrinho (já existia); senão tenta serial/IMEI → unidade direto no carrinho ou aviso do motivo.
+  O PDV novo funciona mesmo antes da migration (a consulta extra falha em silêncio).
+
+### Encomenda (reserva sem estoque) + voucher de reserva + busca com sem-estoque (desenho APROVADO 2026-10-23; migration `20261023_reservation_backorder_voucher.sql` APLICADA + `20261025_reservation_stock_ready.sql` APLICADA; testes aprovados 2026-10-25)
+Decisões do usuário: busca mostra produto zerado com **"Sem estoque"** em vermelho e **"Possui estoque: <lojas>"** (só nomes);
+produto sem estoque **pode ser reservado** (encomenda — vendem antes de a mercadoria chegar); voucher impresso **ao criar a
+reserva**, A4 com via da loja (assinatura) + canhoto do cliente; valor: pagou tudo → só o valor; pagou parte → "Valor: X
+(Restante: Y)"; nada → "R$ 0,00 (Restante: total)", forma "A pagar na retirada"; NF só quando a reserva vira venda (2.8);
+data de retirada prevista = prazo da reserva; logo é única da rede (por ora texto "BeB GAMES"; **pedir o arquivo do logo**);
+regras do voucher editáveis por loja no ERP (texto padrão da foto). CPF **obrigatório** na reserva (recomendação aceita por
+omissão — usuário pode mudar).
+- Achado corrigido junto: a `search_pos_items` viva era a da 2.5 (não descontava reservas ativas).
+- Migration: `product_reservations.customer_cpf`, `product_reservation_items.is_backorder`, `store_configs.reservation_voucher_terms`;
+  `pos_store_available_qty` (interna) = estoque − linhas ativas sem unidade; `search_pos_items` (DROP+CREATE, retorno ganha
+  `stores_with_stock`); `get_pos_store_profile()`; `reserve_pos_cart` 7→8 parâmetros (`p_customer_cpf`, item `backorder`);
+  `list_pos_reservations` com CPF, `isBackorder`, `isSerialized`; `process_pos_terminal_sale` (mesma assinatura): linha de
+  encomenda com serial recebe na entrega a unidade escolhida (`item.serialUnitId`, precisa estar DISPONIVEL) e grava a unidade na
+  reserva. Funções copiadas da 20261017 por script e comparadas (diff só com os trechos novos).
+- Encomenda sem serial: quantidade fica segurada automaticamente quando a mercadoria chega. Com serial: unidade escolhida na
+  entrega (protege só na busca; vender o serial bipado direto ainda é possível — avisar o usuário se virar problema).
+- PDV: `src/app/reservationVoucher.ts` (impressão), CPF com validação, "Reimprimir voucher" na lista, seleção de serial na conversão.
+- **Aplicar a migration, PDV e ERP juntos** (PDV antigo deixa de reservar; ERP novo grava `reservation_voucher_terms`).
+
+### Clientes + consulta de garantia no PDV (desenho APROVADO 2026-10-24; migration `20261024_customers_warranty.sql` APLICADA; testes aprovados 2026-10-25)
+Decisões: cliente **sempre opcional** na venda; cadastro único por franqueado com código automático; campos: CPF (único,
+validado), nome, celular, consentimento LGPD (obrigatórios), e-mail, CEP, endereço, número, complemento, bairro, cidade, UF,
+observação (opcionais) — **sem** data de nascimento, pai/mãe, sexo, CSOSN, crédito bloqueado; CEP preenche endereço via
+**ViaCEP**; no PDV o vendedor cadastra e corrige contato/endereço, **CPF e nome só no ERP**; consulta de garantia no PDV
+(pedido do usuário; desenho da IA: busca por serial/IMEI/CPF, qualquer loja do tenant, "garantia até" + selo).
+- Migration: `is_valid_cpf`, tabela `customers` (RLS ERP, triggers de tenant e `zz_customer_fields_trigger`: normaliza,
+  valida, código sequencial com lock), `sales.customer_id`/`product_reservations.customer_id` preenchidos por trigger a partir
+  do CPF já gravado (nenhuma RPC de venda/reserva mudou), RPCs `search_pos_customers`, `save_pos_customer`, `find_pos_warranty`.
+- PDV: bloco "Cliente (opcional)" no carrinho (lista/cadastro/edição), venda envia `clientCpf/clientName` (parâmetros já
+  existentes), conversão envia o CPF da reserva, Reservar pré-preenche com o cliente, botão **Garantia** no topo
+  (`src/app/CustomerModals.tsx`, `WarrantyPanel.tsx`, `cpf.ts`, `services/supabase/customers.ts`).
+- ERP: menu **Clientes** (`ClientesView.tsx`): lista, busca, cadastro/edição completa, histórico de compras com garantia.
+- Voucher refeito no layout da foto (2026-10-24) com o logo (`KanguruPDV/src/assets/beb-games-logo.png`, fundo removido por
+  script a partir do print; pedir arquivo original em alta se a impressão ficar serrilhada).
+
 ---
 
 ### Vendedores no PDV + relatórios do Histórico de Vendas (desenho de 2026-10-16)
@@ -283,7 +349,7 @@ Decisões do usuário:
 ## 8. Pendências e ideias em aberto (não bloqueantes)
 
 1. **Terminologia/UX:** renomear "SKU" para "Código" na interface; leitor preenchendo o campo; código automático a partir de `10100` quando o franqueado esquecer.
-2. **Limite de desconto por produto** (hoje só por loja) — adiado para a refeita do cadastro de produto (concorrente tem "Limite de Desconto (%)" por produto).
+2. ~~Limite de desconto por produto~~ — **implementado em 2026-10-26** (migration `20261026_product_discount_limit.sql` APLICADA e testes aprovados em 2026-10-26): `products.max_discount_percent`; vale o do produto, sem limite próprio (e serviços) usa o **"Limite de desconto padrão (%)"** da loja; função interna `pos_item_discount_limit`; `search_pos_items`, `find_pos_serial_unit`, `reserve_pos_cart` e `process_pos_terminal_sale` (mesmas assinaturas) copiadas das versões vivas com só a troca do limite. md5 vivos esperados antes de aplicar: search b12c33ee…/76110d8f…, serial e0865691…/33765c94…, reserve 363f62d1…/59029b79…, sale 65cd750c…/b444aa6f…. **Aplicar a migration ANTES do ERP novo** (o ERP grava `max_discount_percent`). PDV mostra o limite em cada item do carrinho.
 3. **"Grupos Restritos" / senha "Gestor":** no ERP > Configurações, cada grupo de telas do PDV (cores estilo Degust: verde=venda, azul=caixa, roxo=configuração) pode ser ativado; ativado, exige senha "Gestor" (diferente da administrativa). Cada vendedor tem permissões individuais; ação fora do permitido pede a senha Gestor.
 4. Referências do Linx já coletadas: venda com código de cliente (rastreio de garantia), pagamento dividido com parcelamento no crédito e desconto/acréscimo por linha (R$ ou %), NFC-e vs Não Fiscal.
 5. Lacunas futuras (loja de games/PC): garantia/assistência técnica (RMA), NF-e além de NFC-e, ICMS-ST por categoria, compra/venda de usados e trade-in (com CPF do vendedor), variações e kits, marketplaces, CRM/fidelidade, aprovação para cancelamento/estorno.
@@ -365,6 +431,17 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-26 (2)** — Usuário conferiu md5, aplicou a 20261026 e aprovou os testes do limite por produto. Branch `feat/2.7b-codigo-barras` acumula: código de barras, campos de valor, encomenda/voucher, clientes/garantia, loja em modal, limite por produto — tudo aplicado e testado. Próximo passo sugerido: PR para a `main` (com aprovação) e depois iniciar a 2.8.
+- **2026-10-26** — Limite de desconto por produto (desenho aprovado: produto, com padrão da loja como reserva; serviços usam o da loja) implementado: migration 20261026 + ERP (campo no cadastro e "Desc. máx. %" editável na lista) + PDV (limite por item). Builds ok. Pendente: conferir md5, aplicar, testar.
+- **2026-10-25 (3)** — Usuário aplicou a 20261025 e aprovou **todos os testes** (busca/encomenda, voucher, entrega, clientes PDV/ERP, garantia, não-regressão). Pergunta do usuário: por que o limite de desconto continua na loja — esclarecido que limite por produto estava só ADIADO (seção 8 item 2); proposta enviada (limite no produto com padrão da loja, ou só por produto), aguardando decisão.
+- **2026-10-25 (2)** — ERP Configurações: cadastro/edição de loja saiu da lateral e virou janela (modal) aberta pelo botão **"Criar loja"** no card do perfil e pelo lápis da lista; regras do voucher continuam **por loja** (campo da loja, rótulo deixa isso claro). Sem mudança no banco.
+- **2026-10-25** — Usuário conferiu md5 e aplicou 20261023 e 20261024. Ajustes dos testes: código exato de produto zerado mostra o card com "Sem estoque" (não adiciona direto); reserva de encomenda sem mercadoria mostra aviso no card e trava "Converter em venda" (migration `20261025_reservation_stock_ready.sql`, só `list_pos_reservations` + `stockReady`, NÃO aplicada; md5 vivo esperado 442e7e4250adbe11be3ba4255317d4e8 ou 7976a2a2ab5e6265d837b38f0b3ee51c).
+- **2026-10-24** — Voucher no layout idêntico ao da foto, com logo. Clientes (PDV + ERP) e consulta de garantia no PDV implementados (migration 20261024). Builds ok. Pendente: md5 da 20261023, aplicar 20261023 e depois 20261024, testar.
+- **2026-10-23** — Encomenda + voucher de reserva + busca com produtos sem estoque: desenho aprovado e implementado (migration 20261023 + PDV + ERP; builds ok; prévia do voucher conferida). Próximo passo: usuário conferir md5 das funções, aplicar e testar; enviar o arquivo do logo.
+- **2026-10-19 (2)** — Usuário aplicou a 20261018 e aprovou todos os testes da Parte 2 e dos campos de valor. Novo pedido em desenho: busca do PDV mostrar produtos sem estoque com "Sem estoque" em vermelho.
+- **2026-10-19** — Campos de valor padronizados (pedido e desenho aprovados pelo usuário): componente `ValueInput` (ERP `src/components/ValueInput.tsx`, PDV `src/app/ValueInput.tsx`) em todos os campos de dinheiro/percentual/quantidade (19 no ERP, 6 no PDV): começa vazio com dica "0,00", sem setinhas, **só vírgula** como decimal (ponto é ignorado, decisão do usuário), máx. 2 casas, sem zero à esquerda, vazio = 0; quantidades só inteiros. Sem mudança no banco. Resolvido também: tela branca no PDV em modo dev era cache antigo do WebView (DevTools > Rede > Desativar cache). Usuário confirmou que apagou `KanguruPDV/.env.example` (era modelo vazio).
+- **2026-10-18** — 2.7b Parte 2 (código de barras) aprovada e implementada no branch `feat/2.7b-codigo-barras` (migration 20261018 + ERP + PDV; builds ok). Próximo passo: usuário conferir os triggers (consulta enviada), aplicar a migration com aprovação e testar. `KanguruPDV/.env.example` aparece apagado no git sem explicação — perguntado ao usuário, fora do commit.
+- **2026-10-17 (4)** — PR #1 (`feat/2.7b-custos`, que contém 2.5–2.7, 2.7b Parte 1, vendedores e impressão do histórico) **mergeado na `main`** pelo usuário. Criado o branch `feat/2.7b-codigo-barras` a partir da `main` para a 2.7b Parte 2. Próximo passo: investigar e propor o desenho da Parte 2.
 - **2026-10-17 (3)** — Usuário concluiu e aprovou todo o roteiro de testes dos vendedores no PDV (venda com código certo/errado/sem código, reserva iniciada e finalizada por vendedores diferentes, mesmo código em lojas diferentes, relatórios do histórico). Próximo passo: levar `feat/2.7b-custos` (que já contém a 2.7) para a `main`, com aprovação.
 - **2026-10-17 (2)** — Botão **Imprimir** no Histórico de Vendas (aprovado): imprime/salva PDF do que está filtrado (Data, Loja, Relatório), com cabeçalho (empresa, loja, período, quem imprimiu), sem menu/botões/coluna Ações; Detalhado em A4 paisagem. Arquivo `KanguruERP/src/components/historyPrint.ts`. Sem mudança no banco. Usuário concluiu e pediu para voltar ao cronograma.
 - **2026-10-17** — Vendedores no PDV implementados (migration 20261017 + PDV + ERP: cadastro com código, Histórico de Vendas com Data/Loja/Relatório Simplificado-Analítico-Detalhado e coluna Vendedor). Builds do ERP e do PDV ok. Próximo passo: aplicar a migration (com aprovação) e testar.

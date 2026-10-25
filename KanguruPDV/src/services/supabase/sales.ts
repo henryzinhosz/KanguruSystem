@@ -28,6 +28,8 @@ export interface SaleItem {
   productId?: string;
   serviceId?: string;
   reservationItemId?: string;
+  // Entrega de encomenda com serial: unidade que chegou e foi escolhida no PDV.
+  serialUnitId?: string;
   itemSku: string;
   itemName: string;
   quantity: number;

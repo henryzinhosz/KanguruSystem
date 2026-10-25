@@ -11,12 +11,21 @@ import {
   Plus,
   ScanBarcode,
   Search,
+  ShieldCheck,
   Trash2,
+  UserRound,
   WalletCards,
   X,
 } from 'lucide-react';
 import { terminalAuth } from '../services/supabase/auth';
+import ValueInput, { formatValueText, parseValueText } from './ValueInput';
+import { formatCpf, printReservationVoucher, type ReservationVoucherData } from './reservationVoucher';
+import { isValidCpf, maskCpf } from './cpf';
+import { CustomerFormModal, CustomerPickerModal } from './CustomerModals';
+import { WarrantyPanel } from './WarrantyPanel';
+import type { PosCustomer } from '../services/supabase/customers';
 import {
+  findPosSerialUnit,
   getPosAvailableSerialUnits,
   searchPosItems,
   type PosCatalogItem,
@@ -28,13 +37,16 @@ import {
   createPosReservation,
   getPosReservations,
   type PosReservation,
+  type ReservationLineInput,
 } from '../services/supabase/reservations';
 import { findPosSeller, normalizeSellerCode, type PosSeller } from '../services/supabase/sellers';
 import {
   activateTerminal,
+  getPosStoreProfile,
   getTerminalContext,
   requireAdminPassword,
   setAdminPassword,
+  type PosStoreProfile,
   type TerminalContext,
 } from '../services/supabase/terminal';
 import {
@@ -56,6 +68,7 @@ type Screen =
   | 'cash-open'
   | 'sale'
   | 'reservations'
+  | 'warranty'
   | 'cash-movement'
   | 'cash-close';
 type PaymentMethod = PaymentMethodKey;
@@ -74,6 +87,8 @@ interface CartItem extends PosCatalogItem {
   quantity: number;
   discountPercent: number;
   serialUnit?: PosSerialUnit;
+  // Encomenda: sem estoque agora; so pode ser reservado.
+  backorder?: boolean;
 }
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -99,7 +114,7 @@ function errorMessage(error: unknown): string {
 
   const discountLimitError = message.match(/Discount exceeds the store limit of ([\d.]+) percent/i);
   if (discountLimitError) {
-    return `Desconto bloqueado. O limite desta loja é ${discountLimitError[1]}%.`;
+    return `Desconto bloqueado. O limite deste item é ${discountLimitError[1]}%.`;
   }
 
   const passwordLockedError = message.match(/Administrative password locked until (.+)$/i);
@@ -114,6 +129,18 @@ function errorMessage(error: unknown): string {
   }
   if (message.includes('Payment lines do not match the sale total')) {
     return 'A soma das formas de pagamento não confere com o total da venda.';
+  }
+  if (message.includes('Customer CPF is required')) {
+    return 'Informe um CPF válido do cliente para registrar a reserva.';
+  }
+  if (message.includes('Insufficient physical stock for reserved product') || /Product .+ was not found in inventory/.test(message)) {
+    return 'O produto desta reserva ainda não chegou no estoque da loja. Dê entrada no estoque antes de entregar.';
+  }
+  if (message.includes('Select the arrived unit for the backorder line')) {
+    return 'Escolha a unidade (serial) que chegou para cada item de encomenda.';
+  }
+  if (message.includes('Selected serialized unit is not available')) {
+    return 'A unidade escolhida não está mais disponível. Escolha outra.';
   }
 
   return message.includes('Anonymous sign-ins are disabled')
@@ -202,6 +229,14 @@ function normalizeSku(value: string): string {
   return value.trim().toUpperCase();
 }
 
+// Aviso quando o serial bipado existe mas nao pode ser vendido aqui.
+const SCANNED_SERIAL_MESSAGES: Record<string, string> = {
+  VENDIDO: 'já foi vendida',
+  RESERVADO: 'está reservada para um cliente (finalize pela tela de reservas)',
+  PERDIDO: 'está marcada como perdida no estoque',
+  OUTRA_LOJA: 'pertence ao estoque de outra loja',
+};
+
 function warrantyLabel(months: number | null): string {
   if (months === null) return 'Garantia nao cadastrada';
   if (months <= 0) return 'Sem garantia';
@@ -238,7 +273,7 @@ export function App() {
   const [passwordConfirmation, setPasswordConfirmation] = useState('');
   const [cashNumber, setCashNumber] = useState('Caixa 01');
   const [responsibleName, setResponsibleName] = useState('');
-  const [openingFloat, setOpeningFloat] = useState('0,00');
+  const [openingFloat, setOpeningFloat] = useState('');
   const [movementType, setMovementType] = useState<MovementType>('SANGRIA');
   const [movementAmount, setMovementAmount] = useState('');
   const [movementReason, setMovementReason] = useState('');
@@ -247,7 +282,6 @@ export function App() {
   const [closureNotes, setClosureNotes] = useState('');
   const [query, setQuery] = useState('');
   const [catalogItems, setCatalogItems] = useState<PosCatalogItem[]>([]);
-  const [maxItemDiscountPercent, setMaxItemDiscountPercent] = useState(0);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [reservations, setReservations] = useState<PosReservation[]>([]);
   const [reservationsLoading, setReservationsLoading] = useState(false);
@@ -257,6 +291,15 @@ export function App() {
   const [reservationDialogOpen, setReservationDialogOpen] = useState(false);
   const [reservationCustomerName, setReservationCustomerName] = useState('');
   const [reservationCustomerPhone, setReservationCustomerPhone] = useState('');
+  const [reservationCustomerCpf, setReservationCustomerCpf] = useState('');
+  const [storeProfile, setStoreProfile] = useState<PosStoreProfile | null>(null);
+  // Cliente da venda (opcional): identifica a compra para nota e garantia.
+  const [saleCustomer, setSaleCustomer] = useState<PosCustomer | null>(null);
+  const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [customerForm, setCustomerForm] = useState<{ customer: PosCustomer | null; cpf: string } | null>(null);
+  // Entrega de encomenda com serial: unidade escolhida por linha da reserva.
+  const [conversionUnitChoices, setConversionUnitChoices] = useState<Record<string, string>>({});
+  const [conversionUnitOptions, setConversionUnitOptions] = useState<Record<string, PosSerialUnit[]>>({});
   const [reservationExpiresOn, setReservationExpiresOn] = useState(() => {
     const date = new Date();
     date.setDate(date.getDate() + 7);
@@ -463,12 +506,13 @@ export function App() {
     setMessage(null);
     try {
       const found = await searchPosItems(trimmedQuery);
-      if (found[0]) setMaxItemDiscountPercent(found[0].maxItemDiscountPercent);
       const normalizedQuery = normalizeSku(trimmedQuery);
       const exactSkuMatches = found.filter((item) => normalizeSku(item.sku) === normalizedQuery);
 
-      if (exactSkuMatches.length === 1) {
-        await selectProduct(exactSkuMatches[0]);
+      // Codigo exato com estoque: direto no carrinho. Sem estoque: mostra o card ("Sem estoque").
+      const exactMatch = exactSkuMatches.length === 1 ? exactSkuMatches[0] : null;
+      if (exactMatch && !(exactMatch.itemType === 'PRODUCT' && exactMatch.availableQuantity <= 0)) {
+        await selectProduct(exactMatch);
         return;
       }
 
@@ -476,6 +520,21 @@ export function App() {
         setMessage(
           `Foram encontrados ${exactSkuMatches.length} itens com o código "${trimmedQuery}". Selecione manualmente na lista para evitar ambiguidade.`
         );
+      }
+
+      // Nao e codigo de produto: pode ser o serial (ou IMEI) de uma unidade bipada.
+      if (exactSkuMatches.length === 0 && !/\s/.test(trimmedQuery)) {
+        // Falha nesta consulta extra nao pode impedir a busca normal por nome.
+        const scanned = await findPosSerialUnit(trimmedQuery).catch(() => null);
+        if (scanned) {
+          if (scanned.serialUnit) {
+            addSerialUnitToCart(scanned.product, scanned.serialUnit);
+          } else {
+            setMessage(`A unidade ${scanned.serialNumber} (${scanned.product.name}) ${SCANNED_SERIAL_MESSAGES[scanned.status] ?? 'não está disponível para venda'}.`);
+            setCatalogItems([]);
+          }
+          return;
+        }
       }
 
       setCatalogItems(found);
@@ -487,6 +546,14 @@ export function App() {
   }
 
   async function selectProduct(product: PosCatalogItem) {
+    // Sem estoque nesta loja: entra como encomenda (so pode ser reservado).
+    if (product.itemType === 'PRODUCT' && product.availableQuantity <= 0) {
+      addBackorder(product);
+      setCatalogItems([]);
+      setQuery('');
+      setMessage(`"${product.name}" está sem estoque nesta loja: entrou como encomenda e só pode ser reservado.`);
+      return;
+    }
     if (product.itemType === 'PRODUCT' && product.requiresUnitSelection) {
       if (!terminal) {
         setMessage('O terminal precisa estar ativado para consultar unidades serializadas.');
@@ -516,7 +583,7 @@ export function App() {
 
   function addProduct(product: PosCatalogItem) {
     setCart((current) => {
-      const existing = current.find((item) => item.id === product.id && item.itemType === product.itemType && !item.serialUnit);
+      const existing = current.find((item) => item.id === product.id && item.itemType === product.itemType && !item.serialUnit && !item.backorder);
       if (!existing) return [...current, { ...product, quantity: 1, discountPercent: 0 }];
 
       if (product.itemType === 'PRODUCT' && existing.quantity >= product.availableQuantity) {
@@ -525,8 +592,16 @@ export function App() {
       }
 
       return current.map((item) =>
-        item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+        item === existing ? { ...item, quantity: item.quantity + 1 } : item
       );
+    });
+  }
+
+  function addBackorder(product: PosCatalogItem) {
+    setCart((current) => {
+      const existing = current.find((item) => item.id === product.id && item.backorder);
+      if (!existing) return [...current, { ...product, quantity: 1, discountPercent: 0, backorder: true }];
+      return current.map((item) => (item === existing ? { ...item, quantity: item.quantity + 1 } : item));
     });
   }
 
@@ -536,7 +611,7 @@ export function App() {
         if (item.id !== productId || item.itemType !== itemType) return [item];
         const quantity = item.quantity + change;
         if (quantity <= 0) return [];
-        return item.itemType === 'PRODUCT' && quantity > item.availableQuantity ? [item] : [{ ...item, quantity }];
+        return item.itemType === 'PRODUCT' && !item.backorder && quantity > item.availableQuantity ? [item] : [{ ...item, quantity }];
       })
     );
   }
@@ -557,31 +632,41 @@ export function App() {
     setSerialUnitsError(null);
   }
 
+  function addSerialUnitToCart(product: PosCatalogItem, serialUnit: PosSerialUnit) {
+    const alreadyInCart = cart.some((item) => item.serialUnit?.serialUnitId === serialUnit.serialUnitId);
+    if (!alreadyInCart) {
+      setCart((current) => current.some((item) => item.serialUnit?.serialUnitId === serialUnit.serialUnitId)
+        ? current
+        : [...current, { ...product, quantity: 1, discountPercent: 0, serialUnit }]);
+    }
+    setCatalogItems([]);
+    setQuery('');
+    setMessage(alreadyInCart
+      ? 'Esta unidade serializada ja esta no carrinho.'
+      : `Unidade ${serialUnit.serialNumber} adicionada ao carrinho.`);
+  }
+
   function addSelectedSerialUnit() {
     if (!serialProduct || !selectedSerialUnitId) return;
     const serialUnit = serialUnits.find((unit) => unit.serialUnitId === selectedSerialUnitId);
     if (!serialUnit) return;
 
-    setCart((current) => {
-      if (current.some((item) => item.serialUnit?.serialUnitId === serialUnit.serialUnitId)) {
-        setMessage('Esta unidade serializada ja esta no carrinho.');
-        return current;
-      }
-      return [...current, { ...serialProduct, quantity: 1, discountPercent: 0, serialUnit }];
-    });
-    setCatalogItems([]);
-    setQuery('');
-    setMessage(`Unidade ${serialUnit.serialNumber} adicionada ao carrinho.`);
+    addSerialUnitToCart(serialProduct, serialUnit);
     closeSerialUnitModal();
   }
 
-  // Limite 0% significa "nenhum desconto sem senha" (mesma regra do servidor).
+  // Limite de cada item (produto; sem limite proprio, o padrao da loja). 0% = nenhum
+  // desconto sem senha (mesma regra do servidor).
   function cartHasOverLimitDiscount(): boolean {
-    return cart.some((item) => item.discountPercent > maxItemDiscountPercent);
+    return cart.some((item) => item.discountPercent > item.maxItemDiscountPercent);
   }
 
   async function finalizeSale() {
     if (!cashSession || cart.length === 0) return;
+    if (cart.some((item) => item.backorder)) {
+      setMessage('Itens de encomenda (sem estoque) só podem ser reservados.');
+      return;
+    }
     if (!saleSeller) {
       setMessage('Informe o código do vendedor para finalizar a venda.');
       return;
@@ -625,8 +710,8 @@ export function App() {
         grossAmount,
         feeAmount: 0,
         netAmount: grossAmount,
-        clientCpf: null,
-        clientName: null,
+        clientCpf: saleCustomer?.cpf ?? null,
+        clientName: saleCustomer?.name ?? null,
         timestamp: new Date().toISOString(),
         status: 'CONCLUIDA',
         requiresApproval: false,
@@ -660,6 +745,7 @@ export function App() {
       setPaymentLines([]);
       setSaleSellerCode('');
       setSaleSeller(null);
+      setSaleCustomer(null);
       setAdminApprovalPassword('');
       setAdminApprovalOpen(false);
       setMessage(
@@ -684,6 +770,42 @@ export function App() {
     await finalizeSale();
   }
 
+  async function loadStoreProfile(): Promise<PosStoreProfile | null> {
+    if (storeProfile) return storeProfile;
+    try {
+      const profile = await getPosStoreProfile();
+      setStoreProfile(profile);
+      return profile;
+    } catch {
+      return null;
+    }
+  }
+
+  async function printVoucher(data: ReservationVoucherData) {
+    printReservationVoucher(data, await loadStoreProfile());
+  }
+
+  function voucherFromReservation(reservation: PosReservation): ReservationVoucherData {
+    return {
+      reservationId: reservation.id,
+      customerName: reservation.customerName,
+      customerCpf: reservation.customerCpf,
+      customerPhone: reservation.customerPhone,
+      items: reservation.items.map((item) => ({
+        name: item.itemName,
+        quantity: item.quantity,
+        serialNumber: item.serialNumber,
+        isBackorder: item.isBackorder === true,
+      })),
+      total: reservation.items.reduce((sum, item) => sum + item.lineTotal, 0),
+      depositAmount: reservation.depositAmount,
+      depositPaymentMethod: reservation.depositPaymentMethod,
+      createdAt: reservation.createdAt,
+      expiresAt: reservation.expiresAt,
+      sellerName: reservation.sellerName,
+    };
+  }
+
   async function openReservations() {
     setBusy(true);
     setReservationsLoading(true);
@@ -706,24 +828,57 @@ export function App() {
       setMessage('Informe o código do vendedor que está fazendo a reserva.');
       return;
     }
+    if (!isValidCpf(reservationCustomerCpf)) {
+      setMessage('Informe um CPF válido do cliente para registrar a reserva.');
+      return;
+    }
     setBusy(true);
     setMessage(null);
     const depositAmount = valueAsNumber(reservationDeposit);
+    const expiresAt = reservationDeadlineIso(reservationExpiresOn);
     try {
-      await createPosReservation({
+      const reservationId = await createPosReservation({
         customerName: reservationCustomerName.trim(),
         customerPhone: reservationCustomerPhone.trim(),
-        expiresAt: reservationDeadlineIso(reservationExpiresOn),
+        customerCpf: reservationCustomerCpf.replace(/\D/g, ''),
+        expiresAt,
         depositAmount,
         depositPaymentMethod: depositAmount > 0 ? paymentMethod : null,
-        items: cart.map((item) => ({
-          productId: item.id,
-          quantity: item.quantity,
-          discountPercent: item.discountPercent,
-          ...(item.serialUnit ? { serialUnitId: item.serialUnit.serialUnitId } : {}),
-        })),
+        // Encomenda com serial: uma linha por unidade (o serial e escolhido na entrega).
+        items: cart.flatMap((item): ReservationLineInput[] => item.backorder && item.requiresUnitSelection
+          ? Array.from({ length: item.quantity }, () => ({
+              productId: item.id,
+              quantity: 1,
+              discountPercent: item.discountPercent,
+              backorder: true,
+            }))
+          : [{
+              productId: item.id,
+              quantity: item.quantity,
+              discountPercent: item.discountPercent,
+              ...(item.serialUnit ? { serialUnitId: item.serialUnit.serialUnitId } : {}),
+              ...(item.backorder ? { backorder: true } : {}),
+            }]),
         sellerCode: reservationSeller.code,
       });
+      const voucher: ReservationVoucherData = {
+        reservationId,
+        customerName: reservationCustomerName.trim(),
+        customerCpf: reservationCustomerCpf.replace(/\D/g, ''),
+        customerPhone: reservationCustomerPhone.trim() || null,
+        items: cart.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          serialNumber: item.serialUnit?.serialNumber ?? null,
+          isBackorder: item.backorder === true,
+        })),
+        total: grossAmount,
+        depositAmount,
+        depositPaymentMethod: depositAmount > 0 ? paymentMethod : null,
+        createdAt: new Date().toISOString(),
+        expiresAt,
+        sellerName: reservationSeller.name,
+      };
       setCart([]);
       setCatalogItems([]);
       setQuery('');
@@ -731,10 +886,13 @@ export function App() {
       setReservationDialogOpen(false);
       setReservationCustomerName('');
       setReservationCustomerPhone('');
+      setReservationCustomerCpf('');
+      setSaleCustomer(null);
       setReservationDeposit('');
       setReservationSellerCode('');
       setReservationSeller(null);
-      setMessage(`Reserva registrada para ${reservationSeller.name}. O produto permanece separado até conversão ou cancelamento.`);
+      setMessage(`Reserva registrada para ${reservationSeller.name}. Imprima o voucher: a via de cima fica na loja e o canhoto vai para o cliente.`);
+      void printVoucher(voucher);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -755,6 +913,16 @@ export function App() {
       setMessage('Informe o seu código de vendedor para finalizar a conversão.');
       return;
     }
+    const pendingUnits = reservation.items.filter((item) => item.isBackorder && item.isSerialized && !item.serialUnitId);
+    const chosenUnits = pendingUnits.map((item) => conversionUnitChoices[item.reservationItemId]).filter(Boolean);
+    if (chosenUnits.length !== pendingUnits.length) {
+      setMessage('Escolha a unidade (serial) que chegou para cada item de encomenda.');
+      return;
+    }
+    if (new Set(chosenUnits).size !== chosenUnits.length) {
+      setMessage('Escolha unidades diferentes para cada item de encomenda.');
+      return;
+    }
     setBusy(true);
     setMessage(null);
     try {
@@ -762,18 +930,27 @@ export function App() {
         saleId: crypto.randomUUID(),
         invoiceNumber: `PDV-${Date.now()}`,
         reservationId: reservation.id,
-        items: reservation.items.map((item) => ({
-          itemType: 'PRODUCT',
-          productId: item.productId,
-          reservationItemId: item.reservationItemId,
-          itemSku: item.itemSku,
-          itemName: item.itemName,
-          quantity: item.quantity,
-          discountPercent: item.discountPercent,
-          unitPrice: item.unitPrice,
-          lineTotal: item.lineTotal,
-          ...(item.serialNumber ? { serials: [item.serialNumber] } : {}),
-        })),
+        items: reservation.items.map((item) => {
+          const chosenUnitId = conversionUnitChoices[item.reservationItemId];
+          const chosenUnit = chosenUnitId
+            ? conversionUnitOptions[item.productId]?.find((unit) => unit.serialUnitId === chosenUnitId)
+            : undefined;
+          return {
+            itemType: 'PRODUCT' as const,
+            productId: item.productId,
+            reservationItemId: item.reservationItemId,
+            itemSku: item.itemSku,
+            itemName: item.itemName,
+            quantity: item.quantity,
+            discountPercent: item.discountPercent,
+            unitPrice: item.unitPrice,
+            lineTotal: item.lineTotal,
+            ...(item.serialNumber ? { serials: [item.serialNumber] } : {}),
+            ...(!item.serialNumber && chosenUnit
+              ? { serialUnitId: chosenUnit.serialUnitId, serials: [chosenUnit.serialNumber] }
+              : {}),
+          };
+        }),
         paymentMethod: resolution
           ? legacyPaymentMethod(resolution.applied)
           : reservation.depositPaymentMethod ?? 'DINHEIRO',
@@ -781,7 +958,7 @@ export function App() {
         grossAmount: total,
         feeAmount: 0,
         netAmount: total,
-        clientCpf: null,
+        clientCpf: reservation.customerCpf,
         clientName: reservation.customerName,
         timestamp: new Date().toISOString(),
         status: 'CONCLUIDA',
@@ -799,6 +976,7 @@ export function App() {
       }
       setReservations(await getPosReservations());
       setConversionReservation(null);
+      setConversionUnitChoices({});
       setConversionPaymentLines([]);
       setConversionSellerCode('');
       setConversionSeller(null);
@@ -834,6 +1012,23 @@ export function App() {
   }
 
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
+  const cartHasBackorder = cart.some((item) => item.backorder);
+
+  useEffect(() => {
+    if (!conversionReservation || !terminal) return;
+    const productIds = Array.from(new Set(conversionReservation.items
+      .filter((item) => item.isBackorder && item.isSerialized && !item.serialUnitId)
+      .map((item) => item.productId)));
+    setConversionUnitChoices({});
+    setConversionUnitOptions({});
+    if (productIds.length === 0) return;
+    let active = true;
+    Promise.all(productIds.map(async (productId) =>
+      [productId, await getPosAvailableSerialUnits(productId, terminal.unitId)] as const))
+      .then((entries) => { if (active) setConversionUnitOptions(Object.fromEntries(entries)); })
+      .catch((error) => { if (active) setMessage(errorMessage(error)); });
+    return () => { active = false; };
+  }, [conversionReservation, terminal]);
 
   if (screen === 'loading') {
     return <main className="loading-screen">Preparando dispositivo...</main>;
@@ -964,10 +1159,9 @@ export function App() {
           </label>
           <label>
             Troco inicial (R$)
-            <input
-              inputMode="decimal"
-              value={openingFloat}
-              onChange={(event) => setOpeningFloat(event.target.value)}
+            <ValueInput
+              value={parseValueText(openingFloat)}
+              onValueChange={(value) => setOpeningFloat(formatValueText(value, 2))}
               required
             />
           </label>
@@ -1002,10 +1196,9 @@ export function App() {
           </label>
           <label>
             Valor (R$)
-            <input
-              inputMode="decimal"
-              value={movementAmount}
-              onChange={(event) => setMovementAmount(event.target.value)}
+            <ValueInput
+              value={parseValueText(movementAmount)}
+              onValueChange={(value) => setMovementAmount(formatValueText(value, 2))}
               required
             />
           </label>
@@ -1105,6 +1298,28 @@ export function App() {
     );
   }
 
+  if (screen === 'warranty') {
+    return (
+      <main className="sale-shell">
+        <header className="sale-header">
+          <div>
+            <Brand compact />
+            <div>
+              <strong>Garantia</strong>
+              <span>{terminal?.tradeName ?? terminal?.unitId}</span>
+            </div>
+          </div>
+          <div className="header-actions">
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('sale')}>
+              Voltar para venda
+            </button>
+          </div>
+        </header>
+        <WarrantyPanel />
+      </main>
+    );
+  }
+
   if (screen === 'reservations') {
     return (
       <main className="sale-shell">
@@ -1141,12 +1356,14 @@ export function App() {
             <div className="reservation-list">
               {reservations.map((reservation) => {
                 const total = reservation.items.reduce((sum, item) => sum + item.lineTotal, 0);
+                const waitingStock = reservation.items.some((item) => item.stockReady === false);
                 return (
                   <article className={`reservation-entry${reservation.expired ? ' is-expired' : ''}`} key={reservation.id}>
                     <div className="reservation-entry-heading">
                       <div>
                         <h2>{reservation.customerName}</h2>
                         {reservation.customerPhone && <small>{reservation.customerPhone}</small>}
+                        {reservation.customerCpf && <small>CPF {formatCpf(reservation.customerCpf)}</small>}
                       </div>
                       <span className={`reservation-status${reservation.expired ? ' expired' : ''}`}>
                         {reservation.expired ? 'VENCIDA · RESERVA ATIVA' : 'ATIVA'}
@@ -1161,7 +1378,10 @@ export function App() {
                         <li key={item.reservationItemId}>
                           <span>
                             <strong>{item.itemName}</strong>
-                            <small>{item.itemSku}{item.serialNumber ? ` | Série ${item.serialNumber}` : ` | ${item.quantity} un.`}</small>
+                            <small>
+                              {item.itemSku}{item.serialNumber ? ` | Série ${item.serialNumber}` : ` | ${item.quantity} un.`}
+                              {item.isBackorder && !item.serialNumber && <span className="backorder-tag">Encomenda</span>}
+                            </small>
                           </span>
                           <strong>{currency.format(item.lineTotal)}</strong>
                         </li>
@@ -1172,13 +1392,21 @@ export function App() {
                       <span>Sinal {currency.format(reservation.depositAmount)}</span>
                       <strong>Saldo {currency.format(Math.max(0, total - reservation.depositAmount))}</strong>
                     </div>
+                    {waitingStock && (
+                      <p className="reservation-waiting">
+                        <CircleAlert size={16} /> Produto ainda sem estoque: não é possível finalizar a venda. Dê entrada no estoque quando a mercadoria chegar.
+                      </p>
+                    )}
                     <div className="reservation-actions">
-                      <button className="primary-action reservation-convert" type="button" disabled={busy} onClick={() => {
+                      <button className="primary-action reservation-convert" type="button" disabled={busy || waitingStock} onClick={() => {
                         setConversionPaymentLines([]);
                         setMessage(null);
                         setConversionReservation(reservation);
                       }}>
                         <CreditCard size={18} /> Converter em venda
+                      </button>
+                      <button className="text-action reservation-reprint" type="button" disabled={busy} onClick={() => void printVoucher(voucherFromReservation(reservation))}>
+                        Reimprimir voucher
                       </button>
                       <button className="reservation-cancel" type="button" disabled={busy} onClick={() => void cancelReservation(reservation)}>
                         Cancelar reserva
@@ -1201,8 +1429,13 @@ export function App() {
             onSellerCode={setConversionSellerCode}
             onSeller={setConversionSeller}
             onPaymentLines={setConversionPaymentLines}
+            unitOptions={conversionUnitOptions}
+            unitChoices={conversionUnitChoices}
+            onUnitChoice={(reservationItemId, unitId) =>
+              setConversionUnitChoices((current) => ({ ...current, [reservationItemId]: unitId }))}
             onClose={() => {
               setConversionReservation(null);
+              setConversionUnitChoices({});
               setConversionSellerCode('');
               setConversionSeller(null);
             }}
@@ -1228,6 +1461,9 @@ export function App() {
         <div className="header-actions">
           <button className="reservation-nav" type="button" onClick={() => void openReservations()} disabled={busy}>
             <ClipboardList size={18} /> Reservas
+          </button>
+          <button className="reservation-nav" type="button" onClick={() => setScreen('warranty')} disabled={busy}>
+            <ShieldCheck size={18} /> Garantia
           </button>
           <button
             className="icon-button"
@@ -1267,7 +1503,7 @@ export function App() {
           <form className="search-form" onSubmit={handleSearch}>
             <input
               ref={searchInputRef}
-              placeholder="Buscar por nome, marca ou SKU"
+              placeholder="Bipe o código ou serial, ou busque por nome/marca"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               autoFocus
@@ -1282,7 +1518,7 @@ export function App() {
           <div className="product-list">
             {catalogItems.map((item) => (
               <button
-                className="product-row"
+                className={`product-row${item.itemType === 'PRODUCT' && item.availableQuantity <= 0 ? ' is-out-of-stock' : ''}`}
                 type="button"
                 key={`${item.itemType}-${item.id}`}
                 onClick={() => void selectProduct(item)}
@@ -1298,7 +1534,18 @@ export function App() {
                 </span>
                 <span>
                   <strong>{currency.format(item.sellPrice)}</strong>
-                  <small>{item.itemType === 'SERVICE' ? 'Sem estoque físico' : `${item.availableQuantity} em estoque`}</small>
+                  {item.itemType === 'SERVICE' ? (
+                    <small>Sem estoque físico</small>
+                  ) : item.availableQuantity > 0 ? (
+                    <small>{item.availableQuantity} em estoque</small>
+                  ) : (
+                    <>
+                      <small className="stock-out">Sem estoque</small>
+                      {item.storesWithStock.length > 0 && (
+                        <small className="stock-elsewhere">Possui estoque: {item.storesWithStock.join(', ')}</small>
+                      )}
+                    </>
+                  )}
                 </span>
               </button>
             ))}
@@ -1312,7 +1559,6 @@ export function App() {
         <aside className="cart-panel">
           <div className="cart-heading">
             <h2>Carrinho</h2>
-            <small>Limite por item: {maxItemDiscountPercent}%</small>
             {cartHasOverLimitDiscount() && (
               <small className="discount-warning">
                 Itens acima do limite exigem a senha administrativa na finalização.
@@ -1324,9 +1570,10 @@ export function App() {
               <p className="empty-state">Adicione um produto para iniciar.</p>
             ) : (
               cart.map((item) => (
-                <div className="cart-item" key={item.serialUnit?.serialUnitId ?? `${item.itemType}-${item.id}`}>
+                <div className="cart-item" key={item.serialUnit?.serialUnitId ?? `${item.itemType}-${item.id}${item.backorder ? '-encomenda' : ''}`}>
                   <div>
                     <strong>{item.name}</strong>
+                    {item.backorder && <span className="backorder-tag">Encomenda · sem estoque</span>}
                     <small>{item.itemType === 'SERVICE' ? 'Serviço' : 'Produto'} | {currency.format(item.sellPrice)} cada</small>
                     {item.serialUnit ? (
                       <>
@@ -1335,15 +1582,12 @@ export function App() {
                       </>
                     ) : null}
                     <label className="cart-discount-label">
-                      Desconto (%)
-                      <input
+                      Desconto (%) <small className="discount-limit">limite {item.maxItemDiscountPercent}%</small>
+                      <ValueInput
                         aria-label={`Desconto percentual de ${item.name}`}
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="0.01"
-                        value={item.discountPercent}
-                        onChange={(event) => updateItemDiscount(item.id, item.itemType, Number(event.target.value))}
+                        placeholder="0"
+                        value={item.discountPercent || null}
+                        onValueChange={(value) => updateItemDiscount(item.id, item.itemType, Math.min(100, value ?? 0))}
                       />
                     </label>
                   </div>
@@ -1381,6 +1625,27 @@ export function App() {
             )}
           </div>
 
+          <div className="sale-customer">
+            <span className="sale-customer-label"><UserRound size={16} /> Cliente (opcional)</span>
+            {saleCustomer ? (
+              <div className="sale-customer-selected">
+                <div>
+                  <strong>{saleCustomer.name}</strong>
+                  <small>CPF {formatCpf(saleCustomer.cpf)} | {saleCustomer.phone}</small>
+                </div>
+                <div className="sale-customer-actions">
+                  <button className="text-action" type="button" onClick={() => setCustomerForm({ customer: saleCustomer, cpf: '' })}>Editar</button>
+                  <button className="text-action" type="button" onClick={() => setCustomerPickerOpen(true)}>Trocar</button>
+                  <button className="text-action" type="button" onClick={() => setSaleCustomer(null)}>Remover</button>
+                </div>
+              </div>
+            ) : (
+              <button className="customer-pick" type="button" disabled={busy} onClick={() => setCustomerPickerOpen(true)}>
+                <Search size={16} /> Selecionar ou cadastrar cliente
+              </button>
+            )}
+          </div>
+
           <PaymentLinesEditor
             lines={paymentLines}
             total={grossAmount}
@@ -1407,17 +1672,27 @@ export function App() {
             className="reserve-action"
             type="button"
             disabled={busy || cart.length === 0 || cart.some((item) => item.itemType !== 'PRODUCT')}
-            onClick={() => setReservationDialogOpen(true)}
+            onClick={() => {
+              if (saleCustomer) {
+                setReservationCustomerName(saleCustomer.name);
+                setReservationCustomerCpf(maskCpf(saleCustomer.cpf));
+                setReservationCustomerPhone(saleCustomer.phone);
+              }
+              setReservationDialogOpen(true);
+            }}
           >
             Reservar
           </button>
           {cart.some((item) => item.itemType !== 'PRODUCT') && (
             <small className="reserve-hint">Remova os serviços para reservar os produtos do carrinho.</small>
           )}
+          {cartHasBackorder && (
+            <small className="reserve-hint">Itens de encomenda (sem estoque) só podem ser reservados.</small>
+          )}
           <button
             className="primary-action finish-button"
             type="button"
-            disabled={busy || cart.length === 0 || !saleSeller}
+            disabled={busy || cart.length === 0 || !saleSeller || cartHasBackorder}
             onClick={() => void finalizeSale()}
           >
             <CreditCard size={20} />
@@ -1443,7 +1718,6 @@ export function App() {
           error={adminApprovalError}
           busy={busy}
           cartItems={cart}
-          maxItemDiscountPercent={maxItemDiscountPercent}
           onPassword={setAdminApprovalPassword}
           onClose={() => {
             if (!busy) {
@@ -1455,10 +1729,38 @@ export function App() {
           onConfirm={() => void confirmDiscountApproval()}
         />
       )}
+      {customerPickerOpen && (
+        <CustomerPickerModal
+          onSelect={(customer) => {
+            setSaleCustomer(customer);
+            setCustomerPickerOpen(false);
+          }}
+          onNew={(cpf) => {
+            setCustomerPickerOpen(false);
+            setCustomerForm({ customer: null, cpf });
+          }}
+          onClose={() => setCustomerPickerOpen(false)}
+        />
+      )}
+      {customerForm && (
+        <CustomerFormModal
+          customer={customerForm.customer}
+          initialCpf={customerForm.cpf}
+          onSaved={(customer) => {
+            setSaleCustomer(customer);
+            setCustomerForm(null);
+            setMessage(`Cliente ${customer.name} vinculado à venda.`);
+          }}
+          onClose={() => setCustomerForm(null)}
+        />
+      )}
       {reservationDialogOpen && (
         <ReservationModal
           customerName={reservationCustomerName}
           customerPhone={reservationCustomerPhone}
+          customerCpf={reservationCustomerCpf}
+          onCustomerCpf={(value) => setReservationCustomerCpf(maskCpf(value))}
+          hasBackorder={cartHasBackorder}
           expiresOn={reservationExpiresOn}
           deposit={reservationDeposit}
           paymentMethod={paymentMethod}
@@ -1484,6 +1786,9 @@ export function App() {
 interface ReservationModalProps {
   customerName: string;
   customerPhone: string;
+  customerCpf: string;
+  onCustomerCpf: (value: string) => void;
+  hasBackorder: boolean;
   expiresOn: string;
   deposit: string;
   paymentMethod: PaymentMethod;
@@ -1505,6 +1810,9 @@ interface ReservationModalProps {
 function ReservationModal({
   customerName,
   customerPhone,
+  customerCpf,
+  onCustomerCpf,
+  hasBackorder,
   expiresOn,
   deposit,
   paymentMethod,
@@ -1523,6 +1831,8 @@ function ReservationModal({
   onSubmit,
 }: ReservationModalProps) {
   const depositAmount = valueAsNumber(deposit);
+  const cpfComplete = customerCpf.replace(/\D/g, '').length === 11;
+  const cpfValid = isValidCpf(customerCpf);
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="serial-unit-modal reservation-modal" role="dialog" aria-modal="true" aria-labelledby="reservation-title">
@@ -1533,23 +1843,33 @@ function ReservationModal({
           </div>
           <button className="icon-button" type="button" title="Fechar" onClick={onClose} disabled={busy}><X size={20} /></button>
         </div>
-        <p className="modal-copy">O produto ficará indisponível para outras vendas até conversão ou cancelamento.</p>
+        <p className="modal-copy">
+          {hasBackorder
+            ? 'Há itens de encomenda (sem estoque): ficam reservados para este cliente assim que chegarem.'
+            : 'O produto ficará indisponível para outras vendas até conversão ou cancelamento.'}
+          {' '}Ao confirmar, o voucher é impresso.
+        </p>
         <form onSubmit={onSubmit}>
           <label>
             Nome do cliente
             <input autoFocus required maxLength={160} value={customerName} onChange={(event) => onCustomerName(event.target.value)} />
           </label>
           <label>
+            CPF do cliente
+            <input required inputMode="numeric" placeholder="000.000.000-00" value={customerCpf} onChange={(event) => onCustomerCpf(event.target.value)} />
+            {cpfComplete && !cpfValid && <small className="field-error">CPF inválido. Confira os números.</small>}
+          </label>
+          <label>
             Telefone (opcional)
             <input type="tel" maxLength={40} value={customerPhone} onChange={(event) => onCustomerPhone(event.target.value)} />
           </label>
           <label>
-            Data limite
+            Data de retirada prevista
             <input type="date" required min={localDateInputValue()} value={expiresOn} onChange={(event) => onExpiresOn(event.target.value)} />
           </label>
           <label>
             Sinal / depósito (opcional)
-            <input type="number" min="0" max={total} step="0.01" value={deposit} onChange={(event) => onDeposit(event.target.value)} />
+            <ValueInput value={parseValueText(deposit)} onValueChange={(value) => onDeposit(formatValueText(value, 2))} />
           </label>
           {depositAmount > 0 && (
             <label>
@@ -1577,7 +1897,7 @@ function ReservationModal({
           </div>
           <div className="modal-actions">
             <button className="text-action" type="button" onClick={onClose} disabled={busy}>Voltar</button>
-            <button className="primary-action modal-confirm" type="submit" disabled={busy || depositAmount > total || !seller}>
+            <button className="primary-action modal-confirm" type="submit" disabled={busy || depositAmount > total || !seller || !cpfValid}>
               {busy ? 'Registrando...' : 'Confirmar reserva'}
             </button>
           </div>
@@ -1635,20 +1955,16 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
                   </option>
                 ))}
               </select>
-              <input
+              <ValueInput
                 aria-label={`Valor da forma ${index + 1}`}
-                type="number"
-                min="0"
-                step="0.01"
-                value={Number.isFinite(line.amount) ? line.amount : 0}
-                onChange={(event) => updateLine(index, { amount: Number(event.target.value) })}
-                onFocus={(event) => {
+                value={Number.isFinite(line.amount) && line.amount ? line.amount : null}
+                onValueChange={(value) => updateLine(index, { amount: value ?? 0 })}
+                onFocus={() => {
                   // Pre-preenche com o saldo restante quando o campo esta zerado.
                   if (!line.amount && totalCents > 0) {
                     const suggested = Math.max(0, totalCents - otherLinesCents) / 100;
                     if (suggested > 0) {
                       updateLine(index, { amount: suggested });
-                      event.currentTarget.value = String(suggested);
                     }
                   }
                 }}
@@ -1694,6 +2010,9 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
 
 interface ReservationPaymentModalProps {
   reservation: PosReservation;
+  unitOptions: Record<string, PosSerialUnit[]>;
+  unitChoices: Record<string, string>;
+  onUnitChoice: (reservationItemId: string, unitId: string) => void;
   paymentLines: PaymentLine[];
   busy: boolean;
   message: string | null;
@@ -1708,6 +2027,9 @@ interface ReservationPaymentModalProps {
 
 function ReservationPaymentModal({
   reservation,
+  unitOptions,
+  unitChoices,
+  onUnitChoice,
   paymentLines,
   busy,
   message,
@@ -1720,6 +2042,8 @@ function ReservationPaymentModal({
   onConfirm,
 }: ReservationPaymentModalProps) {
   const { total, remaining } = reservationAmounts(reservation);
+  const pendingUnits = reservation.items.filter((item) => item.isBackorder && item.isSerialized && !item.serialUnitId);
+  const unitsReady = pendingUnits.every((item) => unitChoices[item.reservationItemId]);
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -1735,6 +2059,37 @@ function ReservationPaymentModal({
         <p className="modal-copy">
           Venda de: <strong>{reservation.sellerName ? `${reservation.sellerName} (${reservation.sellerCode})` : 'quem finalizar (reserva sem vendedor)'}</strong>
         </p>
+        {pendingUnits.length > 0 && (
+          <div className="backorder-units">
+            <p className="modal-copy"><strong>Encomenda:</strong> escolha a unidade que chegou para cada item.</p>
+            {pendingUnits.map((item) => {
+              const options = unitOptions[item.productId] ?? [];
+              const takenElsewhere = new Set(Object.entries(unitChoices)
+                .filter(([lineId]) => lineId !== item.reservationItemId)
+                .map(([, unitId]) => unitId));
+              return (
+                <label key={item.reservationItemId}>
+                  {item.itemName}
+                  {options.length === 0 ? (
+                    <small className="field-error">Nenhuma unidade disponível: o produto ainda não chegou no estoque.</small>
+                  ) : (
+                    <select
+                      value={unitChoices[item.reservationItemId] ?? ''}
+                      onChange={(event) => onUnitChoice(item.reservationItemId, event.target.value)}
+                    >
+                      <option value="">Selecione o serial</option>
+                      {options.filter((unit) => !takenElsewhere.has(unit.serialUnitId)).map((unit) => (
+                        <option key={unit.serialUnitId} value={unit.serialUnitId}>
+                          {unit.serialNumber}{unit.imei ? ` · IMEI ${unit.imei}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        )}
         <div className="reservation-modal-summary">
           <span>Total da venda</span><strong>{currency.format(total)}</strong>
           <span>Sinal já recebido</span><strong>- {currency.format(reservation.depositAmount)}</strong>
@@ -1762,7 +2117,7 @@ function ReservationPaymentModal({
         <Notice message={message} />
         <div className="modal-actions">
           <button className="text-action" type="button" onClick={onClose} disabled={busy}>Voltar</button>
-          <button className="primary-action modal-confirm" type="button" onClick={onConfirm} disabled={busy || !seller}>
+          <button className="primary-action modal-confirm" type="button" onClick={onConfirm} disabled={busy || !seller || !unitsReady}>
             {busy ? 'Processando...' : 'Confirmar venda'}
           </button>
         </div>
@@ -1920,7 +2275,6 @@ interface AdminApprovalModalProps {
   error: string | null;
   busy: boolean;
   cartItems: CartItem[];
-  maxItemDiscountPercent: number;
   onPassword: (value: string) => void;
   onClose: () => void;
   onConfirm: () => void;
@@ -1931,12 +2285,11 @@ function AdminApprovalModal({
   error,
   busy,
   cartItems,
-  maxItemDiscountPercent,
   onPassword,
   onClose,
   onConfirm,
 }: AdminApprovalModalProps) {
-  const overLimit = cartItems.filter((item) => item.discountPercent > maxItemDiscountPercent);
+  const overLimit = cartItems.filter((item) => item.discountPercent > item.maxItemDiscountPercent);
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="serial-unit-modal" role="dialog" aria-modal="true" aria-labelledby="admin-approval-title">
@@ -1951,8 +2304,8 @@ function AdminApprovalModal({
         </div>
         <p className="modal-copy">
           {overLimit.length === 1
-            ? 'Um item deste carrinho excede o limite de desconto da loja.'
-            : `${overLimit.length} itens deste carrinho excedem o limite de desconto da loja.`}
+            ? 'Um item deste carrinho excede o limite de desconto.'
+            : `${overLimit.length} itens deste carrinho excedem o limite de desconto.`}
           Informe a senha administrativa para liberar a venda.
         </p>
         <ul className="admin-approval-list">
@@ -1962,7 +2315,7 @@ function AdminApprovalModal({
                 <strong>{item.name}</strong>
                 <small>
                   {item.itemType === 'SERVICE' ? 'Servico' : 'Produto'} | Desconto aplicado{' '}
-                  {item.discountPercent.toFixed(2)}% (limite {maxItemDiscountPercent}%)
+                  {item.discountPercent.toFixed(2)}% (limite {item.maxItemDiscountPercent}%)
                 </small>
               </span>
             </li>
@@ -2056,11 +2409,7 @@ function CashCount({
       </span>
       <label>
         Contado
-        <input
-          inputMode="decimal"
-          value={value.toFixed(2).replace('.', ',')}
-          onChange={(event) => onChange(valueAsNumber(event.target.value))}
-        />
+        <ValueInput value={value || null} onValueChange={(next) => onChange(next ?? 0)} />
       </label>
       <strong className={difference === 0 ? '' : difference > 0 ? 'positive' : 'negative'}>
         {difference === 0

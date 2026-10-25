@@ -296,26 +296,28 @@ export function useErpStore() {
   };
 
   // Add a product to the catalog
-  const addProduct = (
+  // Codigo vazio: o banco gera o proximo numero. Erro (ex.: codigo repetido) sobe para a tela.
+  const addProduct = async (
     product: Omit<Product, 'id'>,
     initialStoreId?: string,
     initialQty: number = 0,
     initialSerials: string[] = []
-  ) => {
+  ): Promise<Product> => {
     const newId = 'p_new_' + Math.random().toString(36).substring(2, 9);
-    const newProduct: Product = {
+    let newProduct: Product = {
       ...product,
-      sku: product.sku.trim(),
+      sku: product.sku.trim().toUpperCase(),
       name: product.name.trim(),
       brand: product.brand.trim(),
       ncm: product.ncm.trim(),
       id: newId
     };
-    setProducts(prev => [newProduct, ...prev]);
 
     if (useSupabase) {
-      supabaseService.upsertProduct(newProduct).catch(err => console.error('Erro ao salvar produto no Supabase:', err));
+      const savedSku = await supabaseService.upsertProduct(newProduct);
+      newProduct = { ...newProduct, sku: savedSku };
     }
+    setProducts(prev => [newProduct, ...prev]);
 
     return newProduct;
   };
@@ -338,11 +340,11 @@ export function useErpStore() {
   const saveService = async (service: Service) => {
     const sanitizedService = {
       ...service,
-      sku: service.sku.trim(),
+      sku: service.sku.trim().toUpperCase(),
       name: service.name.trim(),
       category: service.category.trim()
     };
-    await supabaseService.upsertService(sanitizedService);
+    sanitizedService.sku = await supabaseService.upsertService(sanitizedService);
     setServices(previous => previous.some(item => item.id === sanitizedService.id)
       ? previous.map(item => item.id === sanitizedService.id ? sanitizedService : item)
       : [...previous, sanitizedService].sort((left, right) => left.name.localeCompare(right.name))
@@ -651,15 +653,17 @@ export function useErpStore() {
   };
 
   // Approve a trade-in and automatically insert it as a USED item in the stock catalog!
-  const approveTradeIn = (
+  const approveTradeIn = async (
     tradeId: string, 
     productDetails: { sku: string; name: string; category: string; brand: string; sellPrice: number; warrantyMonths: number; isSerialized: boolean }
   ) => {
     const trade = tradeIns.find(t => t.id === tradeId);
     if (!trade) return;
 
-    // Create product in catalog
-    const newProduct = addProduct({
+    // Create product in catalog (aguarda o banco: o codigo pode ser recusado)
+    let newProduct: Product;
+    try {
+      newProduct = await addProduct({
       sku: productDetails.sku,
       name: `${productDetails.name} (Usado / Trade-In)`,
       category: productDetails.category,
@@ -670,7 +674,11 @@ export function useErpStore() {
       warrantyMonths: productDetails.warrantyMonths,
       isSerialized: productDetails.isSerialized,
       isUsed: true
-    });
+      });
+    } catch (err) {
+      console.error('Erro ao cadastrar produto do trade-in no Supabase:', err);
+      return;
+    }
 
     // Automatically give an initial Entrada of 1 unit in the physical store where trade-in was registered
     const unitIdToEnter = trade.unitId || (currentUser.unitId === 'central' ? 'loja_1' : currentUser.unitId);
@@ -838,7 +846,7 @@ export function useErpStore() {
           warrantyMonths,
           isSerialized,
           isUsed: false
-        });
+        }).catch(err => console.error('Erro ao importar produto no Supabase:', err));
         importedCount++;
       }
     }

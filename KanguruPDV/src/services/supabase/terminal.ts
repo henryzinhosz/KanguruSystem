@@ -66,3 +66,27 @@ function mapTerminalContext(data: Record<string, unknown> | undefined, error: un
     needsAdminPassword: data.needs_admin_password === true,
   };
 }
+// Dados da loja para o cabecalho do voucher de reserva.
+export interface PosStoreProfile {
+  tradeName: string | null;
+  legalName: string | null;
+  cnpj: string | null;
+  address: string | null;
+  phone: string | null;
+  reservationVoucherTerms: string | null;
+}
+
+export async function getPosStoreProfile(): Promise<PosStoreProfile | null> {
+  const { data, error } = await supabase.rpc('get_pos_store_profile');
+  if (error) throw error;
+  const row = data?.[0];
+  if (!row) return null;
+  return {
+    tradeName: row.trade_name ?? null,
+    legalName: row.legal_name ?? null,
+    cnpj: row.cnpj ?? null,
+    address: row.address ?? null,
+    phone: row.phone ?? null,
+    reservationVoucherTerms: row.reservation_voucher_terms ?? null,
+  };
+}

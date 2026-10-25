@@ -17,6 +17,7 @@ import {
   Phone,
   Settings
 } from 'lucide-react';
+import ValueInput from './ValueInput';
 
 interface AssistênciaViewProps {
   currentUser: User;
@@ -360,21 +361,17 @@ export default function AssistênciaView({
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
                 <label className="font-bold text-slate-700">Orçamento Prévio de Peças (R$)</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={partsCost || ''}
-                  onChange={(e) => setPartsCost(parseFloat(e.target.value) || 0)}
+                <ValueInput
+                  value={partsCost || null}
+                  onValueChange={(value) => setPartsCost(value ?? 0)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                 />
               </div>
               <div className="space-y-1">
                 <label className="font-bold text-slate-700">Custo da Mão de Obra (R$)</label>
-                <input
-                  type="number"
-                  min="0"
-                  value={laborCost || ''}
-                  onChange={(e) => setLaborCost(parseFloat(e.target.value) || 0)}
+                <ValueInput
+                  value={laborCost || null}
+                  onValueChange={(value) => setLaborCost(value ?? 0)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                 />
               </div>
