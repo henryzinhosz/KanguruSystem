@@ -101,3 +101,60 @@ export const saleRpc = {
     return (data as PosSaleResult | null) ?? { status: 'OK' };
   },
 };
+
+// ---- Cupom da venda (2.8a) ----
+export interface PosSaleReceiptItem {
+  itemName: string;
+  quantity: number;
+  unitPrice: number;
+  discountPercent: number;
+  lineTotal: number;
+  serials: string[];
+}
+
+export interface PosSaleReceipt {
+  saleId: string;
+  receiptNumber: number | null;
+  timestamp: string;
+  items: PosSaleReceiptItem[];
+  grossAmount: number;
+  depositApplied: number;
+  paymentMethod: string;
+  payments: { paymentMethod: string; amount: number }[];
+  sellerName: string | null;
+  clientName: string | null;
+  clientCpf: string | null;
+}
+
+// Sem saleId: a ultima venda deste terminal (reimpressao).
+export async function getPosSaleReceipt(saleId: string | null): Promise<PosSaleReceipt | null> {
+  const { data, error } = await supabase.rpc('get_pos_sale_receipt', { p_sale_id: saleId });
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as Record<string, unknown>;
+  const items = (Array.isArray(row.items) ? row.items : []) as Array<Record<string, unknown>>;
+  const payments = (Array.isArray(row.payments) ? row.payments : []) as Array<Record<string, unknown>>;
+  return {
+    saleId: String(row.saleId),
+    receiptNumber: row.receiptNumber == null ? null : Number(row.receiptNumber),
+    timestamp: String(row.timestamp),
+    items: items.map((item) => ({
+      itemName: String(item.itemName ?? ''),
+      quantity: Number(item.quantity ?? 0),
+      unitPrice: Number(item.unitPrice ?? 0),
+      discountPercent: Number(item.discountPercent ?? 0),
+      lineTotal: Number(item.lineTotal ?? 0),
+      serials: Array.isArray(item.serials) ? (item.serials as unknown[]).map(String) : [],
+    })),
+    grossAmount: Number(row.grossAmount ?? 0),
+    depositApplied: Number(row.depositApplied ?? 0),
+    paymentMethod: String(row.paymentMethod ?? ''),
+    payments: payments.map((payment) => ({
+      paymentMethod: String(payment.paymentMethod ?? ''),
+      amount: Number(payment.amount ?? 0),
+    })),
+    sellerName: (row.sellerName as string | null) ?? null,
+    clientName: (row.clientName as string | null) ?? null,
+    clientCpf: (row.clientCpf as string | null) ?? null,
+  };
+}

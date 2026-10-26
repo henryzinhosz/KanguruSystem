@@ -996,7 +996,14 @@ export const supabaseService = {
       isKit: p.is_kit,
       kitItems: p.kit_items || undefined,
       minStock: p.min_stock ?? null,
-      maxDiscountPercent: p.max_discount_percent == null ? null : Number(p.max_discount_percent)
+      maxDiscountPercent: p.max_discount_percent == null ? null : Number(p.max_discount_percent),
+      cest: p.cest ?? null,
+      icmsOrigin: p.icms_origin ?? null,
+      icmsCst: p.icms_cst ?? null,
+      csosn: p.csosn ?? null,
+      icmsRate: p.icms_rate == null ? null : Number(p.icms_rate),
+      icmsReduction: p.icms_reduction == null ? null : Number(p.icms_reduction),
+      taxBurdenPercent: p.tax_burden_percent == null ? null : Number(p.tax_burden_percent)
     }));
   },
 
@@ -1018,7 +1025,14 @@ export const supabaseService = {
       is_kit: p.isKit || false,
       kit_items: p.kitItems || null,
       min_stock: p.minStock ?? null,
-      max_discount_percent: p.maxDiscountPercent ?? null
+      max_discount_percent: p.maxDiscountPercent ?? null,
+      cest: p.cest?.trim() || null,
+      icms_origin: p.icmsOrigin || null,
+      icms_cst: p.icmsCst || null,
+      csosn: p.csosn || null,
+      icms_rate: p.icmsRate ?? null,
+      icms_reduction: p.icmsReduction ?? null,
+      tax_burden_percent: p.taxBurdenPercent ?? null
     };
 
     const { data, error } = await supabase
@@ -1293,7 +1307,10 @@ export const supabaseService = {
       approvedBy: s.approved_by || undefined,
       sellerCode: s.seller_code || undefined,
       sellerName: s.seller_name || undefined,
-      finalizedByName: s.finalized_by_name || undefined
+      finalizedByName: s.finalized_by_name || undefined,
+      receiptNumber: s.receipt_number ?? undefined,
+      receiptPeriod: s.receipt_period ?? undefined,
+      fiscalType: s.fiscal_type ?? undefined
     }));
   },
 
@@ -1476,7 +1493,8 @@ export const supabaseService = {
       address: c.address || undefined,
       phone: c.phone || undefined,
       contactEmail: c.contact_email || undefined,
-      reservationVoucherTerms: c.reservation_voucher_terms || undefined
+      reservationVoucherTerms: c.reservation_voucher_terms || undefined,
+      instagram: c.instagram || undefined
     }));
   },
 
@@ -1493,7 +1511,8 @@ export const supabaseService = {
       address: c.address || null,
       phone: c.phone || null,
       contact_email: c.contactEmail || null,
-      reservation_voucher_terms: c.reservationVoucherTerms?.trim() || null
+      reservation_voucher_terms: c.reservationVoucherTerms?.trim() || null,
+      instagram: c.instagram?.trim() || null
     };
 
     const { error } = await supabase.from('store_configs').upsert(payload);

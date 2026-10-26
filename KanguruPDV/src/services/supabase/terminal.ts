@@ -74,6 +74,8 @@ export interface PosStoreProfile {
   address: string | null;
   phone: string | null;
   reservationVoucherTerms: string | null;
+  stateRegistration: string | null;
+  instagram: string | null;
 }
 
 export async function getPosStoreProfile(): Promise<PosStoreProfile | null> {
@@ -88,5 +90,7 @@ export async function getPosStoreProfile(): Promise<PosStoreProfile | null> {
     address: row.address ?? null,
     phone: row.phone ?? null,
     reservationVoucherTerms: row.reservation_voucher_terms ?? null,
+    stateRegistration: row.state_registration ?? null,
+    instagram: row.instagram ?? null,
   };
 }

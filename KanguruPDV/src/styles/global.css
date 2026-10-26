@@ -1107,3 +1107,21 @@ small {
   color: #647366;
   font-weight: 400;
 }
+
+/* Finalizar: o vendedor escolhe NFC-e ou Nao Fiscal em toda venda */
+.finish-choice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+
+.finish-choice .finish-button {
+  margin-top: 0;
+}
+
+.finish-choice .finish-nfce small {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 400;
+  opacity: 0.85;
+}

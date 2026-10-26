@@ -132,6 +132,14 @@ export interface Product {
   kitItems?: KitItem[];
   minStock?: number | null; // estoque minimo para alertas; null = nao definido (usa o padrao)
   maxDiscountPercent?: number | null; // limite de desconto do produto no PDV; null = usa o padrao da loja
+  // Dados fiscais (2.8a), preenchidos produto a produto. Listas fixas: ver db/fiscal.ts.
+  cest?: string | null;
+  icmsOrigin?: string | null;
+  icmsCst?: string | null;
+  csosn?: string | null;
+  icmsRate?: number | null;
+  icmsReduction?: number | null;
+  taxBurdenPercent?: number | null;
 }
 
 // Custo medio de um produto em uma loja (sem serial: media ponderada;
@@ -282,6 +290,10 @@ export interface Sale {
   sellerName?: string;
   // Quem finalizou no PDV (difere do vendedor so em reserva convertida).
   finalizedByName?: string;
+  // Cupom (2.8a): numero 00001.. por loja, recomeca todo mes; tipo Nao Fiscal / NFC-e.
+  receiptNumber?: number;
+  receiptPeriod?: string;
+  fiscalType?: 'NAO_FISCAL' | 'NFCE';
 }
 
 export interface Expense {
@@ -344,6 +356,7 @@ export interface StoreConfig {
   contactEmail?: string;
   // Texto das regras impresso no voucher de reserva do PDV (vazio = texto padrao).
   reservationVoucherTerms?: string;
+  instagram?: string; // perfil da loja (QR code do cupom)
   paymentFees: {
     DINHEIRO: number; // percentage (e.g. 0)
     PIX: number; // percentage (e.g. 0.005 = 0.5%)

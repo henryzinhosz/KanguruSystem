@@ -537,7 +537,10 @@ export default function FinanceiroView({
                               <span className="block text-[10px] text-slate-400">finalizada por {s.finalizedByName}</span>
                             )}
                           </td>
-                          <td className="px-3 py-2.5 font-bold text-slate-900">{s.invoiceNumber}</td>
+                          <td className="px-3 py-2.5 font-bold text-slate-900">
+                            {s.receiptNumber != null ? `Cupom ${String(s.receiptNumber).padStart(5, '0')}` : s.invoiceNumber}
+                            {s.receiptNumber != null && <span className="block text-[10px] font-normal text-slate-400">{s.fiscalType === 'NFCE' ? 'NFC-e' : 'Não fiscal'} · {s.receiptPeriod?.split('-').reverse().join('/')}</span>}
+                          </td>
                           <td className="px-3 py-2.5 font-medium text-slate-700">{storeName(s.unitId)}</td>
                           <td className="px-3 py-2.5 text-center">
                             <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded font-semibold text-[10px]">

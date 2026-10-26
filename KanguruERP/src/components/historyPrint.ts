@@ -97,7 +97,7 @@ function buildHtml(data: HistoryPrintData): string {
             return `<tr${canceled}>
               <td>${date.toLocaleDateString('pt-BR')} ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</td>
               <td>${seller}${finalizedBy}</td>
-              <td>${e(sale.invoiceNumber || '')}</td>
+              <td>${sale.receiptNumber != null ? `Cupom ${String(sale.receiptNumber).padStart(5, '0')}` : e(sale.invoiceNumber || '')}</td>
               <td>${e(data.storeName(sale.unitId))}</td>
               <td>${e(methodLabel(sale.paymentMethod))}${split}</td>
               <td class="num">${formatMoney(sale.grossAmount)}</td>

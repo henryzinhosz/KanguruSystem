@@ -9,6 +9,7 @@ import {
   LockKeyhole,
   Minus,
   Plus,
+  Printer,
   ScanBarcode,
   Search,
   ShieldCheck,
@@ -31,7 +32,8 @@ import {
   type PosCatalogItem,
   type PosSerialUnit,
 } from '../services/supabase/products';
-import { saleRpc, type PaymentLine, type PaymentMethodKey } from '../services/supabase/sales';
+import { getPosSaleReceipt, saleRpc, type PaymentLine, type PaymentMethodKey } from '../services/supabase/sales';
+import { printSaleReceipt } from './receiptPrint';
 import {
   cancelPosReservation,
   createPosReservation,
@@ -686,9 +688,10 @@ export function App() {
     setBusy(true);
     setMessage(null);
     setAdminApprovalError(null);
+    const saleId = crypto.randomUUID();
     try {
       const result = await saleRpc.processTransaction({
-        saleId: crypto.randomUUID(),
+        saleId,
         invoiceNumber: `PDV-${Date.now()}`,
         items: cart.map((item) => ({
           itemType: item.itemType,
@@ -753,6 +756,7 @@ export function App() {
           ? `Venda registrada com sucesso. Troco: ${currency.format(resolution.changeCents / 100)}.`
           : 'Venda registrada com sucesso.'
       );
+      void printReceipt(saleId, resolution.changeCents / 100);
     } catch (error) {
       const text = errorMessage(error);
       setMessage(text);
@@ -778,6 +782,20 @@ export function App() {
       return profile;
     } catch {
       return null;
+    }
+  }
+
+  // Cupom da venda. Sem saleId: ultima venda deste terminal (reimpressao).
+  async function printReceipt(saleId: string | null, changeAmount = 0) {
+    try {
+      const receipt = await getPosSaleReceipt(saleId);
+      if (!receipt) {
+        setMessage('Nenhuma venda deste terminal para reimprimir.');
+        return;
+      }
+      await printSaleReceipt(receipt, await loadStoreProfile(), changeAmount);
+    } catch (error) {
+      setMessage(`Venda registrada, mas o cupom não pôde ser impresso: ${errorMessage(error)}`);
     }
   }
 
@@ -925,9 +943,10 @@ export function App() {
     }
     setBusy(true);
     setMessage(null);
+    const saleId = crypto.randomUUID();
     try {
       const result = await saleRpc.processTransaction({
-        saleId: crypto.randomUUID(),
+        saleId,
         invoiceNumber: `PDV-${Date.now()}`,
         reservationId: reservation.id,
         items: reservation.items.map((item) => {
@@ -984,6 +1003,7 @@ export function App() {
         `Reserva de ${reservation.customerName} convertida em venda${reservation.sellerName ? ` (venda de ${reservation.sellerName})` : ''}. Saldo pago: ${currency.format(remaining)}.`
           + (resolution && resolution.changeCents > 0 ? ` Troco: ${currency.format(resolution.changeCents / 100)}.` : '')
       );
+      void printReceipt(saleId, resolution ? resolution.changeCents / 100 : 0);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -1487,6 +1507,9 @@ export function App() {
           >
             <BanknoteArrowUp size={20} />
           </button>
+          <button className="icon-button" type="button" title="Reimprimir último cupom" onClick={() => void printReceipt(null)} disabled={busy}>
+            <Printer size={20} />
+          </button>
           <button className="icon-button" type="button" title="Fechar caixa" onClick={() => void openClosing()}>
             <LockKeyhole size={20} />
           </button>
@@ -1689,15 +1712,27 @@ export function App() {
           {cartHasBackorder && (
             <small className="reserve-hint">Itens de encomenda (sem estoque) só podem ser reservados.</small>
           )}
-          <button
-            className="primary-action finish-button"
-            type="button"
-            disabled={busy || cart.length === 0 || !saleSeller || cartHasBackorder}
-            onClick={() => void finalizeSale()}
-          >
-            <CreditCard size={20} />
-            {busy ? 'Processando...' : 'Finalizar venda'}
-          </button>
+          <div className="finish-choice">
+            <button
+              className="primary-action finish-button finish-nfce"
+              type="button"
+              disabled
+              title="A emissão de NFC-e entra na próxima etapa (2.8b)."
+            >
+              <CreditCard size={20} />
+              NFC-e
+              <small>em breve</small>
+            </button>
+            <button
+              className="primary-action finish-button"
+              type="button"
+              disabled={busy || cart.length === 0 || !saleSeller || cartHasBackorder}
+              onClick={() => void finalizeSale()}
+            >
+              <CreditCard size={20} />
+              {busy ? 'Processando...' : 'Não Fiscal'}
+            </button>
+          </div>
         </aside>
       </section>
       {serialProduct && (

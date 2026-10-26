@@ -29,6 +29,7 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   phone: '',
   contactEmail: '',
   reservationVoucherTerms: '',
+  instagram: '',
   fixedCost: 0,
   maxItemDiscountPercent: 0,
   paymentFees: { DINHEIRO: 0, PIX: 0, CREDITO: 0, DEBITO: 0 }
@@ -162,6 +163,7 @@ export default function ConfiguracoesView({
       phone: store.phone || '',
       contactEmail: store.contactEmail || '',
       reservationVoucherTerms: store.reservationVoucherTerms || '',
+      instagram: store.instagram || '',
       fixedCost: store.fixedCost,
       maxItemDiscountPercent: store.maxItemDiscountPercent,
       paymentFees: store.paymentFees
@@ -444,7 +446,8 @@ function StoreFields({ form, onChange }: {
     { field: 'stateRegistration', label: 'Inscrição estadual' },
     { field: 'address', label: 'Endereço completo' },
     { field: 'phone', label: 'Telefone' },
-    { field: 'contactEmail', label: 'E-mail de contato', type: 'email' }
+    { field: 'contactEmail', label: 'E-mail de contato', type: 'email' },
+    { field: 'instagram', label: 'Instagram da loja (ex.: @bebgamescg) — vira o QR code do cupom' }
   ];
 
   return (

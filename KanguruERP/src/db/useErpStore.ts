@@ -322,6 +322,20 @@ export function useErpStore() {
     return newProduct;
   };
 
+  // Edicao completa (formulario do produto): aguarda o banco e devolve o erro para a tela.
+  const saveProduct = async (updatedProduct: Product): Promise<void> => {
+    const sanitizedProduct: Product = {
+      ...updatedProduct,
+      sku: updatedProduct.sku.trim().toUpperCase(),
+      name: updatedProduct.name.trim(),
+      brand: updatedProduct.brand.trim(),
+      ncm: updatedProduct.ncm.trim()
+    };
+    const savedSku = useSupabase ? await supabaseService.upsertProduct(sanitizedProduct) : sanitizedProduct.sku;
+    const saved = { ...sanitizedProduct, sku: savedSku };
+    setProducts(prev => prev.map(p => p.id === saved.id ? saved : p));
+  };
+
   const editProduct = (updatedProduct: Product) => {
     const sanitizedProduct: Product = {
       ...updatedProduct,
@@ -908,6 +922,7 @@ export function useErpStore() {
     resetDatabase,
     addProduct,
     editProduct,
+    saveProduct,
     saveService,
     deleteService,
     registerMovement,

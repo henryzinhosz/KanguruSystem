@@ -51,6 +51,7 @@ export default function App() {
     resetDatabase,
     addProduct,
     editProduct,
+    saveProduct,
     saveService,
     deleteService,
     registerMovement,
@@ -210,6 +211,7 @@ export default function App() {
               storeConfigs={storeConfigs}
               addProduct={addProduct}
               editProduct={editProduct}
+              saveProduct={saveProduct}
               registerMovement={registerMovement}
               registerSerializedStockEntry={registerSerializedStockEntry}
               registerStockEntry={registerStockEntry}

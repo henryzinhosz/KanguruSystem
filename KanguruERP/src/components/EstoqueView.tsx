@@ -20,6 +20,7 @@ import {
 import { formatMoney } from '../db/finance';
 import { supabaseService } from '../db/supabaseService';
 import { sanitizeItemCode } from '../db/itemCode';
+import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, isValidNcm } from '../db/fiscal';
 import ValueInput from './ValueInput';
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
@@ -55,7 +56,8 @@ import {
   Info,
   Calendar,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Pencil
 } from 'lucide-react';
 
 interface EstoqueViewProps {
@@ -72,6 +74,7 @@ interface EstoqueViewProps {
     initialSerials?: string[]
   ) => Promise<Product>;
   editProduct: (product: Product) => void;
+  saveProduct: (product: Product) => Promise<void>;
   registerMovement: (
     productId: string,
     fromUnitId: string,
@@ -109,6 +112,7 @@ export default function EstoqueView({
   storeConfigs,
   addProduct,
   editProduct,
+  saveProduct,
   registerMovement,
   registerSerializedStockEntry,
   registerStockEntry,
@@ -142,6 +146,15 @@ export default function EstoqueView({
   const [newProdQty, setNewProdQty] = useState(0);
   const [newProdMinStock, setNewProdMinStock] = useState('');
   const [newProdMaxDiscount, setNewProdMaxDiscount] = useState<number | null>(null);
+  // Edicao de produto existente (mesmo formulario do cadastro) e dados fiscais (2.8a).
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [newProdCest, setNewProdCest] = useState('');
+  const [newProdOrigin, setNewProdOrigin] = useState('');
+  const [newProdCst, setNewProdCst] = useState('');
+  const [newProdCsosn, setNewProdCsosn] = useState('');
+  const [newProdIcmsRate, setNewProdIcmsRate] = useState<number | null>(null);
+  const [newProdIcmsReduction, setNewProdIcmsReduction] = useState<number | null>(null);
+  const [newProdTaxBurden, setNewProdTaxBurden] = useState<number | null>(null);
   const [maxDiscountDrafts, setMaxDiscountDrafts] = useState<Record<string, number | null>>({});
   const [newProdError, setNewProdError] = useState('');
   const [newProdSaving, setNewProdSaving] = useState(false);
@@ -275,6 +288,59 @@ export default function EstoqueView({
     focusSerialInput(index + 1);
   };
 
+  const resetProductForm = () => {
+    setEditingProductId(null);
+    setNewProdName('');
+    setNewProdSku('');
+    setNewProdCategory('Videogames');
+    setNewProdBrand('');
+    setNewProdCost(0);
+    setNewProdSell(0);
+    setNewProdNcm('');
+    setNewProdWarranty(12);
+    setNewProdSerialized(false);
+    setNewProdStore(defaultStoreId);
+    setNewProdQty(0);
+    setNewProdMinStock('');
+    setNewProdMaxDiscount(null);
+    setNewProdCest('');
+    setNewProdOrigin('');
+    setNewProdCst('');
+    setNewProdCsosn('');
+    setNewProdIcmsRate(null);
+    setNewProdIcmsReduction(null);
+    setNewProdTaxBurden(null);
+  };
+
+  const openNewProduct = () => {
+    resetProductForm();
+    setShowAddProductModal(true);
+  };
+
+  const openEditProduct = (product: Product) => {
+    resetProductForm();
+    setEditingProductId(product.id);
+    setNewProdName(product.name);
+    setNewProdSku(product.sku);
+    setNewProdCategory(product.category);
+    setNewProdBrand(product.brand);
+    setNewProdCost(product.costPrice);
+    setNewProdSell(product.sellPrice);
+    setNewProdNcm(product.ncm);
+    setNewProdWarranty(product.warrantyMonths);
+    setNewProdSerialized(product.isSerialized);
+    setNewProdMinStock(product.minStock == null ? '' : String(product.minStock));
+    setNewProdMaxDiscount(product.maxDiscountPercent ?? null);
+    setNewProdCest(product.cest ?? '');
+    setNewProdOrigin(product.icmsOrigin ?? '');
+    setNewProdCst(product.icmsCst ?? '');
+    setNewProdCsosn(product.csosn ?? '');
+    setNewProdIcmsRate(product.icmsRate ?? null);
+    setNewProdIcmsReduction(product.icmsReduction ?? null);
+    setNewProdTaxBurden(product.taxBurdenPercent ?? null);
+    setShowAddProductModal(true);
+  };
+
   // Handle Add Product Submit
   const handleAddProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -286,12 +352,42 @@ export default function EstoqueView({
 
     // Codigo em branco: o banco gera o proximo numero automatico.
     if (!trimmedName) return;
+    if (trimmedNcm && !isValidNcm(trimmedNcm)) {
+      setNewProdError('NCM inválido: são 8 números (ex.: 8471.60.52).');
+      return;
+    }
+    const fiscalFields = {
+      cest: newProdCest.trim() || null,
+      icmsOrigin: newProdOrigin || null,
+      icmsCst: newProdCst || null,
+      csosn: newProdCsosn || null,
+      icmsRate: newProdIcmsRate,
+      icmsReduction: newProdIcmsReduction,
+      taxBurdenPercent: newProdTaxBurden
+    };
 
     const minStockValue = newProdMinStock.trim() === '' ? null : Math.max(0, parseInt(newProdMinStock, 10) || 0);
 
     setNewProdSaving(true);
     try {
-      await addProduct({
+      const editing = editingProductId ? products.find(product => product.id === editingProductId) : undefined;
+      if (editing) {
+        await saveProduct({
+          ...editing,
+          sku: trimmedSku || editing.sku,
+          name: trimmedName,
+          category: newProdCategory,
+          brand: trimmedBrand,
+          costPrice: newProdCost,
+          sellPrice: newProdSell,
+          ncm: trimmedNcm,
+          warrantyMonths: newProdWarranty,
+          isSerialized: newProdSerialized,
+          minStock: minStockValue,
+          maxDiscountPercent: newProdMaxDiscount,
+          ...fiscalFields
+        });
+      } else await addProduct({
       sku: trimmedSku,
       name: trimmedName,
       category: newProdCategory,
@@ -303,10 +399,11 @@ export default function EstoqueView({
       isSerialized: newProdSerialized,
       isUsed: false,
       minStock: minStockValue,
-      maxDiscountPercent: newProdMaxDiscount
+      maxDiscountPercent: newProdMaxDiscount,
+      ...fiscalFields
       });
     } catch (error: any) {
-      setNewProdError(error?.message || 'Não foi possível cadastrar o produto.');
+      setNewProdError(error?.message || 'Não foi possível salvar o produto.');
       return;
     } finally {
       setNewProdSaving(false);
@@ -325,6 +422,7 @@ export default function EstoqueView({
     setNewProdQty(0);
     setNewProdMinStock('');
     setNewProdMaxDiscount(null);
+    resetProductForm();
     setShowAddProductModal(false);
   };
 
@@ -624,7 +722,7 @@ export default function EstoqueView({
         {activeSubTab === 'catalogo' && (
           <button
             id="btn-add-product"
-            onClick={() => setShowAddProductModal(true)}
+            onClick={openNewProduct}
             className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition flex items-center shadow-xs"
           >
             <Plus className="w-4 h-4 mr-1.5" />
@@ -699,7 +797,15 @@ export default function EstoqueView({
                         }`}>
                           Estoque: {totalStock} un
                         </span>
-                        <h3 className="text-sm font-bold text-slate-900 mt-1 font-sans">{p.name}</h3>
+                        <h3 className="text-sm font-bold text-slate-900 mt-1 font-sans flex items-center gap-1.5">
+                          {p.name}
+                          {isAdmin && (
+                            <button type="button" onClick={() => openEditProduct(p)} title="Editar produto" aria-label={`Editar ${p.name}`} className="p-1 text-blue-700 rounded hover:bg-blue-50">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {!p.ncm && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100" title="Sem NCM a NFC-e é recusada">SEM NCM</span>}
+                        </h3>
                         <p className="text-xs text-slate-400 font-mono mt-0.5">Código: {p.sku}</p>
                       </div>
                       <div className="text-right">
@@ -1472,15 +1578,15 @@ export default function EstoqueView({
       {/* Add Product Modal (Simple custom overlay) */}
       {showAddProductModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-lg w-full overflow-hidden flex flex-col">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-2xl w-full max-h-[92vh] overflow-y-auto flex flex-col">
             <div className="bg-slate-900 text-white p-4 flex justify-between items-center">
               <h3 className="font-bold text-sm uppercase tracking-wider flex items-center">
                 <Layers className="w-4.5 h-4.5 mr-2 text-amber-500" />
-                Cadastrar Novo Produto no Catálogo
+                {editingProductId ? 'Editar Produto' : 'Cadastrar Novo Produto no Catálogo'}
               </h3>
               <button
                 id="btn-close-product-modal"
-                onClick={() => setShowAddProductModal(false)}
+                onClick={() => { setShowAddProductModal(false); resetProductForm(); }}
                 className="text-slate-400 hover:text-white font-bold text-lg"
               >
                 ✕
@@ -1546,7 +1652,7 @@ export default function EstoqueView({
                   <label className="font-bold text-slate-700">NCM (Fins Fiscais)</label>
                   <input
                     type="text"
-                    placeholder="Ex: 8471.60.52"
+                    placeholder="8 números, ex.: 8471.60.52"
                     value={newProdNcm}
                     onChange={(e) => setNewProdNcm(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
@@ -1594,9 +1700,67 @@ export default function EstoqueView({
                 <p className="text-[10px] text-slate-400">Desconto máximo que o vendedor pode dar no PDV sem a senha administrativa.</p>
               </div>
 
-              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mt-2 text-[11px] text-slate-500">
-                O estoque será lançado depois, na sub-aba de Entrada de Estoque.
+              <div className="space-y-1 max-w-[200px]">
+                <label className="font-bold text-slate-700">Garantia (meses)</label>
+                <ValueInput
+                  decimals={0}
+                  value={newProdWarranty || null}
+                  placeholder="0 = sem garantia"
+                  onValueChange={(value) => setNewProdWarranty(value ?? 0)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
+                />
               </div>
+
+              <fieldset className="border border-slate-200 rounded-lg p-3 space-y-3">
+                <legend className="px-1 font-bold text-slate-800 uppercase tracking-wider text-[10px]">Informações fiscais</legend>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">ICMS (%)</label>
+                    <ValueInput value={newProdIcmsRate} placeholder="0,00" onValueChange={(value) => setNewProdIcmsRate(value == null ? null : Math.min(100, value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">Redução do ICMS (%)</label>
+                    <ValueInput value={newProdIcmsReduction} placeholder="0,00" onValueChange={(value) => setNewProdIcmsReduction(value == null ? null : Math.min(100, value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700" title="Valor aproximado de impostos informado ao consumidor (Lei da Transparência)">Total de tributos (%)</label>
+                    <ValueInput value={newProdTaxBurden} placeholder="0,00" onValueChange={(value) => setNewProdTaxBurden(value == null ? null : Math.min(100, value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700">Origem da Situação Tributária</label>
+                  <select value={newProdOrigin} onChange={(e) => setNewProdOrigin(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none">
+                    <option value="">Selecione uma origem</option>
+                    {ICMS_ORIGINS.map(origin => <option key={origin.code} value={origin.code}>{origin.label}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">Situação Tributária (CST)</label>
+                    <select value={newProdCst} onChange={(e) => setNewProdCst(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none">
+                      <option value="">Selecione</option>
+                      {ICMS_CSTS.map(code => <option key={code} value={code}>{code}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">CSOSN</label>
+                    <select value={newProdCsosn} onChange={(e) => setNewProdCsosn(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none">
+                      <option value="">Vazio</option>
+                      {CSOSNS.map(code => <option key={code} value={code}>{code}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">CEST</label>
+                    <input type="text" inputMode="numeric" maxLength={9} value={newProdCest} onChange={(e) => setNewProdCest(e.target.value.replace(/[^0-9.]/g, ''))} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono" />
+                  </div>
+                </div>
+              </fieldset>
+
+              {!editingProductId && (
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mt-2 text-[11px] text-slate-500">
+                  O estoque será lançado depois, na sub-aba de Entrada de Estoque.
+                </div>
+              )}
 
               <div className="flex items-center space-x-2 bg-slate-50 p-3 rounded-lg border border-slate-100 mt-2">
                 <input
@@ -1617,7 +1781,7 @@ export default function EstoqueView({
               <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowAddProductModal(false)}
+                  onClick={() => { setShowAddProductModal(false); resetProductForm(); }}
                   className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition"
                 >
                   Cancelar
@@ -1627,7 +1791,7 @@ export default function EstoqueView({
                   disabled={newProdSaving}
                   className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition disabled:opacity-60"
                 >
-                  {newProdSaving ? 'Salvando...' : 'Confirmar Cadastro'}
+                  {newProdSaving ? 'Salvando...' : editingProductId ? 'Salvar alterações' : 'Confirmar Cadastro'}
                 </button>
               </div>
             </form>

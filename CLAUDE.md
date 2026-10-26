@@ -105,12 +105,14 @@ por operador (inspirado no Linx Degust).
 | 2.6 Reserva de produto (`product_reservations`, sinal em ledger próprio, preço/desconto congelado) | ✅ |
 | 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada, testada e na `main` (PR #1, 2026-10-17) |
 | 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) ✅ testada e na `main`. Parte 2 (código de barras) ✅ migration 20261018 aplicada e testes aprovados (2026-10-19). Parte 3 (Zebra) aguarda impressora (seção 7) |
-| 2.8 Finalização da venda (fiscal, garantia) | ⚪ Não iniciada |
+| 2.8 Finalização da venda (fiscal, garantia) | 🟡 Emissor escolhido: **Focus NFe**. 2.8a (cadastro fiscal + Não Fiscal + cupom) implementada em 2026-10-27, migration 20261027 **não aplicada**. 2.8b NFC-e e 2.8c ESC/POS depois |
 | 2.9 Trocas e devoluções | ⚪ |
 | 2.10 Interface para tablet | ⚪ (design visual adiado de propósito para o fim) |
 | 2.11 Empacotamento e distribuição | ⚪ |
 
-**2.8 (detalhes já decididos):** gateway de NFC-e ainda não escolhido (Focus NFe ou PlugNotas). Dois tipos de emissão
+**2.8 (detalhes já decididos):** emissor **Focus NFe** (aprovado 2026-10-26; plano Retail por CNPJ ou Retail+ ilimitado). Chave da Focus **por loja, configurada só no UCP** (franqueado vê só "configurada/não configurada"); certificado A1 e CSC ficam cadastrados **dentro da Focus**, nunca no nosso banco; a chave fica no servidor (Edge Function), nunca no PDV. Usuário já tem certificado e dados fiscais dos produtos principais.
+**2.8a (desenho aprovado 2026-10-26, implementado 2026-10-27):** dados fiscais **produto a produto** como no sistema atual (opção A, sem padrão da loja): NCM (8 dígitos), CEST, Origem (lista oficial 0–8), CST (lista oficial, **sem o 28** que aparece no sistema atual — confirmar com contador), CSOSN (101…900), ICMS %, Redução ICMS %, Total de tributos %; sem CFOP/PIS/COFINS no produto (2.8b deriva). Formulário de produto agora também **edita** (lápis na lista) e mostra selo "SEM NCM". PDV: **dois botões** "NFC-e" (em breve) e "Não Fiscal" — vendedor escolhe em toda venda. Cupom 80 mm **igual ao cupom atual da rede** (DAV, sem "sem valor fiscal"), número **00001 por loja, recomeça todo mês** (trigger `zz_sale_receipt_number`, `sales.receipt_number/receipt_period`), QR code = **Instagram da loja** (campo na loja), frase de troca **fixa**; impressão pela impressora do Windows (Epson TM 80 mm na loja; pode variar). Migration `20261027_fiscal_products_receipt.sql`: colunas fiscais em `products`, `store_configs.instagram`, `sales.fiscal_type/fiscal_status/receipt_*`, `get_pos_store_profile` (DROP+CREATE com IE e Instagram), `get_pos_sale_receipt`. Função de venda **não mudou**. Lib `qrcode@1.5.4` no PDV. **Aplicar a migration antes de usar o ERP/PDV novos.**
+Antes: gateway de NFC-e ainda não escolhido (Focus NFe ou PlugNotas). Dois tipos de emissão
 como no Linx: **NFC-e** (enviada à Fazenda) e **"Não Fiscal"** (mesmo cupom, sem envio). Entra a configuração fiscal
 por produto (CFOP, CST/CSOSN, NCM, ICMS). Impressão de cupom térmico ESC/POS entra aqui.
 
@@ -431,6 +433,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-27** — PR #2 mergeado na `main`; branch `feat/2.8-finalizacao`. Focus NFe aprovada. 2.8a implementada (ver seção 5): migration 20261027 + ERP (fiscal no produto, editar produto, Instagram da loja, cupom no histórico) + PDV (NFC-e/Não Fiscal, cupom 80 mm, reimprimir). Builds ok; prévia do cupom conferida. Pendente: aplicar 20261027 e testar.
 - **2026-10-26 (2)** — Usuário conferiu md5, aplicou a 20261026 e aprovou os testes do limite por produto. Branch `feat/2.7b-codigo-barras` acumula: código de barras, campos de valor, encomenda/voucher, clientes/garantia, loja em modal, limite por produto — tudo aplicado e testado. Próximo passo sugerido: PR para a `main` (com aprovação) e depois iniciar a 2.8.
 - **2026-10-26** — Limite de desconto por produto (desenho aprovado: produto, com padrão da loja como reserva; serviços usam o da loja) implementado: migration 20261026 + ERP (campo no cadastro e "Desc. máx. %" editável na lista) + PDV (limite por item). Builds ok. Pendente: conferir md5, aplicar, testar.
 - **2026-10-25 (3)** — Usuário aplicou a 20261025 e aprovou **todos os testes** (busca/encomenda, voucher, entrega, clientes PDV/ERP, garantia, não-regressão). Pergunta do usuário: por que o limite de desconto continua na loja — esclarecido que limite por produto estava só ADIADO (seção 8 item 2); proposta enviada (limite no produto com padrão da loja, ou só por produto), aguardando decisão.
