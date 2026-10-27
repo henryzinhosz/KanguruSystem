@@ -62,12 +62,20 @@ writeFileSync(join(releaseDir, 'latest.json'), JSON.stringify({
 }, null, 2));
 
 console.log('Enviando para o Supabase Storage (bucket pdv-updates)...');
-const upload = (file, extra = '') => execSync(
-  `npx supabase storage cp "${join(releaseDir, file)}" "ss:///pdv-updates/${file}" --linked --experimental ${extra}`,
-  { cwd: supabaseWorkdir, stdio: 'inherit' },
-);
+// O CLI nao sobrescreve arquivo existente: remove antes (ignora se ainda nao existe).
+const upload = (file) => {
+  try {
+    execSync(`npx supabase storage rm "ss:///pdv-updates/${file}" --linked --experimental --yes`, { cwd: supabaseWorkdir, stdio: 'ignore' });
+  } catch {
+    // arquivo ainda nao existia
+  }
+  execSync(
+    `npx supabase storage cp "${join(releaseDir, file)}" "ss:///pdv-updates/${file}" --linked --experimental`,
+    { cwd: supabaseWorkdir, stdio: 'inherit' },
+  );
+};
 upload(remoteName);
-// latest.json sem cache: os PDVs precisam ver a versao nova na hora.
-upload('latest.json', '--cache-control "no-cache" --content-type application/json');
+// latest.json por ultimo: so anuncia a versao depois que o instalador ja esta no ar.
+upload('latest.json');
 
 console.log(`Pronto: versão ${version} publicada. Os PDVs mostram o aviso ao abrir (ou em até 4 horas).`);
