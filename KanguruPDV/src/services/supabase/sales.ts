@@ -213,6 +213,9 @@ export async function emitPosNfce(saleId: string): Promise<NfceEmitResult> {
     const context = (error as { context?: Response }).context;
     const body = context && typeof context.json === 'function' ? await context.json().catch(() => null) : null;
     if (body?.error) return { status: 'ERRO', message: String(body.error) };
+    // 404 = funcao nfce-emit nao publicada no Supabase (nome diferente ou deploy incompleto).
+    if (context?.status === 404) return { status: 'PENDENTE', message: 'Serviço de NFC-e não encontrado no servidor (função nfce-emit não publicada). A venda ficou com NFC-e pendente.' };
+    if (context?.status) return { status: 'PENDENTE', message: `O serviço de NFC-e respondeu com erro ${context.status}. A venda ficou com NFC-e pendente.` };
     return { status: 'PENDENTE', message: 'Sem conexão com o serviço de NFC-e. A venda ficou com NFC-e pendente.' };
   }
   const row = (data ?? {}) as Record<string, unknown>;

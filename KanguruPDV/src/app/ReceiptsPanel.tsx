@@ -111,8 +111,8 @@ export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce }: R
       <div className="receipts-list">
         {results.map((sale) => {
           const date = new Date(sale.timestamp);
-          const canEmit = nfceConfigured && sale.status === 'CONCLUIDA' && sale.fiscalType === 'NFCE'
-            && (sale.fiscalStatus === 'ERRO' || sale.fiscalStatus === 'PENDENTE');
+          const canEmit = nfceConfigured && sale.status === 'CONCLUIDA'
+            && sale.fiscalStatus !== 'AUTORIZADA' && sale.fiscalStatus !== 'CANCELADA';
           return (
             <article className="receipt-card" key={sale.saleId}>
               <div>
