@@ -70,7 +70,8 @@ const upload = (file) => {
     // arquivo ainda nao existia
   }
   execSync(
-    `npx supabase storage cp "${join(releaseDir, file)}" "ss:///pdv-updates/${file}" --linked --experimental`,
+    // Caminho relativo e sem acento: o cmd do Windows estraga o "ç" de "Programação".
+    `npx supabase storage cp "../KanguruPDV/release/${file}" "ss:///pdv-updates/${file}" --linked --experimental`,
     { cwd: supabaseWorkdir, stdio: 'inherit' },
   );
 };
