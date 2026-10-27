@@ -48,13 +48,13 @@ function formatAccessKey(key: string): string {
   return key.replace(/\D/g, '').replace(/(\d{4})(?=\d)/g, '$1 ');
 }
 
-// DANFE NFC-e: so os produtos (servicos ficam fora da nota). Pagamentos cortados no valor
-// dos produtos, na mesma ordem usada no envio (sinal primeiro).
-function buildNfceSection(receipt: PosSaleReceipt, qrDataUrl: string | null, changeAmount: number): string {
+// DANFE NFC-e no layout do cupom fiscal da Linx (logo da BeB no lugar da Linx). So os produtos
+// (servicos ficam fora da nota); pagamentos cortados no valor dos produtos, na mesma ordem
+// usada no envio (sinal primeiro).
+function buildNfceHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, logo: string, qrDataUrl: string | null, changeAmount: number): string {
   const e = escapeHtml;
   const nfce = receipt.nfce!;
   const items = receipt.items.filter((item) => item.quantity > 0 && item.itemType === 'PRODUCT');
-  const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
   const listTotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const productsTotal = Math.round(items.reduce((sum, item) => sum + item.lineTotal, 0) * 100) / 100;
   const discount = Math.max(0, Math.round((listTotal - productsTotal) * 100) / 100);
@@ -73,46 +73,125 @@ function buildNfceSection(receipt: PosSaleReceipt, qrDataUrl: string | null, cha
   const authorized = nfce.authorizedAt ? new Date(nfce.authorizedAt) : new Date(receipt.timestamp);
   const cpf = (receipt.clientCpf ?? '').replace(/\D/g, '');
 
-  const itemRows = items.map((item, index) => `
-    <div class="row"><span>${String(index + 1).padStart(3, '0')} ${e(item.itemSku)} ${e(item.itemName.toUpperCase())}</span><span>${money(item.lineTotal)}</span></div>
-    <div class="sub">${money(item.quantity)} UN x ${money(item.unitPrice)}${item.discountPercent > 0 ? ` &nbsp;(desc. ${money(item.discountPercent)}%)` : ''}</div>
-    ${item.serials.length ? `<div class="sub">S/N ${e(item.serials.join(', '))}</div>` : ''}`).join('');
+  // Tributos aproximados por item (VLTR): parte proporcional do total da nota.
+  const taxTotal = nfce.taxTotal ?? 0;
+  const itemTax = (lineTotal: number) => productsTotal > 0 ? Math.round(taxTotal * lineTotal / productsTotal * 100) / 100 : 0;
+  const issued = new Date(receipt.timestamp);
+  const qty = (value: number) => value.toLocaleString('pt-BR', { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  const consultUrl = (nfce.consultUrl ?? '').replace(/^https?:\/\//i, '');
 
-  return `
-  <div class="center title">DANFE NFC-e - Documento Auxiliar da<br>Nota Fiscal de Consumidor Eletrônica</div>
-  ${nfce.environment === 'homologacao' ? '<div class="center">EMITIDA EM AMBIENTE DE HOMOLOGAÇÃO<br>SEM VALOR FISCAL</div>' : ''}
-  <hr>
-  <div class="head"><span>Item Código Descrição</span><span>Total</span></div>
-  <div class="sub">Qtd. UN x Vl. Unit.</div>
-  <hr>
+  const itemRows = items.map((item, index) => `
+    <div class="mono">${String(index + 1).padStart(3, '0')} ${e(item.itemSku)} ${e(item.itemName.toUpperCase())}</div>
+    <div class="mono row item-values"><span>${qty(item.quantity)} UN &nbsp;X ${money(item.unitPrice)}(${money(itemTax(item.lineTotal))})</span><span>${money(item.lineTotal)}</span></div>
+    ${item.serials.length ? `<div class="mono item-values">S/N ${e(item.serials.join(', '))}</div>` : ''}`).join('');
+
+  const storeLines = [
+    `<div class="issuer-name">${e((store?.legalName || store?.tradeName || '').toUpperCase())}</div>`,
+    store?.cnpj ? `<div class="issuer-cnpj">${e(formatCnpj(store.cnpj))}</div>` : '',
+    store?.address || store?.phone
+      ? `<div class="issuer-address">${e(store?.address ?? '')}${store?.phone ? ` - FONE ${e(store.phone.replace(/\s+/g, ''))}` : ''}</div>`
+      : '',
+  ].join('');
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>NFC-e ${e(String(nfce.number ?? ''))}</title>
+<style>
+  @page { size: 80mm auto; margin: 0; }
+  * { box-sizing: border-box; }
+  /* Impressora termica pelo driver do Windows: fonte em negrito e preto puro, senao o texto sai fraco */
+  html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; width: 80mm; padding: 4mm 3mm 6mm; font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: bold; color: #000; line-height: 1.3; -webkit-font-smoothing: none; }
+  .issuer { display: flex; align-items: center; gap: 2mm; }
+  .issuer img { width: 20mm; flex: 0 0 auto; filter: grayscale(1) contrast(2) brightness(0.85); }
+  .issuer-name { font-size: 12px; font-weight: bold; }
+  .issuer-cnpj { font-size: 12px; }
+  .issuer-address { font-size: 10px; font-weight: normal; }
+  .title { margin: 6px 0 2px; text-align: center; font-size: 13px; line-height: 1.25; }
+  .homolog { text-align: center; font-size: 11px; margin: 2px 0; }
+  .columns { font-size: 9px; font-weight: normal; margin-bottom: 1px; }
+  .mono { font-family: 'Courier New', Courier, monospace; font-size: 11.5px; font-weight: bold; }
+  .item-values { padding-left: 6ch; }
+  .row { display: flex; justify-content: space-between; gap: 6px; }
+  .row span:last-child { white-space: nowrap; }
+  .totals { margin-top: 6px; font-size: 13px; }
+  .totals .gap { height: 10px; }
+  .payment { font-size: 12px; font-weight: normal; }
+  .consult { text-align: center; font-size: 10px; font-weight: normal; margin-top: 4px; }
+  .access-key { text-align: center; font-size: 9.5px; white-space: nowrap; margin-top: 2px; }
+  .auth { display: flex; gap: 3mm; margin-top: 8px; }
+  .auth img { width: 30mm; height: 30mm; flex: 0 0 auto; image-rendering: pixelated; }
+  .auth-info { font-size: 10px; font-weight: normal; line-height: 1.35; }
+  .auth-info strong { font-weight: bold; }
+  .taxes { margin-top: 6px; font-size: 10px; font-weight: normal; text-align: center; }
+  .store-footer { margin-top: 10px; font-size: 11px; }
+  .store-footer .row { margin-bottom: 2px; }
+</style>
+</head>
+<body>
+  <div class="issuer">
+    <img src="${logo}" alt="">
+    <div>${storeLines}</div>
+  </div>
+  <div class="title">DOCUMENTO AUXILIAR DA NOTA FISCAL<br>DE CONSUMIDOR ELETRÔNICA</div>
+  ${nfce.environment === 'homologacao' ? '<div class="homolog">EMITIDA EM AMBIENTE DE HOMOLOGAÇÃO - SEM VALOR FISCAL</div>' : ''}
+  <div class="columns">#|COD|DESC|QTD|UN| VL UN R$|(VLTR R$)*|VL ITEM R$</div>
   ${itemRows}
   <div class="totals">
-    <div class="row"><span>Qtde. total de itens</span><span>${String(totalItems).padStart(3, '0')}</span></div>
-    <div class="row"><span>Valor total R$</span><span>${money(listTotal)}</span></div>
-    ${discount > 0 ? `<div class="row"><span>Desconto R$</span><span>-${money(discount)}</span></div>` : ''}
-    <div class="row"><span>Valor a Pagar R$</span><span>${money(productsTotal)}</span></div>
+    <div class="row"><span>QTD. TOTAL DE ITENS</span><span>${String(items.length).padStart(3, '0')}</span></div>
+    <div class="row"><span>SUBTOTAL</span><span>${money(listTotal)}</span></div>
+    <div class="row"><span>DESCONTOS</span><span>${money(discount)}</span></div>
+    <div class="gap"></div>
+    <div class="row"><span>VALOR TOTAL R$</span><span>${money(productsTotal)}</span></div>
+    <div class="row"><span>FORMA DE PAGAMENTO</span><span>Valor Pago</span></div>
   </div>
-  <div class="block row"><span>FORMA PAGAMENTO</span><span>VALOR PAGO R$</span></div>
-  ${payments.map((payment) => `<div class="row sub"><span>${payment.paymentMethod === 'SINAL' ? 'SINAL DA RESERVA' : e(PAYMENT_LABELS[payment.paymentMethod] ?? payment.paymentMethod)}</span><span>${money(payment.amount)}</span></div>`).join('')}
-  ${changeAmount > 0 ? `<div class="row"><span>Troco R$</span><span>${money(changeAmount)}</span></div>` : ''}
-  <hr>
-  <div class="center">Consulte pela Chave de Acesso em</div>
-  <div class="center small">${e(nfce.consultUrl ?? '')}</div>
-  <div class="center small">${e(formatAccessKey(nfce.key ?? ''))}</div>
-  <hr>
-  <div class="center">${cpf.length === 11 ? `CONSUMIDOR - CPF ${formatCpf(cpf)}${receipt.clientName ? `<br>${e(receipt.clientName.toUpperCase())}` : ''}` : 'CONSUMIDOR NÃO IDENTIFICADO'}</div>
-  <hr>
-  <div class="center">NFC-e nº ${e(String(nfce.number ?? '').padStart(9, '0'))} Série ${e(String(nfce.series ?? '').padStart(3, '0'))} ${new Date(receipt.timestamp).toLocaleDateString('pt-BR')} ${new Date(receipt.timestamp).toLocaleTimeString('pt-BR')}</div>
-  <div class="center">Protocolo de autorização: ${e(nfce.protocol ?? '')}</div>
-  <div class="center">Data de autorização: ${authorized.toLocaleDateString('pt-BR')} ${authorized.toLocaleTimeString('pt-BR')}</div>
-  ${qrDataUrl ? `<img class="qr" src="${qrDataUrl}" alt="">` : ''}
-  <div class="center">Tributos Totais Incidentes (Lei Federal 12.741/2012): R$ ${money(nfce.taxTotal ?? 0)}</div>
-`;
+  ${payments.map((payment) => `<div class="row payment"><span>${payment.paymentMethod === 'SINAL' ? 'Sinal da reserva' : e(PAYMENT_NFCE_LABELS[payment.paymentMethod] ?? payment.paymentMethod)}</span><span>${money(payment.amount)}</span></div>`).join('')}
+  ${changeAmount > 0 ? `<div class="row payment"><span>Troco</span><span>${money(changeAmount)}</span></div>` : ''}
+  <div class="consult">Consulte pela Chave de Acesso em<br>${e(consultUrl)}</div>
+  <div class="access-key">${e(formatAccessKey(nfce.key ?? ''))}</div>
+  <div class="auth">
+    ${qrDataUrl ? `<img src="${qrDataUrl}" alt="">` : ''}
+    <div class="auth-info">
+      <strong>Número ${e(String(nfce.number ?? '').padStart(9, '0'))} - Série ${e(String(nfce.series ?? '').padStart(3, '0'))}</strong><br>
+      Emissão ${issued.toLocaleDateString('pt-BR')} ${issued.toLocaleTimeString('pt-BR')}<br>
+      Via Consumidor<br><br>
+      Protocolo de Autorização ${e(nfce.protocol ?? '')}<br>
+      Data de Autorização ${authorized.toLocaleDateString('pt-BR')} ${authorized.toLocaleTimeString('pt-BR')}<br>
+      ${cpf.length === 11 ? `CONSUMIDOR CPF: ${formatCpf(cpf)}${receipt.clientName ? `<br>${e(receipt.clientName.toUpperCase())}` : ''}` : 'CONSUMIDOR NÃO IDENTIFICADO'}
+    </div>
+  </div>
+  <div class="taxes">*Tributos Totais Incidentes (Lei Federal 12.741/2012): R$ ${money(taxTotal)}</div>
+  <div class="store-footer">
+    <div class="row"><span>Cupom: ${formatReceiptNumber(receipt.receiptNumber)}</span><span>${receipt.sellerName ? `Vendedor: ${e(receipt.sellerName.toUpperCase())}` : ''}</span></div>
+    <div>${RECEIPT_FOOTER}</div>
+  </div>
+</body>
+</html>`;
 }
 
-function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, logo: string, qrDataUrl: string | null, changeAmount: number): string {
+function formatCnpj(value: string): string {
+  const digits = value.replace(/\D/g, '');
+  return digits.length === 14
+    ? `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`
+    : value;
+}
+
+const PAYMENT_NFCE_LABELS: Record<string, string> = {
+  DINHEIRO: 'Dinheiro',
+  PIX: 'PIX',
+  CREDITO: 'Cartão de Crédito',
+  DEBITO: 'Cartão de Débito',
+  VOUCHER: 'Vale',
+  CREDIARIO: 'Crédito Loja',
+};
+
+export function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, logo: string, qrDataUrl: string | null, changeAmount: number): string {
+  if (receipt.fiscalStatus === 'AUTORIZADA' && receipt.nfce != null) {
+    return buildNfceHtml(receipt, store, logo, qrDataUrl, changeAmount);
+  }
   const e = escapeHtml;
-  const isNfce = receipt.fiscalStatus === 'AUTORIZADA' && receipt.nfce != null;
   const issued = new Date(receipt.timestamp);
   const items = receipt.items.filter((item) => item.quantity > 0);
   const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
@@ -142,7 +221,7 @@ function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, logo:
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>${isNfce ? 'NFC-e' : 'Cupom'} ${formatReceiptNumber(receipt.receiptNumber)}</title>
+<title>Cupom ${formatReceiptNumber(receipt.receiptNumber)}</title>
 <style>
   @page { size: 80mm auto; margin: 0; }
   * { box-sizing: border-box; }
@@ -164,18 +243,14 @@ function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, logo:
   .qr { display: block; width: 32mm; height: 32mm; margin: 10px auto; image-rendering: pixelated; }
   .footer { margin-top: 8px; text-transform: uppercase; }
   .issued { margin-top: 16px; }
-  .small { font-size: 10px; word-break: break-all; }
 </style>
 </head>
 <body>
   <img class="logo" src="${logo}" alt="">
   <div class="center">
     ${storeLines}
-    ${isNfce ? '' : '<div class="title">DAV - DOCUMENTO AUXILIAR DE VENDA</div>'}
+    <div class="title">DAV - DOCUMENTO AUXILIAR DE VENDA</div>
   </div>
-  ${isNfce ? `${buildNfceSection(receipt, qrDataUrl, changeAmount)}
-  <div class="block row"><span>Cupom : &nbsp;${formatReceiptNumber(receipt.receiptNumber)}</span><span>${receipt.sellerName ? `Vendedor : ${e(receipt.sellerName.toUpperCase())}` : ''}</span></div>
-  <div class="footer">${RECEIPT_FOOTER}</div>` : `
   <hr>
   <div class="head"><span>Seq. Descrição Produto</span><span>Total</span></div>
   <div class="sub">Qtd. &nbsp;&nbsp; Preço</div>
@@ -199,7 +274,7 @@ function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, logo:
   <div>CPF : ${formatCpf(receipt.clientCpf)}</div>
   ${qrDataUrl ? `<img class="qr" src="${qrDataUrl}" alt="">` : ''}
   <div class="footer">${RECEIPT_FOOTER}</div>
-  <div class="issued">Emissão : &nbsp; ${issued.toLocaleDateString('pt-BR')} ${issued.toLocaleTimeString('pt-BR')}</div>`}
+  <div class="issued">Emissão : &nbsp; ${issued.toLocaleDateString('pt-BR')} ${issued.toLocaleTimeString('pt-BR')}</div>
 </body>
 </html>`;
 }
