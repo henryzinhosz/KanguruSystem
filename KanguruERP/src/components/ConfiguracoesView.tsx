@@ -1,6 +1,7 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Building2, Check, Pencil, Plus, Save, Store, Trash2, UserRound, Users, X } from 'lucide-react';
-import { PdvOperator, PdvOperatorPermissions, StoreConfig, User, UserRole } from '../types';
+import { PdvOperator, PdvOperatorPermissions, StoreConfig, StoreNfceStatus, User, UserRole } from '../types';
+import { supabaseService } from '../db/supabaseService';
 import ValueInput from './ValueInput';
 
 interface ConfiguracoesViewProps {
@@ -78,6 +79,11 @@ export default function ConfiguracoesView({
   const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
   // Cadastro/edicao de loja em janela (modal) sobre o ERP.
   const [storeModalOpen, setStoreModalOpen] = useState(false);
+  // NFC-e: a chave da Focus e configurada no UCP; aqui so a situacao de cada loja.
+  const [nfceStatus, setNfceStatus] = useState<StoreNfceStatus[]>([]);
+  useEffect(() => {
+    supabaseService.getStoreNfceStatus().then(setNfceStatus).catch(() => setNfceStatus([]));
+  }, []);
   const [storeForm, setStoreForm] = useState<Omit<StoreConfig, 'unitId'>>(EMPTY_STORE);
   const [storeMessage, setStoreMessage] = useState('');
   const [storeError, setStoreError] = useState('');
@@ -332,7 +338,17 @@ export default function ConfiguracoesView({
                       <span className="font-bold text-slate-900 block">{store.tradeName || store.unitId}</span>
                       <span className="text-slate-500">{store.legalName || 'Razão social não informada'}</span>
                     </td>
-                    <td className="p-3 text-slate-600">{store.cnpj || 'Não informado'}</td>
+                    <td className="p-3 text-slate-600">
+                      {store.cnpj || 'Não informado'}
+                      {(() => {
+                        const nfce = nfceStatus.find(item => item.unitId === store.unitId);
+                        return (
+                          <span className={`mt-1 block w-fit rounded border px-1.5 text-[10px] font-bold ${nfce?.configured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                            {nfce?.configured ? `NFC-e configurada${nfce.environment === 'homologacao' ? ' (teste)' : ''}` : 'NFC-e não configurada'}
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="p-3 text-slate-600">{store.contactEmail || store.phone || 'Não informado'}</td>
                     <td className="p-3">
                       <div className="flex justify-end items-center gap-1">

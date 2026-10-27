@@ -1241,3 +1241,89 @@ small {
 .reservation-inline .modal-copy {
   margin: 0.8rem 0;
 }
+
+/* Cupons e notas (reimpressao por data, numero ou CPF) */
+.receipts-notice {
+  padding: 0 clamp(1rem, 4vw, 3rem);
+}
+
+.receipts-search {
+  display: grid;
+  grid-template-columns: minmax(150px, 220px) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.receipts-search label {
+  margin: 0;
+}
+
+.receipts-search-button {
+  width: auto;
+  min-height: 48px;
+  padding: 0 1.2rem;
+}
+
+.receipts-list {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.receipt-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid #d0dacd;
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  background: #fff;
+  font-family: 'Trebuchet MS', sans-serif;
+}
+
+.receipt-card strong,
+.receipt-card small {
+  display: block;
+}
+
+.receipt-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+
+.receipt-tag {
+  border: 1px solid #c5d3c1;
+  border-radius: 4px;
+  padding: 0 0.4rem;
+  color: #48604d;
+  background: #f3f7f1;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.receipt-tag.nfce-autorizada { border-color: #9fd0ae; color: #1f6b3a; background: #ecf8ef; }
+.receipt-tag.nfce-erro { border-color: #e3b1a0; color: #923c21; background: #fff3ee; }
+.receipt-tag.nfce-pendente { border-color: #e6cf8f; color: #8a6412; background: #fff9e8; }
+.receipt-tag.nfce-cancelada,
+.receipt-tag.is-cancelled { border-color: #d0d0d0; color: #6b6b6b; background: #f2f2f2; }
+
+.receipt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .receipts-search {
+    grid-template-columns: 1fr;
+  }
+
+  .receipt-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

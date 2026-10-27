@@ -20,7 +20,7 @@ import {
 import { formatMoney } from '../db/finance';
 import { supabaseService } from '../db/supabaseService';
 import { sanitizeItemCode } from '../db/itemCode';
-import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, isValidNcm } from '../db/fiscal';
+import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fiscal';
 import ValueInput from './ValueInput';
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
@@ -352,8 +352,19 @@ export default function EstoqueView({
 
     // Codigo em branco: o banco gera o proximo numero automatico.
     if (!trimmedName) return;
-    if (trimmedNcm && !isValidNcm(trimmedNcm)) {
-      setNewProdError('NCM inválido: são 8 números (ex.: 8471.60.52).');
+    // Dados fiscais obrigatorios (2.8b): sem eles o produto nao sai na NFC-e.
+    const fiscalError = productFiscalError({
+      ncm: trimmedNcm,
+      origin: newProdOrigin,
+      cst: newProdCst,
+      csosn: newProdCsosn,
+      cest: newProdCest,
+      icmsRate: newProdIcmsRate,
+      icmsReduction: newProdIcmsReduction,
+      taxBurden: newProdTaxBurden
+    });
+    if (fiscalError) {
+      setNewProdError(fiscalError);
       return;
     }
     const fiscalFields = {
@@ -804,7 +815,7 @@ export default function EstoqueView({
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
                           )}
-                          {!p.ncm && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100" title="Sem NCM a NFC-e é recusada">SEM NCM</span>}
+                          {(!p.ncm || !p.icmsOrigin || !(p.csosn || p.icmsCst)) && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100" title="Sem os dados fiscais a NFC-e é recusada: edite o produto">DADOS FISCAIS PENDENTES</span>}
                         </h3>
                         <p className="text-xs text-slate-400 font-mono mt-0.5">Código: {p.sku}</p>
                       </div>
@@ -1649,7 +1660,7 @@ export default function EstoqueView({
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700">NCM (Fins Fiscais)</label>
+                  <label className="font-bold text-slate-700">NCM (Fins Fiscais) *</label>
                   <input
                     type="text"
                     placeholder="8 números, ex.: 8471.60.52"
@@ -1712,7 +1723,7 @@ export default function EstoqueView({
               </div>
 
               <fieldset className="border border-slate-200 rounded-lg p-3 space-y-3">
-                <legend className="px-1 font-bold text-slate-800 uppercase tracking-wider text-[10px]">Informações fiscais</legend>
+                <legend className="px-1 font-bold text-slate-800 uppercase tracking-wider text-[10px]">Informações fiscais (obrigatórias; CEST só com substituição tributária)</legend>
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <label className="font-bold text-slate-700">ICMS (%)</label>

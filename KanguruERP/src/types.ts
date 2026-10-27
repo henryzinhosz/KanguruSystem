@@ -294,6 +294,24 @@ export interface Sale {
   receiptNumber?: number;
   receiptPeriod?: string;
   fiscalType?: 'NAO_FISCAL' | 'NFCE';
+  // NFC-e (2.8b): situacao e dados devolvidos pela Sefaz via Focus.
+  fiscalStatus?: NfceStatus;
+  nfceNumber?: string;
+  nfceSeries?: string;
+  nfceKey?: string;
+  nfceEnvironment?: 'homologacao' | 'producao';
+  nfceXmlUrl?: string;
+  nfceDanfeUrl?: string;
+  nfceMessage?: string;
+  nfceAuthorizedAt?: string;
+}
+
+export type NfceStatus = 'PENDENTE' | 'AUTORIZADA' | 'ERRO' | 'CANCELADA';
+
+export interface StoreNfceStatus {
+  unitId: string;
+  configured: boolean;
+  environment: 'homologacao' | 'producao' | null;
 }
 
 export interface Expense {

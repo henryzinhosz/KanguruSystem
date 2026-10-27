@@ -5,6 +5,7 @@ import {
   StockInventory, 
   StockMovement, 
   Sale,
+  StoreNfceStatus,
   SalePaymentLine,
   Expense, 
   TradeIn, 
@@ -815,6 +816,32 @@ export const supabaseService = {
     return (data || []).map(mapPdvOperator);
   },
 
+  // Chave da Focus por loja (UCP). A chave nunca volta do banco: so "configurada" e o ambiente.
+  async getPlatformStoreFiscal(tenantId: string): Promise<StoreNfceStatus[]> {
+    const { data, error } = await supabase.rpc('platform_list_store_fiscal', { p_tenant_id: tenantId });
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      unitId: row.unit_id,
+      configured: Boolean(row.configured),
+      environment: row.environment ?? null
+    }));
+  },
+
+  async setPlatformStoreFocus(input: { tenantId: string; unitId: string; token: string; environment: 'homologacao' | 'producao' }): Promise<void> {
+    const { error } = await supabase.rpc('platform_set_store_focus', {
+      p_tenant_id: input.tenantId,
+      p_unit_id: input.unitId,
+      p_token: input.token,
+      p_environment: input.environment
+    });
+    if (error) throw error;
+  },
+
+  async clearPlatformStoreFocus(tenantId: string, unitId: string): Promise<void> {
+    const { error } = await supabase.rpc('platform_clear_store_focus', { p_tenant_id: tenantId, p_unit_id: unitId });
+    if (error) throw error;
+  },
+
   async createPlatformTenant(input: {
     legalName: string;
     cnpj: string;
@@ -1310,8 +1337,41 @@ export const supabaseService = {
       finalizedByName: s.finalized_by_name || undefined,
       receiptNumber: s.receipt_number ?? undefined,
       receiptPeriod: s.receipt_period ?? undefined,
-      fiscalType: s.fiscal_type ?? undefined
+      fiscalType: s.fiscal_type ?? undefined,
+      fiscalStatus: s.fiscal_status ?? undefined,
+      nfceNumber: s.nfce_number ?? undefined,
+      nfceSeries: s.nfce_series ?? undefined,
+      nfceKey: s.nfce_key ?? undefined,
+      nfceEnvironment: s.nfce_environment ?? undefined,
+      nfceXmlUrl: s.nfce_xml_url ?? undefined,
+      nfceDanfeUrl: s.nfce_danfe_url ?? undefined,
+      nfceMessage: s.nfce_message ?? undefined,
+      nfceAuthorizedAt: s.nfce_authorized_at ?? undefined
     }));
+  },
+
+  // === NFC-e (2.8b) ===
+  async getStoreNfceStatus(): Promise<StoreNfceStatus[]> {
+    const { data, error } = await supabase.rpc('list_store_nfce_status');
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      unitId: row.unit_id,
+      configured: Boolean(row.configured),
+      environment: row.environment ?? null
+    }));
+  },
+
+  // Cancela a NFC-e na Sefaz (ate 30 min depois da autorizacao). Lanca o motivo se recusado.
+  async cancelSaleNfce(saleId: string, justification: string): Promise<void> {
+    const { data, error } = await supabase.functions.invoke('nfce-cancel', {
+      body: { saleId, justification }
+    });
+    if (error) {
+      const context = (error as { context?: Response }).context;
+      const body = context && typeof context.json === 'function' ? await context.json().catch(() => null) : null;
+      throw new Error(body?.error || 'Não foi possível cancelar a NFC-e.');
+    }
+    if (data?.status !== 'CANCELADA') throw new Error(data?.error || 'Não foi possível cancelar a NFC-e.');
   },
 
   // Muda so o status: nunca regrava os itens (o custo congelado vem do servidor).

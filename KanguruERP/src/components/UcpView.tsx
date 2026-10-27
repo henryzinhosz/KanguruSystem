@@ -12,7 +12,7 @@ import {
   Store,
   Users
 } from 'lucide-react';
-import { PdvOperator, PlatformTenant, PlatformTenantDetails, PosTerminalActivation, PosTerminalActivationStatus, SubscriptionStatus } from '../types';
+import { PdvOperator, PlatformTenant, PlatformTenantDetails, PosTerminalActivation, PosTerminalActivationStatus, StoreNfceStatus, SubscriptionStatus } from '../types';
 import { supabaseService } from '../db/supabaseService';
 
 interface UcpViewProps {
@@ -78,6 +78,10 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
   const [statusDraft, setStatusDraft] = useState<SubscriptionStatus>('ATIVO');
   const [form, setForm] = useState({ legalName: '', cnpj: '', adminEmail: '', initialPassword: '' });
   const [activationForm, setActivationForm] = useState({ unitId: '', terminalLabel: '', expiresInMinutes: 15 });
+  // NFC-e por loja: so "configurada" e o ambiente voltam do banco (a chave nunca).
+  const [storeFiscal, setStoreFiscal] = useState<StoreNfceStatus[]>([]);
+  const [focusForm, setFocusForm] = useState<{ unitId: string; token: string; environment: 'homologacao' | 'producao' } | null>(null);
+  const [isSavingFocus, setIsSavingFocus] = useState(false);
 
   const loadTenants = async () => {
     setIsLoading(true);
@@ -119,6 +123,45 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
     }
   };
 
+  const loadStoreFiscal = async (tenantId: string) => {
+    try {
+      setStoreFiscal(await supabaseService.getPlatformStoreFiscal(tenantId));
+    } catch {
+      setStoreFiscal([]);
+    }
+  };
+
+  const handleSaveFocus = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedTenant || !focusForm) return;
+    setIsSavingFocus(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await supabaseService.setPlatformStoreFocus({ tenantId: selectedTenant.tenant.id, ...focusForm, token: focusForm.token.trim() });
+      setFocusForm(null);
+      setSuccess('NFC-e da loja configurada.');
+      await loadStoreFiscal(selectedTenant.tenant.id);
+    } catch (saveError) {
+      setError(getErrorMessage(saveError, 'Não foi possível salvar a chave da Focus.'));
+    } finally {
+      setIsSavingFocus(false);
+    }
+  };
+
+  const handleClearFocus = async (unitId: string) => {
+    if (!selectedTenant || !window.confirm('Remover a chave da Focus desta loja? O PDV deixa de emitir NFC-e.')) return;
+    setError(null);
+    try {
+      await supabaseService.clearPlatformStoreFocus(selectedTenant.tenant.id, unitId);
+      setFocusForm(null);
+      setSuccess('Chave da Focus removida.');
+      await loadStoreFiscal(selectedTenant.tenant.id);
+    } catch (clearError) {
+      setError(getErrorMessage(clearError, 'Não foi possível remover a chave da Focus.'));
+    }
+  };
+
   const selectTenant = async (tenantId: string) => {
     setIsLoadingDetails(true);
     setError(null);
@@ -137,6 +180,9 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
       setIsActivationFormOpen(false);
       void loadTerminalActivations(tenantId);
       void loadPdvOperators(tenantId);
+      setStoreFiscal([]);
+      setFocusForm(null);
+      void loadStoreFiscal(tenantId);
     } catch (detailsError) {
       setError(detailsError instanceof Error ? detailsError.message : 'Não foi possível carregar os detalhes do cliente.');
     } finally {
@@ -450,7 +496,40 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
                 <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600"><Store className="h-4 w-4" />Lojas ({selectedTenant.stores.length})</div>
                 <div className="divide-y divide-slate-100 border border-slate-200">
                   {selectedTenant.stores.length === 0 && <div className="p-3 text-xs text-slate-400">Nenhuma loja cadastrada.</div>}
-                  {selectedTenant.stores.map(store => <div key={store.unitId} className="p-3 text-xs"><div className="font-bold text-slate-800">{store.tradeName || store.legalName || store.unitId}</div><div className="mt-1 font-mono text-slate-500">{formatCnpj(store.cnpj)}</div></div>)}
+                  {selectedTenant.stores.map(store => {
+                    const fiscal = storeFiscal.find(item => item.unitId === store.unitId);
+                    const editing = focusForm?.unitId === store.unitId;
+                    return (
+                      <div key={store.unitId} className="p-3 text-xs">
+                        <div className="font-bold text-slate-800">{store.tradeName || store.legalName || store.unitId}</div>
+                        <div className="mt-1 font-mono text-slate-500">{formatCnpj(store.cnpj)}</div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-bold ${fiscal?.configured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                            {fiscal?.configured ? `NFC-e configurada · ${fiscal.environment === 'producao' ? 'Produção' : 'Teste (homologação)'}` : 'NFC-e não configurada'}
+                          </span>
+                          {!editing && <button type="button" onClick={() => setFocusForm({ unitId: store.unitId, token: '', environment: fiscal?.environment || 'homologacao' })} className="font-bold text-blue-700 hover:underline">{fiscal?.configured ? 'Alterar' : 'Configurar'}</button>}
+                          {!editing && fiscal?.configured && <button type="button" onClick={() => void handleClearFocus(store.unitId)} className="font-bold text-rose-700 hover:underline">Remover</button>}
+                        </div>
+                        {editing && focusForm && (
+                          <form onSubmit={handleSaveFocus} className="mt-3 grid gap-2 border border-slate-200 bg-slate-50 p-3">
+                            <label className="font-bold text-slate-600">Chave (token) da Focus
+                              <input type="password" autoComplete="off" value={focusForm.token} onChange={event => setFocusForm({ ...focusForm, token: event.target.value })} placeholder={fiscal?.configured ? 'Em branco = manter a chave atual' : 'Cole a chave da empresa na Focus'} className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                            </label>
+                            <label className="font-bold text-slate-600">Ambiente
+                              <select value={focusForm.environment} onChange={event => setFocusForm({ ...focusForm, environment: event.target.value as 'homologacao' | 'producao' })} className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                                <option value="homologacao">Teste (homologação) — não vale como nota</option>
+                                <option value="producao">Produção — nota real</option>
+                              </select>
+                            </label>
+                            <div className="flex justify-end gap-2">
+                              <button type="button" onClick={() => setFocusForm(null)} className="rounded-md px-3 py-2 font-bold text-slate-600 hover:bg-slate-100">Cancelar</button>
+                              <button type="submit" disabled={isSavingFocus || (!fiscal?.configured && !focusForm.token.trim())} className="rounded-md bg-blue-600 px-3 py-2 font-bold text-white disabled:opacity-50">{isSavingFocus ? 'Salvando...' : 'Salvar'}</button>
+                            </div>
+                          </form>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
               <div>

@@ -32,7 +32,17 @@ import {
   type PosCatalogItem,
   type PosSerialUnit,
 } from '../services/supabase/products';
-import { getPosSaleReceipt, saleRpc, type PaymentLine, type PaymentMethodKey } from '../services/supabase/sales';
+import {
+  emitPosNfce,
+  getPosNfceStatus,
+  getPosSaleReceipt,
+  saleRpc,
+  type NfceStatus,
+  type PaymentLine,
+  type PaymentMethodKey,
+  type PosNfceStatus,
+} from '../services/supabase/sales';
+import { ReceiptsPanel } from './ReceiptsPanel';
 import { printSaleReceipt } from './receiptPrint';
 import {
   cancelPosReservation,
@@ -71,11 +81,13 @@ type Screen =
   | 'sale'
   | 'reservations'
   | 'new-reservation'
+  | 'receipts'
   | 'warranty'
   | 'cash-movement'
   | 'cash-close';
 type PaymentMethod = PaymentMethodKey;
 type MovementType = 'SANGRIA' | 'SUPRIMENTO';
+type FiscalChoice = 'NAO_FISCAL' | 'NFCE';
 
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   DINHEIRO: 'Dinheiro',
@@ -331,6 +343,11 @@ export function App() {
   // Venda em andamento guardada enquanto o vendedor monta uma reserva na tela de Reservas.
   const saleDraftRef = useRef<{ cart: CartItem[]; customer: PosCustomer | null; lines: PaymentLine[] } | null>(null);
   const reservationMode = screen === 'new-reservation';
+  // NFC-e (2.8b): loja configurada no UCP? Escolha do vendedor (NFC-e / Nao Fiscal) da venda em curso.
+  const [nfceConfig, setNfceConfig] = useState<PosNfceStatus | null>(null);
+  const [nfceEmitting, setNfceEmitting] = useState(false);
+  const [nfceProblem, setNfceProblem] = useState<{ saleId: string; change: number; status: NfceStatus; message: string | null } | null>(null);
+  const fiscalChoiceRef = useRef<FiscalChoice>('NAO_FISCAL');
 
   async function routeAfterUnlock() {
     const openCash = await getOpenCashSession();
@@ -674,7 +691,8 @@ export function App() {
     return cart.some((item) => item.discountPercent > item.maxItemDiscountPercent);
   }
 
-  async function finalizeSale() {
+  async function finalizeSale(fiscal?: FiscalChoice) {
+    if (fiscal) fiscalChoiceRef.current = fiscal;
     if (!cashSession || cart.length === 0) return;
     if (cart.some((item) => item.backorder)) {
       setMessage('Itens de encomenda (sem estoque) só podem ser reservados.');
@@ -767,7 +785,7 @@ export function App() {
           ? `Venda registrada com sucesso. Troco: ${currency.format(resolution.changeCents / 100)}.`
           : 'Venda registrada com sucesso.'
       );
-      void printReceipt(saleId, resolution.changeCents / 100);
+      void deliverReceipt(saleId, resolution.changeCents / 100);
     } catch (error) {
       const text = errorMessage(error);
       setMessage(text);
@@ -807,6 +825,30 @@ export function App() {
       await printSaleReceipt(receipt, await loadStoreProfile(), changeAmount);
     } catch (error) {
       setMessage(`Venda registrada, mas o cupom não pôde ser impresso: ${errorMessage(error)}`);
+    }
+  }
+
+  // Depois da venda: Nao Fiscal imprime o cupom; NFC-e emite a nota e imprime o DANFE.
+  async function deliverReceipt(saleId: string, changeAmount: number) {
+    if (fiscalChoiceRef.current === 'NFCE') await emitNfce(saleId, changeAmount);
+    else await printReceipt(saleId, changeAmount);
+  }
+
+  async function emitNfce(saleId: string, changeAmount: number) {
+    setNfceEmitting(true);
+    setNfceProblem(null);
+    try {
+      const result = await emitPosNfce(saleId);
+      if (result.status === 'AUTORIZADA') {
+        setMessage(changeAmount > 0
+          ? `NFC-e autorizada. Troco: ${currency.format(changeAmount)}.`
+          : 'NFC-e autorizada.');
+        await printReceipt(saleId, changeAmount);
+      } else {
+        setNfceProblem({ saleId, change: changeAmount, status: result.status, message: result.message });
+      }
+    } finally {
+      setNfceEmitting(false);
     }
   }
 
@@ -971,7 +1013,8 @@ export function App() {
     }
   }
 
-  async function convertReservationToSale(reservation: PosReservation, lines: PaymentLine[]) {
+  async function convertReservationToSale(reservation: PosReservation, lines: PaymentLine[], fiscal: FiscalChoice) {
+    fiscalChoiceRef.current = fiscal;
     if (!cashSession) return;
     const { total, remaining } = reservationAmounts(reservation);
     // Sinal cobrindo tudo: sem linhas de pagamento (cai no caminho legado, saldo zero).
@@ -1056,7 +1099,7 @@ export function App() {
         `Reserva de ${reservation.customerName} convertida em venda${reservation.sellerName ? ` (venda de ${reservation.sellerName})` : ''}. Saldo pago: ${currency.format(remaining)}.`
           + (resolution && resolution.changeCents > 0 ? ` Troco: ${currency.format(resolution.changeCents / 100)}.` : '')
       );
-      void printReceipt(saleId, resolution ? resolution.changeCents / 100 : 0);
+      void deliverReceipt(saleId, resolution ? resolution.changeCents / 100 : 0);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -1083,6 +1126,29 @@ export function App() {
       setBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (screen !== 'sale' && screen !== 'receipts') return;
+    getPosNfceStatus().then(setNfceConfig).catch(() => setNfceConfig(null));
+  }, [screen]);
+
+  const nfceModal = nfceProblem && (
+    <NfceProblemModal
+      problem={nfceProblem}
+      busy={nfceEmitting}
+      onRetry={() => void emitNfce(nfceProblem.saleId, nfceProblem.change)}
+      onPrintNonFiscal={() => {
+        const { saleId, change } = nfceProblem;
+        setNfceProblem(null);
+        setMessage('Cupom Não Fiscal impresso. A NFC-e desta venda ficou pendente: emita depois pela tela de cupons (impressora no topo).');
+        void printReceipt(saleId, change);
+      }}
+      onClose={() => {
+        setNfceProblem(null);
+        setMessage('A NFC-e desta venda ficou pendente. Emita depois pela tela de cupons (impressora no topo).');
+      }}
+    />
+  );
 
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
   const cartHasBackorder = cart.some((item) => item.backorder);
@@ -1394,6 +1460,35 @@ export function App() {
     );
   }
 
+  if (screen === 'receipts') {
+    return (
+      <main className="sale-shell">
+        <header className="sale-header">
+          <div>
+            <Brand compact />
+            <div>
+              <strong>Cupons e notas</strong>
+              <span>{terminal?.tradeName ?? terminal?.unitId}</span>
+            </div>
+          </div>
+          <div className="header-actions">
+            <button className="text-action reservation-back" type="button" onClick={() => { setMessage(null); setScreen('sale'); }}>
+              Voltar para venda
+            </button>
+          </div>
+        </header>
+        <div className="receipts-notice"><Notice message={message} /></div>
+        <ReceiptsPanel
+          nfceConfigured={nfceConfig?.configured === true}
+          busy={busy || nfceEmitting}
+          onReprint={(saleId) => printReceipt(saleId)}
+          onEmitNfce={(saleId) => emitNfce(saleId, 0)}
+        />
+        {nfceModal}
+      </main>
+    );
+  }
+
   if (screen === 'reservations') {
     return (
       <main className="sale-shell">
@@ -1516,9 +1611,11 @@ export function App() {
               setConversionSellerCode('');
               setConversionSeller(null);
             }}
-            onConfirm={() => void convertReservationToSale(conversionReservation, conversionPaymentLines)}
+            nfceConfig={nfceConfig}
+            onConfirm={(fiscal) => void convertReservationToSale(conversionReservation, conversionPaymentLines, fiscal)}
           />
         )}
+        {nfceModal}
       </main>
     );
   }
@@ -1571,7 +1668,7 @@ export function App() {
             >
               <BanknoteArrowUp size={20} />
             </button>
-            <button className="icon-button" type="button" title="Reimprimir último cupom" onClick={() => void printReceipt(null)} disabled={busy}>
+            <button className="icon-button" type="button" title="Cupons: reimprimir e emitir NFC-e pendente" onClick={() => { setMessage(null); setScreen('receipts'); }} disabled={busy}>
               <Printer size={20} />
             </button>
             <button className="icon-button" type="button" title="Fechar caixa" onClick={() => void openClosing()}>
@@ -1810,18 +1907,21 @@ export function App() {
                   <button
                     className="primary-action finish-button finish-nfce"
                     type="button"
-                    disabled
-                    title="A emissão de NFC-e entra na próxima etapa (2.8b)."
+                    disabled={!nfceConfig?.configured || busy || nfceEmitting || cart.length === 0 || !saleSeller || cartHasBackorder}
+                    title={nfceConfig?.configured ? 'Finalizar com NFC-e' : 'NFC-e não configurada para esta loja.'}
+                    onClick={() => void finalizeSale('NFCE')}
                   >
                     <CreditCard size={20} />
-                    NFC-e
-                    <small>em breve</small>
+                    {nfceEmitting ? 'Emitindo...' : 'NFC-e'}
+                    {!nfceConfig?.configured
+                      ? <small>não configurada</small>
+                      : nfceConfig.environment === 'homologacao' && <small>teste</small>}
                   </button>
                   <button
                     className="primary-action finish-button"
                     type="button"
-                    disabled={busy || cart.length === 0 || !saleSeller || cartHasBackorder}
-                    onClick={() => void finalizeSale()}
+                    disabled={busy || nfceEmitting || cart.length === 0 || !saleSeller || cartHasBackorder}
+                    onClick={() => void finalizeSale('NAO_FISCAL')}
                   >
                     <CreditCard size={20} />
                     {busy ? 'Processando...' : 'Não Fiscal'}
@@ -1832,6 +1932,7 @@ export function App() {
           )}
         </aside>
       </section>
+      {nfceModal}
       {serialProduct && (
         <SerialUnitModal
           product={serialProduct}
@@ -1978,6 +2079,45 @@ function ReservationFields({
   );
 }
 
+interface NfceProblemModalProps {
+  problem: { status: NfceStatus; message: string | null };
+  busy: boolean;
+  onRetry: () => void;
+  onPrintNonFiscal: () => void;
+  onClose: () => void;
+}
+
+// NFC-e recusada ou sem resposta: a venda ja esta registrada; o vendedor tenta de novo,
+// imprime o cupom Nao Fiscal ou deixa a nota pendente para emitir depois.
+function NfceProblemModal({ problem, busy, onRetry, onPrintNonFiscal, onClose }: NfceProblemModalProps) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="serial-unit-modal" role="dialog" aria-modal="true" aria-labelledby="nfce-problem-title">
+        <div className="modal-heading">
+          <div>
+            <p className="eyebrow">Venda registrada</p>
+            <h2 id="nfce-problem-title">{problem.status === 'PENDENTE' ? 'NFC-e pendente' : 'NFC-e não autorizada'}</h2>
+          </div>
+        </div>
+        <p className="modal-copy">
+          {problem.message ?? 'A Sefaz não autorizou a NFC-e.'}
+        </p>
+        <p className="modal-copy">
+          A venda já foi registrada. Você pode tentar emitir de novo agora, imprimir o cupom Não Fiscal
+          ou deixar a nota pendente e emitir depois pela tela de cupons.
+        </p>
+        <div className="modal-actions">
+          <button className="text-action" type="button" onClick={onClose} disabled={busy}>Deixar pendente</button>
+          <button className="reservation-nav" type="button" onClick={onPrintNonFiscal} disabled={busy}>Imprimir Não Fiscal</button>
+          <button className="primary-action modal-confirm" type="button" onClick={onRetry} disabled={busy}>
+            {busy ? 'Emitindo...' : 'Tentar de novo'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 interface PaymentLinesEditorProps {
   lines: PaymentLine[];
   total: number;
@@ -2093,7 +2233,8 @@ interface ReservationPaymentModalProps {
   onSeller: (seller: PosSeller | null) => void;
   onPaymentLines: (lines: PaymentLine[]) => void;
   onClose: () => void;
-  onConfirm: () => void;
+  nfceConfig: PosNfceStatus | null;
+  onConfirm: (fiscal: FiscalChoice) => void;
 }
 
 function ReservationPaymentModal({
@@ -2110,6 +2251,7 @@ function ReservationPaymentModal({
   onSeller,
   onPaymentLines,
   onClose,
+  nfceConfig,
   onConfirm,
 }: ReservationPaymentModalProps) {
   const { total, remaining } = reservationAmounts(reservation);
@@ -2188,8 +2330,17 @@ function ReservationPaymentModal({
         <Notice message={message} />
         <div className="modal-actions">
           <button className="text-action" type="button" onClick={onClose} disabled={busy}>Voltar</button>
-          <button className="primary-action modal-confirm" type="button" onClick={onConfirm} disabled={busy || !seller || !unitsReady}>
-            {busy ? 'Processando...' : 'Confirmar venda'}
+          <button
+            className="primary-action modal-confirm"
+            type="button"
+            onClick={() => onConfirm('NFCE')}
+            disabled={busy || !seller || !unitsReady || !nfceConfig?.configured}
+            title={nfceConfig?.configured ? 'Finalizar com NFC-e' : 'NFC-e não configurada para esta loja.'}
+          >
+            {busy ? 'Processando...' : `NFC-e${nfceConfig?.environment === 'homologacao' ? ' (teste)' : ''}`}
+          </button>
+          <button className="primary-action modal-confirm" type="button" onClick={() => onConfirm('NAO_FISCAL')} disabled={busy || !seller || !unitsReady}>
+            {busy ? 'Processando...' : 'Não Fiscal'}
           </button>
         </div>
       </section>
