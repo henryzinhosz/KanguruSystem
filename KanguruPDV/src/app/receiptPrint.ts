@@ -45,7 +45,7 @@ export function formatReceiptNumber(value: number | null): string {
 }
 
 function formatAccessKey(key: string): string {
-  return key.replace(/D/g, '').replace(/(d{4})(?=d)/g, '$1 ');
+  return key.replace(/\D/g, '').replace(/(\d{4})(?=\d)/g, '$1 ');
 }
 
 // DANFE NFC-e: so os produtos (servicos ficam fora da nota). Pagamentos cortados no valor
@@ -71,7 +71,7 @@ function buildNfceSection(receipt: PosSaleReceipt, qrDataUrl: string | null, cha
     return amount > 0 ? [{ ...payment, amount }] : [];
   });
   const authorized = nfce.authorizedAt ? new Date(nfce.authorizedAt) : new Date(receipt.timestamp);
-  const cpf = (receipt.clientCpf ?? '').replace(/D/g, '');
+  const cpf = (receipt.clientCpf ?? '').replace(/\D/g, '');
 
   const itemRows = items.map((item, index) => `
     <div class="row"><span>${String(index + 1).padStart(3, '0')} ${e(item.itemSku)} ${e(item.itemName.toUpperCase())}</span><span>${money(item.lineTotal)}</span></div>
