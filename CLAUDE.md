@@ -105,7 +105,7 @@ por operador (inspirado no Linx Degust).
 | 2.6 Reserva de produto (`product_reservations`, sinal em ledger próprio, preço/desconto congelado) | ✅ |
 | 2.7 Pagamento dividido + aprovação de desconto | ✅ Aplicada, testada e na `main` (PR #1, 2026-10-17) |
 | 2.7b Etiquetas, código de barras e custo por unidade | 🟡 Parte 1 (custo/lucro/Dashboard) ✅ testada e na `main`. Parte 2 (código de barras) ✅ migration 20261018 aplicada e testes aprovados (2026-10-19). Parte 3 (Zebra) aguarda impressora (seção 7) |
-| 2.8 Finalização da venda (fiscal, garantia) | 🟡 Emissor escolhido: **Focus NFe**. 2.8a (cadastro fiscal + Não Fiscal + cupom) implementada em 2026-10-27, migration 20261027 **não aplicada**. 2.8b NFC-e e 2.8c ESC/POS depois |
+| 2.8 Finalização da venda (fiscal, garantia) | 🟡 Emissor escolhido: **Focus NFe**. 2.8a (cadastro fiscal + Não Fiscal + cupom) ✅ aplicada e testada em 2026-10-27 (PC da loja, instalador 0.1.1). 2.8b NFC-e e 2.8c ESC/POS depois |
 | 2.9 Trocas e devoluções | ⚪ |
 | 2.10 Interface para tablet | ⚪ (design visual adiado de propósito para o fim) |
 | 2.11 Empacotamento e distribuição | ⚪ |
@@ -433,6 +433,7 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 ## 12. Diário de sessões (mais recente primeiro)
 
 - **2026-10-15** — Desenho da Parte 1 da 2.7b aprovado (custo médio por loja, custo congelado na venda, novo Dashboard, DRE com seletor). Criado o branch `feat/2.7b-custos`.
+- **2026-10-27 (3)** — Cupom em negrito/preto puro (impressão térmica saía fraca pelo driver do Windows) e instalador **0.1.1**. Usuário instalou no PC da loja e **aprovou todos os testes** (2.8a, tela que cabe na janela, Nova reserva, cupom). Próximo: PR de `feat/2.8-finalizacao` para a `main` e escolher 2.8b (NFC-e Focus) ou 2.8c (ESC/POS).
 - **2026-10-27 (2)** — Pedidos do usuário nos testes da 2.8a (confirmar se a 20261027 foi aplicada): (1) tela de venda cabe na janela (catálogo e carrinho rolam por dentro, rodapé do carrinho fixo; no celular volta a rolar a página); (2) vendedor e total lado a lado no rodapé; (3) **reserva saiu da tela de venda** e virou tela própria **"+ Nova reserva"** na tela de Reservas (busca, serial, encomenda, cliente, data, sinal com 1 forma, vendedor, voucher; venda em andamento fica guardada e volta depois; na venda, produto sem estoque orienta usar Nova reserva). Sem mudança no banco. (4) **Instalador** do PDV: `npx tauri build --bundles nsis` (em `KanguruPDV/`) → `src-tauri/target/release/bundle/nsis/Kanguru PDV_0.1.0_x64-setup.exe` (sem assinatura digital: Windows mostra aviso SmartScreen; assinatura na 2.11). Pendente: usuário testar.
 - **2026-10-27** — PR #2 mergeado na `main`; branch `feat/2.8-finalizacao`. Focus NFe aprovada. 2.8a implementada (ver seção 5): migration 20261027 + ERP (fiscal no produto, editar produto, Instagram da loja, cupom no histórico) + PDV (NFC-e/Não Fiscal, cupom 80 mm, reimprimir). Builds ok; prévia do cupom conferida. Pendente: aplicar 20261027 e testar.
 - **2026-10-26 (2)** — Usuário conferiu md5, aplicou a 20261026 e aprovou os testes do limite por produto. Branch `feat/2.7b-codigo-barras` acumula: código de barras, campos de valor, encomenda/voucher, clientes/garantia, loja em modal, limite por produto — tudo aplicado e testado. Próximo passo sugerido: PR para a `main` (com aprovação) e depois iniciar a 2.8.
