@@ -43,6 +43,7 @@ import {
   type PosNfceStatus,
 } from '../services/supabase/sales';
 import { ReceiptsPanel } from './ReceiptsPanel';
+import { printManagerialReport, type ManagerialReport } from './cashReportPrint';
 import { printSaleReceipt } from './receiptPrint';
 import {
   cancelPosReservation,
@@ -444,6 +445,13 @@ export function App() {
       const opened = await openCashSession(cashNumber, responsibleName, valueAsNumber(openingFloat));
       setCashSession(opened);
       setScreen('sale');
+      void printCashReport({
+        subtitle: 'Abertura de PDV',
+        date: new Date(opened.openedAt),
+        cashNumber: opened.cashNumber,
+        operator: opened.openedByName,
+        cashAmount: opened.openingFloatAmount,
+      });
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -456,12 +464,21 @@ export function App() {
     setBusy(true);
     setMessage(null);
     try {
+      const operator = responsibleName.trim() || cashSession?.openedByName || '';
       await recordCashMovement(
         movementType,
         valueAsNumber(movementAmount),
         movementReason,
-        responsibleName
+        operator
       );
+      void printCashReport({
+        subtitle: movementType === 'SANGRIA' ? 'Sangria' : 'Suprimento',
+        date: new Date(),
+        cashNumber: cashSession?.cashNumber ?? '',
+        operator,
+        cashAmount: valueAsNumber(movementAmount),
+        reason: movementReason.trim() || null,
+      });
       setMovementAmount('');
       setMovementReason('');
       setScreen('sale');
@@ -849,6 +866,15 @@ export function App() {
       }
     } finally {
       setNfceEmitting(false);
+    }
+  }
+
+  // Relatorio Gerencial (abertura, sangria, suprimento): falha na impressao nao desfaz a operacao.
+  async function printCashReport(report: ManagerialReport) {
+    try {
+      await printManagerialReport(report, await loadStoreProfile());
+    } catch (error) {
+      setMessage(`Operação registrada, mas o relatório não pôde ser impresso: ${errorMessage(error)}`);
     }
   }
 

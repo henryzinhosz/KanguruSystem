@@ -284,7 +284,12 @@ export async function printSaleReceipt(receipt: PosSaleReceipt, store: PosStoreP
   // NFC-e autorizada: QR code de consulta da Sefaz; Nao Fiscal: Instagram da loja.
   const link = receipt.fiscalStatus === 'AUTORIZADA' && receipt.nfce?.qrcodeUrl ? receipt.nfce.qrcodeUrl : instagramUrl(store?.instagram);
   const qrDataUrl = link ? await QRCode.toDataURL(link, { margin: 0, width: 256, errorCorrectionLevel: 'M' }).catch(() => null) : null;
+  await printHtmlDocument(buildHtml(receipt, store, new URL(logoUrl, window.location.href).href, qrDataUrl, changeAmount));
+}
 
+// Imprime um documento HTML pela impressora do Windows (iframe invisivel; espera as imagens
+// carregarem, limite de 3 s). Usado pelo cupom e pelos relatorios gerenciais do caixa.
+export async function printHtmlDocument(html: string) {
   const frame = document.createElement('iframe');
   frame.setAttribute('aria-hidden', 'true');
   Object.assign(frame.style, { position: 'fixed', width: '0', height: '0', border: '0', right: '0', bottom: '0' });
@@ -296,7 +301,7 @@ export async function printSaleReceipt(receipt: PosSaleReceipt, store: PosStoreP
     return;
   }
   doc.open();
-  doc.write(buildHtml(receipt, store, new URL(logoUrl, window.location.href).href, qrDataUrl, changeAmount));
+  doc.write(html);
   doc.close();
 
   const loaded = Promise.all(Array.from(doc.images).map((image) => image.complete
