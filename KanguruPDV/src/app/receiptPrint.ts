@@ -78,12 +78,14 @@ function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, logo:
 <style>
   @page { size: 80mm auto; margin: 0; }
   * { box-sizing: border-box; }
-  body { margin: 0; width: 80mm; padding: 4mm 4mm 6mm; font-family: 'Courier New', Courier, monospace; font-size: 11px; color: #000; line-height: 1.35; }
+  /* Impressora termica pelo driver do Windows: fonte em negrito e preto puro, senao o texto sai fraco */
+  html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; width: 80mm; padding: 4mm 4mm 6mm; font-family: 'Courier New', Courier, monospace; font-size: 12px; font-weight: bold; color: #000; line-height: 1.35; -webkit-font-smoothing: none; text-rendering: optimizeSpeed; }
   .center { text-align: center; }
-  .logo { display: block; width: 46mm; margin: 0 auto 6px; filter: grayscale(1) contrast(1.4); }
-  .store-name { font-weight: bold; font-size: 12px; margin-bottom: 2px; }
+  .logo { display: block; width: 46mm; margin: 0 auto 6px; filter: grayscale(1) contrast(2) brightness(0.85); }
+  .store-name { font-weight: bold; font-size: 13px; margin-bottom: 2px; }
   .title { margin: 4px 0 2px; }
-  hr { border: 0; border-top: 1px dashed #000; margin: 3px 0; }
+  hr { border: 0; border-top: 2px dashed #000; margin: 3px 0; }
   .row { display: flex; justify-content: space-between; gap: 6px; }
   .row span:last-child { white-space: nowrap; }
   .sub { padding-left: 2ch; }
