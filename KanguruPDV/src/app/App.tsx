@@ -43,7 +43,7 @@ import {
   type PosNfceStatus,
 } from '../services/supabase/sales';
 import { ReceiptsPanel } from './ReceiptsPanel';
-import { printManagerialReport, type ManagerialReport } from './cashReportPrint';
+import { printClosingReport, printManagerialReport, type ManagerialReport } from './cashReportPrint';
 import { printSaleReceipt } from './receiptPrint';
 import {
   cancelPosReservation,
@@ -65,6 +65,8 @@ import {
 import {
   closeCashSession,
   getCashClosureSummary,
+  getCashSessionReport,
+  type CashSessionReport,
   getOpenCashSession,
   openCashSession,
   recordCashMovement,
@@ -294,6 +296,7 @@ export function App() {
   const [movementAmount, setMovementAmount] = useState('');
   const [movementReason, setMovementReason] = useState('');
   const [closure, setClosure] = useState<CashClosureSummary | null>(null);
+  const [closingReport, setClosingReport] = useState<CashSessionReport | null>(null);
   const [counts, setCounts] = useState<CashCounts>(emptyCounts);
   const [closureNotes, setClosureNotes] = useState('');
   const [query, setQuery] = useState('');
@@ -496,6 +499,8 @@ export function App() {
     try {
       const summary = await getCashClosureSummary();
       setClosure(summary);
+      // Dados extras do relatorio de fechamento; se a consulta falhar, o relatorio sai sem eles.
+      setClosingReport(await getCashSessionReport().catch(() => null));
       setCounts({
         cash: summary.expectedCashAmount,
         pix: summary.expectedPixAmount,
@@ -520,6 +525,13 @@ export function App() {
     try {
       await requireAdminPassword(password);
       await closeCashSession(responsibleName, counts, closureNotes);
+      if (closure) {
+        const closingData = { summary: closure, report: closingReport, counts, closedBy: responsibleName.trim(), closedAt: new Date() };
+        void loadStoreProfile()
+          .then((store) => printClosingReport(closingData, store))
+          .catch((error) => setMessage(`Caixa fechado, mas o relatório não pôde ser impresso: ${errorMessage(error)}`));
+      }
+      setClosingReport(null);
       setCashSession(null);
       setClosure(null);
       setPassword('');

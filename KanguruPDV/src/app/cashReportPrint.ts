@@ -1,4 +1,5 @@
 import type { PosStoreProfile } from '../services/supabase/terminal';
+import type { CashClosureSummary, CashCounts, CashSessionReport } from '../services/supabase/cash-register';
 import { printHtmlDocument } from './receiptPrint';
 
 // Relatorio Gerencial do caixa (abertura, sangria e suprimento) em bobina de 80 mm, no modelo
@@ -76,4 +77,112 @@ export function buildReportHtml(report: ManagerialReport, store: PosStoreProfile
 
 export function printManagerialReport(report: ManagerialReport, store: PosStoreProfile | null) {
   return printHtmlDocument(buildReportHtml(report, store));
+}
+
+// ---- Fechamento de caixa (adaptado da "Reducao de caixa" do Degust) ----
+export interface ClosingReport {
+  summary: CashClosureSummary;
+  report: CashSessionReport | null;
+  counts: CashCounts;
+  closedBy: string;
+  closedAt: Date;
+}
+
+const pad = (label: string, width: number) => (label + '.'.repeat(width)).slice(0, width);
+
+function closingRow(label: string, value: string, width = 18) {
+  return `<div class="line"><span>${escapeHtml(pad(label, width))}:</span><span>${escapeHtml(value)}</span></div>`;
+}
+
+export function buildClosingHtml(data: ClosingReport, store: PosStoreProfile | null): string {
+  const e = escapeHtml;
+  const { summary, report, counts } = data;
+  const opened = new Date(summary.openedAt);
+  // Dinheiro do sistema = gaveta: fundo + vendas/sinais em dinheiro + suprimentos - sangrias.
+  const methods = [
+    { label: 'DINHEIRO', expected: summary.expectedCashAmount, counted: counts.cash },
+    { label: 'CREDITO', expected: summary.expectedCreditAmount, counted: counts.credit },
+    { label: 'DEBITO', expected: summary.expectedDebitAmount, counted: counts.debit },
+    { label: 'PIX', expected: summary.expectedPixAmount, counted: counts.pix },
+    { label: 'VOUCHER', expected: summary.expectedVoucherAmount, counted: counts.voucher },
+    { label: 'CREDIARIO', expected: summary.expectedCreditAccountAmount, counted: counts.creditAccount },
+  ].filter((method, index) => index < 4 || method.expected !== 0 || method.counted !== 0);
+  // Total finalizador = o que entrou por venda/sinal (sem fundo, suprimentos e sangrias).
+  const cashFromSales = summary.expectedCashAmount - summary.openingFloatAmount - summary.suppliesAmount + summary.withdrawalsAmount;
+  const finalizer = cashFromSales + methods.slice(1).reduce((sum, method) => sum + method.expected, 0);
+  const discount = report ? Math.max(0, Math.round((report.listTotal - report.grossTotal) * 100) / 100) : 0;
+  const ticket = report && report.saleCount > 0 ? report.grossTotal / report.saleCount : 0;
+  const time = (date: Date) => date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Fechamento de caixa</title>
+<style>
+  @page { size: 80mm auto; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; width: 80mm; padding: 4mm 3mm 6mm; font-family: 'Courier New', Courier, monospace; font-size: 12px; font-weight: bold; color: #000; line-height: 1.35; -webkit-font-smoothing: none; }
+  .dash { border-top: 2px dashed #000; margin: 4px 0; }
+  .title { text-align: center; font-size: 15px; letter-spacing: 1px; }
+  .store { text-align: center; font-family: Arial, Helvetica, sans-serif; font-size: 13px; margin-bottom: 2px; }
+  .line { display: flex; justify-content: space-between; white-space: pre; }
+  .gap { height: 8px; }
+  .sum { border-top: 2px dashed #000; margin-left: 50%; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 0; text-align: right; font-weight: bold; }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-size: 11px; }
+  .signature { margin-top: 60px; border-top: 2px solid #000; padding-top: 3px; text-align: center; font-family: Arial, Helvetica, sans-serif; font-weight: normal; }
+</style>
+</head>
+<body>
+  ${store?.tradeName ? `<div class="store">${e(store.tradeName)}</div>` : ''}
+  <div class="dash"></div>
+  <div class="title">FECHAMENTO DE CAIXA</div>
+  <div class="dash"></div>
+  <div>PDV: ${e(summary.cashNumber)}${report?.terminalName && report.terminalName !== summary.cashNumber ? ` (${e(report.terminalName)})` : ''}</div>
+  ${closingRow('Data Abertura', `${opened.toLocaleDateString('pt-BR')} ${time(opened)}`)}
+  ${closingRow('No. Abertura', report ? String(report.sessionNumber).padStart(2, '0') : '--')}
+  ${closingRow('Fechamento', `${data.closedAt.toLocaleDateString('pt-BR')} ${time(data.closedAt)}`)}
+  ${closingRow('Responsavel', summary.openedByName.toUpperCase())}
+  ${closingRow('Operador', (data.closedBy || summary.openedByName).toUpperCase())}
+  ${closingRow('Fundo Inicial', money(summary.openingFloatAmount))}
+  <div class="gap"></div>
+  ${report ? `
+  ${closingRow('Venda Balcao', money(report.directTotal))}
+  ${report.reservationTotal > 0 ? closingRow('Reserva convert.', money(report.reservationTotal)) : ''}
+  ${closingRow('Faturamento Bruto', money(report.listTotal))}
+  ${closingRow('(-) Desconto', money(discount))}
+  <div class="sum"></div>
+  ${closingRow('RES. OPERACIONAL', money(report.grossTotal))}
+  ${report.depositsReceived > 0 || report.depositsRefunded > 0 ? closingRow('Sinais recebidos', money(report.depositsReceived)) : ''}
+  ${report.depositsRefunded > 0 ? closingRow('Sinais devolvidos', money(report.depositsRefunded)) : ''}
+  <div class="gap"></div>` : ''}
+  <table>
+    <tr><th>Contagem</th><th>Sistema</th><th>Contado</th><th>Dif.</th></tr>
+    ${methods.map((method) => `<tr><td>${method.label}</td><td>${money(method.expected)}</td><td>${money(method.counted)}</td><td>${money(method.counted - method.expected)}</td></tr>`).join('')}
+  </table>
+  <div class="sum"></div>
+  ${closingRow('TOTAL FINALIZADOR', money(finalizer))}
+  <div class="gap"></div>
+  ${closingRow('Suprimentos (+)', money(summary.suppliesAmount))}
+  ${closingRow('Sangrias (-)', money(summary.withdrawalsAmount))}
+  ${closingRow('Dinheiro gaveta', money(summary.expectedCashAmount))}
+  ${report ? `
+  <div class="dash"></div>
+  ${closingRow('TC-Total Cupom', String(report.saleCount), 20)}
+  ${closingRow('  NFC-e', String(report.nfceCount), 20)}
+  ${closingRow('  Nao Fiscal', String(report.nonFiscalCount), 20)}
+  ${closingRow('TM-Ticket Medio', money(ticket), 20)}
+  ${closingRow('Estornadas', `${report.cancelledCount} (${money(report.cancelledTotal)})`, 20)}` : ''}
+  <div class="dash"></div>
+  <div class="signature">ASSINATURA DO OPERADOR</div>
+</body>
+</html>`;
+}
+
+export function printClosingReport(data: ClosingReport, store: PosStoreProfile | null) {
+  return printHtmlDocument(buildClosingHtml(data, store));
 }

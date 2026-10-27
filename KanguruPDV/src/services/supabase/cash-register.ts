@@ -98,3 +98,42 @@ export async function closeCashSession(closedByName: string, counts: CashCounts,
   });
   if (error) throw error;
 }
+
+// Relatorio de fechamento (caixa aberto do terminal): cupons, faturamento, estornos e sinais.
+export interface CashSessionReport {
+  sessionNumber: number;
+  terminalName: string;
+  saleCount: number;
+  listTotal: number;
+  grossTotal: number;
+  directTotal: number;
+  reservationTotal: number;
+  nfceCount: number;
+  nonFiscalCount: number;
+  cancelledCount: number;
+  cancelledTotal: number;
+  depositsReceived: number;
+  depositsRefunded: number;
+}
+
+export async function getCashSessionReport(): Promise<CashSessionReport | null> {
+  const { data, error } = await supabase.rpc('get_pos_cash_session_report');
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as Record<string, unknown>;
+  return {
+    sessionNumber: numberValue(row.sessionNumber),
+    terminalName: String(row.terminalName ?? ''),
+    saleCount: numberValue(row.saleCount),
+    listTotal: numberValue(row.listTotal),
+    grossTotal: numberValue(row.grossTotal),
+    directTotal: numberValue(row.directTotal),
+    reservationTotal: numberValue(row.reservationTotal),
+    nfceCount: numberValue(row.nfceCount),
+    nonFiscalCount: numberValue(row.nonFiscalCount),
+    cancelledCount: numberValue(row.cancelledCount),
+    cancelledTotal: numberValue(row.cancelledTotal),
+    depositsReceived: numberValue(row.depositsReceived),
+    depositsRefunded: numberValue(row.depositsRefunded),
+  };
+}
