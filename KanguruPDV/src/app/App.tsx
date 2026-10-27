@@ -70,6 +70,7 @@ type Screen =
   | 'cash-open'
   | 'sale'
   | 'reservations'
+  | 'new-reservation'
   | 'warranty'
   | 'cash-movement'
   | 'cash-close';
@@ -290,7 +291,6 @@ export function App() {
   const [conversionReservation, setConversionReservation] = useState<PosReservation | null>(null);
   const [conversionPaymentLines, setConversionPaymentLines] = useState<PaymentLine[]>([]);
   const [refundPaymentMethod, setRefundPaymentMethod] = useState<PaymentMethod>('DINHEIRO');
-  const [reservationDialogOpen, setReservationDialogOpen] = useState(false);
   const [reservationCustomerName, setReservationCustomerName] = useState('');
   const [reservationCustomerPhone, setReservationCustomerPhone] = useState('');
   const [reservationCustomerCpf, setReservationCustomerCpf] = useState('');
@@ -328,6 +328,9 @@ export function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Venda em andamento guardada enquanto o vendedor monta uma reserva na tela de Reservas.
+  const saleDraftRef = useRef<{ cart: CartItem[]; customer: PosCustomer | null; lines: PaymentLine[] } | null>(null);
+  const reservationMode = screen === 'new-reservation';
 
   async function routeAfterUnlock() {
     const openCash = await getOpenCashSession();
@@ -548,12 +551,20 @@ export function App() {
   }
 
   async function selectProduct(product: PosCatalogItem) {
-    // Sem estoque nesta loja: entra como encomenda (so pode ser reservado).
+    if (reservationMode && product.itemType === 'SERVICE') {
+      setMessage('Serviços não podem ser reservados: adicione o serviço na hora da venda.');
+      return;
+    }
+    // Sem estoque nesta loja: na reserva entra como encomenda; na venda, orienta a reservar.
     if (product.itemType === 'PRODUCT' && product.availableQuantity <= 0) {
+      if (!reservationMode) {
+        setMessage(`"${product.name}" está sem estoque nesta loja. Para encomendar, use Reservas > Nova reserva.`);
+        return;
+      }
       addBackorder(product);
       setCatalogItems([]);
       setQuery('');
-      setMessage(`"${product.name}" está sem estoque nesta loja: entrou como encomenda e só pode ser reservado.`);
+      setMessage(`"${product.name}" está sem estoque nesta loja: entrou como encomenda.`);
       return;
     }
     if (product.itemType === 'PRODUCT' && product.requiresUnitSelection) {
@@ -580,7 +591,7 @@ export function App() {
     addProduct(product);
     setCatalogItems([]);
     setQuery('');
-    setMessage(`${product.itemType === 'SERVICE' ? 'Serviço' : 'Produto'} "${product.name}" adicionado ao carrinho.`);
+    setMessage(`${product.itemType === 'SERVICE' ? 'Serviço' : 'Produto'} "${product.name}" adicionado ${reservationMode ? 'à reserva' : 'ao carrinho'}.`);
   }
 
   function addProduct(product: PosCatalogItem) {
@@ -839,6 +850,51 @@ export function App() {
     }
   }
 
+  function defaultReservationDate(): string {
+    const date = new Date();
+    date.setDate(date.getDate() + 7);
+    return localDateInputValue(date);
+  }
+
+  function startNewReservation() {
+    saleDraftRef.current = { cart, customer: saleCustomer, lines: paymentLines };
+    setCart([]);
+    setSaleCustomer(null);
+    setPaymentLines([]);
+    setCatalogItems([]);
+    setQuery('');
+    setMessage(null);
+    setReservationCustomerName('');
+    setReservationCustomerPhone('');
+    setReservationCustomerCpf('');
+    setReservationExpiresOn(defaultReservationDate());
+    setReservationDeposit('');
+    setReservationSellerCode('');
+    setReservationSeller(null);
+    setScreen('new-reservation');
+  }
+
+  function restoreSaleDraft() {
+    const draft = saleDraftRef.current;
+    saleDraftRef.current = null;
+    setCart(draft?.cart ?? []);
+    setSaleCustomer(draft?.customer ?? null);
+    setPaymentLines(draft?.lines ?? []);
+    setCatalogItems([]);
+    setQuery('');
+  }
+
+  function leaveNewReservation() {
+    restoreSaleDraft();
+    void openReservations();
+  }
+
+  function fillReservationCustomer(customer: PosCustomer) {
+    setReservationCustomerName(customer.name);
+    setReservationCustomerCpf(maskCpf(customer.cpf));
+    setReservationCustomerPhone(customer.phone);
+  }
+
   async function submitReservation(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!cashSession || cart.length === 0 || cart.some((item) => item.itemType !== 'PRODUCT')) return;
@@ -897,20 +953,17 @@ export function App() {
         expiresAt,
         sellerName: reservationSeller.name,
       };
-      setCart([]);
-      setCatalogItems([]);
-      setQuery('');
-      setPaymentLines([]);
-      setReservationDialogOpen(false);
       setReservationCustomerName('');
       setReservationCustomerPhone('');
       setReservationCustomerCpf('');
-      setSaleCustomer(null);
       setReservationDeposit('');
       setReservationSellerCode('');
       setReservationSeller(null);
-      setMessage(`Reserva registrada para ${reservationSeller.name}. Imprima o voucher: a via de cima fica na loja e o canhoto vai para o cliente.`);
       void printVoucher(voucher);
+      restoreSaleDraft();
+      setReservations(await getPosReservations().catch(() => reservations));
+      setScreen('reservations');
+      setMessage(`Reserva registrada para ${reservationSeller.name}. Imprima o voucher: a via de cima fica na loja e o canhoto vai para o cliente.`);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -1033,6 +1086,7 @@ export function App() {
 
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
   const cartHasBackorder = cart.some((item) => item.backorder);
+  const reservationDepositAmount = valueAsNumber(reservationDeposit);
 
   useEffect(() => {
     if (!conversionReservation || !terminal) return;
@@ -1361,6 +1415,9 @@ export function App() {
                 <option value="DEBITO">Débito</option>
               </select>
             </label>
+            <button className="primary-action new-reservation-button" type="button" onClick={startNewReservation} disabled={busy}>
+              <Plus size={18} /> Nova reserva
+            </button>
             <button className="text-action reservation-back" type="button" onClick={() => setScreen('sale')}>
               Voltar para venda
             </button>
@@ -1467,62 +1524,70 @@ export function App() {
   }
 
   return (
-    <main className="sale-shell">
+    <main className="sale-shell sale-shell-fit">
       <header className="sale-header">
         <div>
           <Brand compact />
           <div>
-            <strong>{cashSession?.cashNumber}</strong>
+            <strong>{reservationMode ? 'Nova reserva' : cashSession?.cashNumber}</strong>
             <span>
               {terminal?.tradeName ?? terminal?.unitId} | Aberto por {cashSession?.openedByName}
             </span>
           </div>
         </div>
-        <div className="header-actions">
-          <button className="reservation-nav" type="button" onClick={() => void openReservations()} disabled={busy}>
-            <ClipboardList size={18} /> Reservas
-          </button>
-          <button className="reservation-nav" type="button" onClick={() => setScreen('warranty')} disabled={busy}>
-            <ShieldCheck size={18} /> Garantia
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            title="Registrar sangria"
-            onClick={() => {
-              setMovementType('SANGRIA');
-              setScreen('cash-movement');
-            }}
-          >
-            <BanknoteArrowDown size={20} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            title="Registrar suprimento"
-            onClick={() => {
-              setMovementType('SUPRIMENTO');
-              setScreen('cash-movement');
-            }}
-          >
-            <BanknoteArrowUp size={20} />
-          </button>
-          <button className="icon-button" type="button" title="Reimprimir último cupom" onClick={() => void printReceipt(null)} disabled={busy}>
-            <Printer size={20} />
-          </button>
-          <button className="icon-button" type="button" title="Fechar caixa" onClick={() => void openClosing()}>
-            <LockKeyhole size={20} />
-          </button>
-          <span className="operator-badge">
-            <CheckCircle2 size={18} />
-            Caixa aberto
-          </span>
-        </div>
+        {reservationMode ? (
+          <div className="header-actions">
+            <button className="text-action reservation-back" type="button" onClick={leaveNewReservation} disabled={busy}>
+              Voltar para reservas
+            </button>
+          </div>
+        ) : (
+          <div className="header-actions">
+            <button className="reservation-nav" type="button" onClick={() => void openReservations()} disabled={busy}>
+              <ClipboardList size={18} /> Reservas
+            </button>
+            <button className="reservation-nav" type="button" onClick={() => setScreen('warranty')} disabled={busy}>
+              <ShieldCheck size={18} /> Garantia
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              title="Registrar sangria"
+              onClick={() => {
+                setMovementType('SANGRIA');
+                setScreen('cash-movement');
+              }}
+            >
+              <BanknoteArrowDown size={20} />
+            </button>
+            <button
+              className="icon-button"
+              type="button"
+              title="Registrar suprimento"
+              onClick={() => {
+                setMovementType('SUPRIMENTO');
+                setScreen('cash-movement');
+              }}
+            >
+              <BanknoteArrowUp size={20} />
+            </button>
+            <button className="icon-button" type="button" title="Reimprimir último cupom" onClick={() => void printReceipt(null)} disabled={busy}>
+              <Printer size={20} />
+            </button>
+            <button className="icon-button" type="button" title="Fechar caixa" onClick={() => void openClosing()}>
+              <LockKeyhole size={20} />
+            </button>
+            <span className="operator-badge">
+              <CheckCircle2 size={18} />
+              Caixa aberto
+            </span>
+          </div>
+        )}
       </header>
 
       <section className="sale-layout">
         <section className="catalog-panel">
-          <h1>Nova venda</h1>
+          <h1>{reservationMode ? 'Nova reserva' : 'Nova venda'}</h1>
           <form className="search-form" onSubmit={handleSearch}>
             <input
               ref={searchInputRef}
@@ -1581,7 +1646,7 @@ export function App() {
 
         <aside className="cart-panel">
           <div className="cart-heading">
-            <h2>Carrinho</h2>
+            <h2>{reservationMode ? 'Itens da reserva' : 'Carrinho'}</h2>
             {cartHasOverLimitDiscount() && (
               <small className="discount-warning">
                 Itens acima do limite exigem a senha administrativa na finalização.
@@ -1648,91 +1713,123 @@ export function App() {
             )}
           </div>
 
-          <div className="sale-customer">
-            <span className="sale-customer-label"><UserRound size={16} /> Cliente (opcional)</span>
-            {saleCustomer ? (
-              <div className="sale-customer-selected">
-                <div>
-                  <strong>{saleCustomer.name}</strong>
-                  <small>CPF {formatCpf(saleCustomer.cpf)} | {saleCustomer.phone}</small>
+          {reservationMode ? (
+            <>
+              <form id="new-reservation-form" className="reservation-inline" onSubmit={(event) => void submitReservation(event)}>
+                <ReservationFields
+                  customerName={reservationCustomerName}
+                  customerPhone={reservationCustomerPhone}
+                  customerCpf={reservationCustomerCpf}
+                  onCustomerCpf={(value) => setReservationCustomerCpf(maskCpf(value))}
+                  hasBackorder={cartHasBackorder}
+                  expiresOn={reservationExpiresOn}
+                  deposit={reservationDeposit}
+                  paymentMethod={paymentMethod}
+                  busy={busy}
+                  onPickCustomer={() => setCustomerPickerOpen(true)}
+                  onCustomerName={setReservationCustomerName}
+                  onCustomerPhone={setReservationCustomerPhone}
+                  onExpiresOn={setReservationExpiresOn}
+                  onDeposit={setReservationDeposit}
+                  onPaymentMethod={(value) => setPaymentMethod(value)}
+                />
+              </form>
+              <div className="cart-footer">
+                <div className="reservation-modal-summary">
+                  <span>Total reservado</span><strong>{currency.format(grossAmount)}</strong>
+                  <span>Sinal</span><strong>{currency.format(reservationDepositAmount)}</strong>
+                  <span>Saldo na conversão</span><strong>{currency.format(Math.max(0, grossAmount - reservationDepositAmount))}</strong>
                 </div>
-                <div className="sale-customer-actions">
-                  <button className="text-action" type="button" onClick={() => setCustomerForm({ customer: saleCustomer, cpf: '' })}>Editar</button>
-                  <button className="text-action" type="button" onClick={() => setCustomerPickerOpen(true)}>Trocar</button>
-                  <button className="text-action" type="button" onClick={() => setSaleCustomer(null)}>Remover</button>
+                <SellerCodeField
+                  label="Código do vendedor (fica com a venda)"
+                  value={reservationSellerCode}
+                  seller={reservationSeller}
+                  disabled={busy}
+                  onValue={setReservationSellerCode}
+                  onSeller={setReservationSeller}
+                />
+                <button
+                  className="primary-action finish-button"
+                  type="submit"
+                  form="new-reservation-form"
+                  disabled={busy || cart.length === 0 || reservationDepositAmount > grossAmount || !reservationSeller || !isValidCpf(reservationCustomerCpf)}
+                >
+                  <ClipboardList size={20} />
+                  {busy ? 'Registrando...' : 'Confirmar reserva'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="sale-customer">
+                <span className="sale-customer-label"><UserRound size={16} /> Cliente (opcional)</span>
+                {saleCustomer ? (
+                  <div className="sale-customer-selected">
+                    <div>
+                      <strong>{saleCustomer.name}</strong>
+                      <small>CPF {formatCpf(saleCustomer.cpf)} | {saleCustomer.phone}</small>
+                    </div>
+                    <div className="sale-customer-actions">
+                      <button className="text-action" type="button" onClick={() => setCustomerForm({ customer: saleCustomer, cpf: '' })}>Editar</button>
+                      <button className="text-action" type="button" onClick={() => setCustomerPickerOpen(true)}>Trocar</button>
+                      <button className="text-action" type="button" onClick={() => setSaleCustomer(null)}>Remover</button>
+                    </div>
+                  </div>
+                ) : (
+                  <button className="customer-pick" type="button" disabled={busy} onClick={() => setCustomerPickerOpen(true)}>
+                    <Search size={16} /> Selecionar ou cadastrar cliente
+                  </button>
+                )}
+              </div>
+
+              <PaymentLinesEditor
+                lines={paymentLines}
+                total={grossAmount}
+                totalLabel="Total da venda"
+                busy={busy}
+                onChange={setPaymentLines}
+              />
+
+              <div className="cart-footer">
+                <div className="cart-footer-row">
+                  <SellerCodeField
+                    label="Código do vendedor"
+                    value={saleSellerCode}
+                    seller={saleSeller}
+                    disabled={busy}
+                    onValue={setSaleSellerCode}
+                    onSeller={setSaleSeller}
+                  />
+                  <div className="total-row">
+                    <span>Total</span>
+                    <strong>{currency.format(grossAmount)}</strong>
+                  </div>
+                </div>
+
+                <div className="finish-choice">
+                  <button
+                    className="primary-action finish-button finish-nfce"
+                    type="button"
+                    disabled
+                    title="A emissão de NFC-e entra na próxima etapa (2.8b)."
+                  >
+                    <CreditCard size={20} />
+                    NFC-e
+                    <small>em breve</small>
+                  </button>
+                  <button
+                    className="primary-action finish-button"
+                    type="button"
+                    disabled={busy || cart.length === 0 || !saleSeller || cartHasBackorder}
+                    onClick={() => void finalizeSale()}
+                  >
+                    <CreditCard size={20} />
+                    {busy ? 'Processando...' : 'Não Fiscal'}
+                  </button>
                 </div>
               </div>
-            ) : (
-              <button className="customer-pick" type="button" disabled={busy} onClick={() => setCustomerPickerOpen(true)}>
-                <Search size={16} /> Selecionar ou cadastrar cliente
-              </button>
-            )}
-          </div>
-
-          <PaymentLinesEditor
-            lines={paymentLines}
-            total={grossAmount}
-            totalLabel="Total da venda"
-            busy={busy}
-            onChange={setPaymentLines}
-          />
-
-          <div className="total-row">
-            <span>Total</span>
-            <strong>{currency.format(grossAmount)}</strong>
-          </div>
-
-          <SellerCodeField
-            label="Código do vendedor"
-            value={saleSellerCode}
-            seller={saleSeller}
-            disabled={busy}
-            onValue={setSaleSellerCode}
-            onSeller={setSaleSeller}
-          />
-
-          <button
-            className="reserve-action"
-            type="button"
-            disabled={busy || cart.length === 0 || cart.some((item) => item.itemType !== 'PRODUCT')}
-            onClick={() => {
-              if (saleCustomer) {
-                setReservationCustomerName(saleCustomer.name);
-                setReservationCustomerCpf(maskCpf(saleCustomer.cpf));
-                setReservationCustomerPhone(saleCustomer.phone);
-              }
-              setReservationDialogOpen(true);
-            }}
-          >
-            Reservar
-          </button>
-          {cart.some((item) => item.itemType !== 'PRODUCT') && (
-            <small className="reserve-hint">Remova os serviços para reservar os produtos do carrinho.</small>
+            </>
           )}
-          {cartHasBackorder && (
-            <small className="reserve-hint">Itens de encomenda (sem estoque) só podem ser reservados.</small>
-          )}
-          <div className="finish-choice">
-            <button
-              className="primary-action finish-button finish-nfce"
-              type="button"
-              disabled
-              title="A emissão de NFC-e entra na próxima etapa (2.8b)."
-            >
-              <CreditCard size={20} />
-              NFC-e
-              <small>em breve</small>
-            </button>
-            <button
-              className="primary-action finish-button"
-              type="button"
-              disabled={busy || cart.length === 0 || !saleSeller || cartHasBackorder}
-              onClick={() => void finalizeSale()}
-            >
-              <CreditCard size={20} />
-              {busy ? 'Processando...' : 'Não Fiscal'}
-            </button>
-          </div>
         </aside>
       </section>
       {serialProduct && (
@@ -1767,7 +1864,8 @@ export function App() {
       {customerPickerOpen && (
         <CustomerPickerModal
           onSelect={(customer) => {
-            setSaleCustomer(customer);
+            if (reservationMode) fillReservationCustomer(customer);
+            else setSaleCustomer(customer);
             setCustomerPickerOpen(false);
           }}
           onNew={(cpf) => {
@@ -1782,43 +1880,19 @@ export function App() {
           customer={customerForm.customer}
           initialCpf={customerForm.cpf}
           onSaved={(customer) => {
-            setSaleCustomer(customer);
+            if (reservationMode) fillReservationCustomer(customer);
+            else setSaleCustomer(customer);
             setCustomerForm(null);
-            setMessage(`Cliente ${customer.name} vinculado à venda.`);
+            setMessage(`Cliente ${customer.name} vinculado ${reservationMode ? 'à reserva' : 'à venda'}.`);
           }}
           onClose={() => setCustomerForm(null)}
-        />
-      )}
-      {reservationDialogOpen && (
-        <ReservationModal
-          customerName={reservationCustomerName}
-          customerPhone={reservationCustomerPhone}
-          customerCpf={reservationCustomerCpf}
-          onCustomerCpf={(value) => setReservationCustomerCpf(maskCpf(value))}
-          hasBackorder={cartHasBackorder}
-          expiresOn={reservationExpiresOn}
-          deposit={reservationDeposit}
-          paymentMethod={paymentMethod}
-          total={grossAmount}
-          busy={busy}
-          onCustomerName={setReservationCustomerName}
-          onCustomerPhone={setReservationCustomerPhone}
-          onExpiresOn={setReservationExpiresOn}
-          onDeposit={setReservationDeposit}
-          onPaymentMethod={(value) => setPaymentMethod(value as PaymentMethod)}
-          sellerCode={reservationSellerCode}
-          seller={reservationSeller}
-          onSellerCode={setReservationSellerCode}
-          onSeller={setReservationSeller}
-          onClose={() => setReservationDialogOpen(false)}
-          onSubmit={(event) => void submitReservation(event)}
         />
       )}
     </main>
   );
 }
 
-interface ReservationModalProps {
+interface ReservationFieldsProps {
   customerName: string;
   customerPhone: string;
   customerCpf: string;
@@ -1827,22 +1901,17 @@ interface ReservationModalProps {
   expiresOn: string;
   deposit: string;
   paymentMethod: PaymentMethod;
-  total: number;
   busy: boolean;
+  onPickCustomer: () => void;
   onCustomerName: (value: string) => void;
   onCustomerPhone: (value: string) => void;
   onExpiresOn: (value: string) => void;
   onDeposit: (value: string) => void;
   onPaymentMethod: (value: PaymentMethod) => void;
-  sellerCode: string;
-  seller: PosSeller | null;
-  onSellerCode: (value: string) => void;
-  onSeller: (seller: PosSeller | null) => void;
-  onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
 
-function ReservationModal({
+// Dados da reserva no painel da direita da tela "Nova reserva" (o vendedor e o botao ficam no rodape).
+function ReservationFields({
   customerName,
   customerPhone,
   customerCpf,
@@ -1851,94 +1920,61 @@ function ReservationModal({
   expiresOn,
   deposit,
   paymentMethod,
-  total,
   busy,
+  onPickCustomer,
   onCustomerName,
   onCustomerPhone,
   onExpiresOn,
   onDeposit,
   onPaymentMethod,
-  sellerCode,
-  seller,
-  onSellerCode,
-  onSeller,
-  onClose,
-  onSubmit,
-}: ReservationModalProps) {
+}: ReservationFieldsProps) {
   const depositAmount = valueAsNumber(deposit);
   const cpfComplete = customerCpf.replace(/\D/g, '').length === 11;
   const cpfValid = isValidCpf(customerCpf);
   return (
-    <div className="modal-backdrop" role="presentation">
-      <section className="serial-unit-modal reservation-modal" role="dialog" aria-modal="true" aria-labelledby="reservation-title">
-        <div className="modal-heading">
-          <div>
-            <p className="eyebrow">Separar produto</p>
-            <h2 id="reservation-title">Nova reserva</h2>
-          </div>
-          <button className="icon-button" type="button" title="Fechar" onClick={onClose} disabled={busy}><X size={20} /></button>
-        </div>
-        <p className="modal-copy">
-          {hasBackorder
-            ? 'Há itens de encomenda (sem estoque): ficam reservados para este cliente assim que chegarem.'
-            : 'O produto ficará indisponível para outras vendas até conversão ou cancelamento.'}
-          {' '}Ao confirmar, o voucher é impresso.
-        </p>
-        <form onSubmit={onSubmit}>
-          <label>
-            Nome do cliente
-            <input autoFocus required maxLength={160} value={customerName} onChange={(event) => onCustomerName(event.target.value)} />
-          </label>
-          <label>
-            CPF do cliente
-            <input required inputMode="numeric" placeholder="000.000.000-00" value={customerCpf} onChange={(event) => onCustomerCpf(event.target.value)} />
-            {cpfComplete && !cpfValid && <small className="field-error">CPF inválido. Confira os números.</small>}
-          </label>
-          <label>
-            Telefone (opcional)
-            <input type="tel" maxLength={40} value={customerPhone} onChange={(event) => onCustomerPhone(event.target.value)} />
-          </label>
-          <label>
-            Data de retirada prevista
-            <input type="date" required min={localDateInputValue()} value={expiresOn} onChange={(event) => onExpiresOn(event.target.value)} />
-          </label>
-          <label>
-            Sinal / depósito (opcional)
-            <ValueInput value={parseValueText(deposit)} onValueChange={(value) => onDeposit(formatValueText(value, 2))} />
-          </label>
-          {depositAmount > 0 && (
-            <label>
-              Forma de recebimento do sinal
-              <select value={paymentMethod} onChange={(event) => onPaymentMethod(event.target.value as PaymentMethod)}>
-                <option value="DINHEIRO">Dinheiro</option>
-                <option value="PIX">Pix</option>
-                <option value="CREDITO">Crédito</option>
-                <option value="DEBITO">Débito</option>
-              </select>
-            </label>
-          )}
-          <SellerCodeField
-            label="Código do vendedor (fica com a venda)"
-            value={sellerCode}
-            seller={seller}
-            disabled={busy}
-            onValue={onSellerCode}
-            onSeller={onSeller}
-          />
-          <div className="reservation-modal-summary">
-            <span>Total reservado</span><strong>{currency.format(total)}</strong>
-            <span>Sinal</span><strong>{currency.format(depositAmount)}</strong>
-            <span>Saldo na conversão</span><strong>{currency.format(Math.max(0, total - depositAmount))}</strong>
-          </div>
-          <div className="modal-actions">
-            <button className="text-action" type="button" onClick={onClose} disabled={busy}>Voltar</button>
-            <button className="primary-action modal-confirm" type="submit" disabled={busy || depositAmount > total || !seller || !cpfValid}>
-              {busy ? 'Registrando...' : 'Confirmar reserva'}
-            </button>
-          </div>
-        </form>
-      </section>
-    </div>
+    <>
+      <p className="modal-copy">
+        {hasBackorder
+          ? 'Há itens de encomenda (sem estoque): ficam reservados para este cliente assim que chegarem.'
+          : 'Os produtos ficam indisponíveis para outras vendas até a conversão ou o cancelamento.'}
+        {' '}Ao confirmar, o voucher é impresso.
+      </p>
+      <button className="customer-pick" type="button" disabled={busy} onClick={onPickCustomer}>
+        <Search size={16} /> Buscar cliente cadastrado
+      </button>
+      <label>
+        Nome do cliente
+        <input required maxLength={160} value={customerName} onChange={(event) => onCustomerName(event.target.value)} />
+      </label>
+      <label>
+        CPF do cliente
+        <input required inputMode="numeric" placeholder="000.000.000-00" value={customerCpf} onChange={(event) => onCustomerCpf(event.target.value)} />
+        {cpfComplete && !cpfValid && <small className="field-error">CPF inválido. Confira os números.</small>}
+      </label>
+      <label>
+        Telefone (opcional)
+        <input type="tel" maxLength={40} value={customerPhone} onChange={(event) => onCustomerPhone(event.target.value)} />
+      </label>
+      <label>
+        Data de retirada prevista
+        <input type="date" required min={localDateInputValue()} value={expiresOn} onChange={(event) => onExpiresOn(event.target.value)} />
+      </label>
+      <label>
+        Sinal / depósito (opcional)
+        <ValueInput value={parseValueText(deposit)} onValueChange={(value) => onDeposit(formatValueText(value, 2))} />
+      </label>
+      {depositAmount > 0 && (
+        <label>
+          Forma de recebimento do sinal
+          <select value={paymentMethod} onChange={(event) => onPaymentMethod(event.target.value as PaymentMethod)}>
+            <option value="DINHEIRO">Dinheiro</option>
+            <option value="PIX">Pix</option>
+            <option value="CREDITO">Crédito</option>
+            <option value="DEBITO">Débito</option>
+          </select>
+        </label>
+      )}
+    </>
   );
 }
 

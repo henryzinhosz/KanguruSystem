@@ -1125,3 +1125,119 @@ small {
   font-weight: 400;
   opacity: 0.85;
 }
+
+/* Tela de venda cabe na janela: catalogo e carrinho rolam por dentro, rodape do carrinho fica sempre visivel */
+.sale-shell-fit {
+  display: flex;
+  height: 100vh;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sale-shell-fit .sale-header {
+  flex: 0 0 auto;
+}
+
+.sale-shell-fit .sale-layout {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.sale-shell-fit .catalog-panel,
+.sale-shell-fit .cart-panel {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sale-shell-fit .cart-panel {
+  padding-bottom: 0;
+}
+
+.cart-footer {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  padding-bottom: clamp(1rem, 2vw, 1.5rem);
+  background: #f8faf5;
+}
+
+.cart-footer .total-row {
+  margin: 1rem 0 0.5rem;
+  padding-top: 1rem;
+}
+
+.cart-footer .seller-code-field {
+  margin: 0.5rem 0;
+}
+
+.cart-footer .reserve-action {
+  margin-bottom: 0.6rem;
+}
+
+.cart-footer .reserve-hint {
+  display: block;
+  margin: 0 0 0.6rem;
+}
+
+/* Celular: volta a rolar a pagina inteira */
+@media (max-width: 480px) {
+  .sale-shell-fit {
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .sale-shell-fit .catalog-panel,
+  .sale-shell-fit .cart-panel {
+    overflow: visible;
+  }
+}
+
+/* Rodape da venda: codigo do vendedor e total lado a lado */
+.cart-footer-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  border-top: 1px solid #b4c7b1;
+}
+
+.cart-footer-row .total-row {
+  display: grid;
+  justify-items: end;
+  gap: 0.2rem;
+  margin: 0.5rem 0 1.1rem;
+  padding-top: 0;
+  border-top: 0;
+}
+
+.cart-footer-row .seller-code-field {
+  margin: 0.6rem 0 0.5rem;
+}
+
+.cart-footer .finish-choice,
+.cart-footer > .finish-button {
+  margin-top: 0.4rem;
+}
+
+/* Nova reserva (tela de Reservas) */
+.new-reservation-button {
+  width: auto;
+  min-height: 42px;
+  padding: 0 1rem;
+}
+
+.reservation-inline {
+  margin-top: 1rem;
+  border-top: 1px solid #c5d3c1;
+}
+
+.reservation-inline > label {
+  margin: 0.8rem 0;
+}
+
+.reservation-inline .modal-copy {
+  margin: 0.8rem 0;
+}
