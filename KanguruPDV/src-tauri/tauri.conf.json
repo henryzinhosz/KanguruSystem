@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Kanguru PDV",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "identifier": "com.kanguruerp.pdv",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -25,6 +25,18 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI5OTk5MjE0QTE4Njg5NgpSV1NXYUJoS0labVpDM1BrRVFHbitJL2dZUk44RlBWSXBjZVhoNG4yb3FLYUplTnZ6UGNxeklxZwo=",
+      "endpoints": [
+        "https://qnxmboxwluuyjvgiqlbm.supabase.co/storage/v1/object/public/pdv-updates/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

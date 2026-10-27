@@ -43,6 +43,7 @@ import {
   type PosNfceStatus,
 } from '../services/supabase/sales';
 import { ReceiptsPanel } from './ReceiptsPanel';
+import { setUpdateAllowed } from './UpdateNotice';
 import { printClosingReport, printManagerialReport, type ManagerialReport } from './cashReportPrint';
 import { printSaleReceipt } from './receiptPrint';
 import {
@@ -1169,6 +1170,12 @@ export function App() {
     if (screen !== 'sale' && screen !== 'receipts') return;
     getPosNfceStatus().then(setNfceConfig).catch(() => setNfceConfig(null));
   }, [screen]);
+
+  // Aviso de atualizacao so fora de uma venda/reserva em andamento.
+  useEffect(() => {
+    const sellingNow = (screen === 'sale' || screen === 'new-reservation') && cart.length > 0;
+    setUpdateAllowed(!sellingNow && !busy && !nfceEmitting && !conversionReservation && !nfceProblem);
+  }, [screen, cart.length, busy, nfceEmitting, conversionReservation, nfceProblem]);
 
   const nfceModal = nfceProblem && (
     <NfceProblemModal

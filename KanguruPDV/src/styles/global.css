@@ -1327,3 +1327,12 @@ small {
     align-items: stretch;
   }
 }
+
+/* Aviso de atualizacao do PDV */
+.update-modal {
+  width: min(100%, 480px);
+}
+
+.update-notes {
+  white-space: pre-line;
+}
