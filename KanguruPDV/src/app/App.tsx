@@ -1558,7 +1558,6 @@ export function App() {
       const wasOffline = isOffline();
       setOffline(!online);
       if (!online) return;
-      if (wasOffline) setMessage('Internet de volta. Enviando as vendas feitas sem internet...');
       const result = await syncOutbox();
       if (result.sent > 0 || result.failed > 0) {
         setMessage(`Vendas sem internet enviadas: ${result.sent}${result.failed > 0 ? `; ${result.failed} com erro (veja na faixa no topo)` : ''}${result.conflicts > 0 ? `; ${result.conflicts} divergência(s) para o gerente conferir no ERP` : ''}.`);

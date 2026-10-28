@@ -6,7 +6,6 @@ import {
   ClipboardList,
   Inbox,
   Lock,
-  Plus,
   Receipt,
   RotateCcw,
   Search,
@@ -82,10 +81,9 @@ export function HomeMenu({ offline, cashOpen, version, onAction }: HomeMenuProps
     { key: '3', action: 'returns', disabled: offline || !cashOpen },
     { key: '4', action: 'warranty', disabled: offline },
     { key: '5', action: 'receipts', disabled: false },
-    { key: '6', action: 'new-reservation', disabled: offline || !cashOpen },
-    { key: '7', action: 'sangria', disabled: !cashOpen },
-    { key: '8', action: 'suprimento', disabled: !cashOpen },
-    { key: '9', action: 'partial', disabled: offline || !cashOpen },
+    { key: '6', action: 'sangria', disabled: !cashOpen },
+    { key: '7', action: 'suprimento', disabled: !cashOpen },
+    { key: '8', action: 'partial', disabled: offline || !cashOpen },
   ];
 
   function run(action: MenuAction) {
@@ -140,18 +138,17 @@ export function HomeMenu({ offline, cashOpen, version, onAction }: HomeMenuProps
           {tile('returns', 'green', <RotateCcw size={28} strokeWidth={1.8} />, 'Trocas e devoluções', '3', offline || !cashOpen)}
           {tile('warranty', 'green', <ShieldCheck size={28} strokeWidth={1.8} />, 'Garantia', '4', offline)}
           {tile('receipts', 'green', <Receipt size={28} strokeWidth={1.8} />, 'Cupons e notas', '5')}
-          {tile('new-reservation', 'green', <Plus size={28} strokeWidth={1.8} />, 'Nova reserva', '6', offline || !cashOpen)}
         </div>
       </section>
       <section className="menu-side">
         <div>
           <p className="menu-group-label">Caixa</p>
           <div className="menu-grid menu-grid-two">
-            {tile('sangria', 'blue', <BanknoteArrowDown size={26} strokeWidth={1.8} />, 'Sangria', '7', !cashOpen)}
-            {tile('suprimento', 'blue', <BanknoteArrowUp size={26} strokeWidth={1.8} />, 'Suprimento', '8', !cashOpen)}
-            {tile('partial', 'blue', <ChartLine size={26} strokeWidth={1.8} />, 'Caixa parcial', '9', offline || !cashOpen)}
+            {tile('sangria', 'blue', <BanknoteArrowDown size={26} strokeWidth={1.8} />, 'Sangria', '6', !cashOpen)}
+            {tile('suprimento', 'blue', <BanknoteArrowUp size={26} strokeWidth={1.8} />, 'Suprimento', '7', !cashOpen)}
+            {tile('partial', 'blue', <ChartLine size={26} strokeWidth={1.8} />, 'Caixa parcial', '8', offline || !cashOpen)}
             <button type="button" className="menu-tile tone-blue" disabled title="Depende da impressão direta na impressora (em breve)">
-              <span className="menu-tile-top"><Inbox size={26} strokeWidth={1.8} /><kbd>0</kbd></span>
+              <span className="menu-tile-top"><Inbox size={26} strokeWidth={1.8} /><kbd>9</kbd></span>
               <span className="menu-tile-label">Abrir gaveta</span>
               <span className="menu-tile-sub">em breve</span>
             </button>

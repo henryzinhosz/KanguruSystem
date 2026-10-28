@@ -1455,16 +1455,16 @@ small {
   gap: 0.85rem;
 }
 
-.top-bar-identity strong,
-.top-bar-identity span {
+.top-bar-identity > div strong,
+.top-bar-identity > div span {
   display: block;
 }
 
-.top-bar-identity strong {
+.top-bar-identity > div strong {
   font-size: 1.05rem;
 }
 
-.top-bar-identity span {
+.top-bar-identity > div span {
   color: #4d5f50;
   font-size: 0.82rem;
 }
@@ -1793,4 +1793,27 @@ small {
   .menu-grid-three {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+}
+
+/* Cabecalhos das telas Reservas/Cupons/Garantia: botoes alinhados e com espaco */
+.header-actions {
+  gap: 1.5rem;
+}
+
+.header-actions .text-action {
+  margin: 0;
+}
+
+.reservation-header-actions {
+  align-items: flex-end;
+}
+
+.reservation-header-actions .new-reservation-button,
+.reservation-header-actions .text-action {
+  min-height: 42px;
+}
+
+/* Venda: "Cupons e notas" ocupa as duas ultimas colunas da linha de baixo */
+.menu-grid-sale > .menu-tile:last-child {
+  grid-column: span 2;
 }
