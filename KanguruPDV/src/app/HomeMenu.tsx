@@ -36,6 +36,7 @@ interface Option {
 
 interface HomeMenuProps {
   offline: boolean;
+  drawerAvailable: boolean;
   cashOpen: boolean;
   version: string | null;
   onAction: (action: MenuAction) => void;
@@ -43,7 +44,7 @@ interface HomeMenuProps {
 
 const OFFLINE_BLOCK = 'Indisponível sem internet';
 
-export function HomeMenu({ offline, cashOpen, version, onAction }: HomeMenuProps) {
+export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction }: HomeMenuProps) {
   const [group, setGroup] = useState<Group | null>(null);
 
   const submenus: Record<Group, { title: string; tone: string; options: Option[] }> = {
@@ -70,7 +71,7 @@ export function HomeMenu({ offline, cashOpen, version, onAction }: HomeMenuProps
       tone: 'purple',
       options: [
         { action: 'comunicador', label: 'Comunicador Offline', description: 'Porta do Comunicador da Focus (NFC-e sem internet)' },
-        { action: 'printer', label: 'Impressora', description: 'Impressão direta na Epson (em breve)', disabled: 'Em breve' },
+        { action: 'printer', label: 'Impressora', description: 'Impressora térmica do cupom (impressão direta e gaveta)' },
         { action: 'version', label: 'Versão e atualização', description: version ? `Versão ${version}` : 'Versão do PDV' },
       ],
     },
@@ -84,6 +85,7 @@ export function HomeMenu({ offline, cashOpen, version, onAction }: HomeMenuProps
     { key: '6', action: 'sangria', disabled: !cashOpen },
     { key: '7', action: 'suprimento', disabled: !cashOpen },
     { key: '8', action: 'partial', disabled: offline || !cashOpen },
+    { key: '9', action: 'drawer', disabled: !drawerAvailable },
   ];
 
   function run(action: MenuAction) {
@@ -147,10 +149,10 @@ export function HomeMenu({ offline, cashOpen, version, onAction }: HomeMenuProps
             {tile('sangria', 'blue', <BanknoteArrowDown size={26} strokeWidth={1.8} />, 'Sangria', '6', !cashOpen)}
             {tile('suprimento', 'blue', <BanknoteArrowUp size={26} strokeWidth={1.8} />, 'Suprimento', '7', !cashOpen)}
             {tile('partial', 'blue', <ChartLine size={26} strokeWidth={1.8} />, 'Caixa parcial', '8', offline || !cashOpen)}
-            <button type="button" className="menu-tile tone-blue" disabled title="Depende da impressão direta na impressora (em breve)">
+            <button type="button" className="menu-tile tone-blue" disabled={!drawerAvailable} title={drawerAvailable ? undefined : 'Escolha a impressora em Configurações › Impressora'} onClick={() => run('drawer')}>
               <span className="menu-tile-top"><Inbox size={26} strokeWidth={1.8} /><kbd>9</kbd></span>
               <span className="menu-tile-label">Abrir gaveta</span>
-              <span className="menu-tile-sub">em breve</span>
+              {!drawerAvailable && <span className="menu-tile-sub">escolha a impressora</span>}
             </button>
           </div>
         </div>

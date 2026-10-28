@@ -2,6 +2,8 @@
 
 use keyring::Entry;
 
+mod raw_printer;
+
 const KEYRING_SERVICE: &str = "com.kanguruerp.pdv";
 const KEYRING_ACCOUNT: &str = "supabase-device-session";
 
@@ -42,7 +44,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             save_device_session,
             load_device_session,
-            clear_device_session
+            clear_device_session,
+            raw_printer::list_printers,
+            raw_printer::print_raw
         ])
         .run(tauri::generate_context!())
         .expect("error while running Kanguru PDV");

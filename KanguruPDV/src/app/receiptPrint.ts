@@ -2,6 +2,7 @@ import QRCode from 'qrcode';
 import type { PosStoreProfile } from '../services/supabase/terminal';
 import type { PosSaleReceipt } from '../services/supabase/sales';
 import logoUrl from '../assets/beb-games-logo.png';
+import { printReceiptDirect } from '../printing/directPrint';
 
 // Cupom da venda em bobina de 80 mm: DAV (Nao Fiscal, layout do cupom atual da rede) ou
 // DANFE NFC-e (venda com NFC-e autorizada). Imprime
@@ -289,6 +290,8 @@ export function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null
 
 // Iframe invisivel; imprime depois que logo e QR carregarem (limite de 3 s).
 export async function printSaleReceipt(receipt: PosSaleReceipt, store: PosStoreProfile | null, changeAmount = 0) {
+  // Impressora termica escolhida neste PC: imprime direto; senao (ou se falhar) janela do Windows.
+  if (await printReceiptDirect(receipt, store, changeAmount)) return;
   // NFC-e autorizada: QR code de consulta da Sefaz; Nao Fiscal: Instagram da loja.
   const link = receipt.fiscalStatus === 'AUTORIZADA' && receipt.nfce?.qrcodeUrl ? receipt.nfce.qrcodeUrl : instagramUrl(store?.instagram);
   const qrDataUrl = link ? await QRCode.toDataURL(link, { margin: 0, width: 256, errorCorrectionLevel: 'M' }).catch(() => null) : null;

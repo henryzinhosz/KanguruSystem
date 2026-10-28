@@ -49,6 +49,8 @@ import { getVersion } from '@tauri-apps/api/app';
 import { TopBar } from './TopBar';
 import { HomeMenu, type MenuAction } from './HomeMenu';
 import { ProductLookupModal } from './ProductLookupModal';
+import { PrinterSettingsModal } from './PrinterSettingsModal';
+import { getDirectPrinter, openCashDrawer } from '../printing/directPrint';
 import {
   cacheTerminal,
   enqueueOfflineMovement,
@@ -396,6 +398,9 @@ export function App() {
   const [offlineCustomerOpen, setOfflineCustomerOpen] = useState(false);
   // Menu inicial (2.10): consulta de produto, versao do app e numero da abertura na barra.
   const [lookupOpen, setLookupOpen] = useState(false);
+  // Impressao direta (2.8c): impressora termica escolhida neste PC.
+  const [printerOpen, setPrinterOpen] = useState(false);
+  const [directPrinter, setDirectPrinterState] = useState<string | null>(() => getDirectPrinter());
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [sessionNumber, setSessionNumber] = useState<number | null>(null);
   const offlineInfo = useOfflineState();
@@ -940,6 +945,8 @@ export function App() {
           : 'Venda registrada com sucesso.'
       );
       void deliverReceipt(saleId, resolution.changeCents / 100);
+      // Venda com dinheiro: abre a gaveta (impressao direta configurada).
+      if (resolution.applied.some((line) => line.paymentMethod === 'DINHEIRO')) void openCashDrawer();
     } catch (error) {
       // Caiu a internet no meio: registra offline com o mesmo id (o envio e idempotente).
       if (isNetworkError(error)) {
@@ -1041,6 +1048,7 @@ export function App() {
     };
     await saveLastOfflineReceipt({ receipt, changeAmount });
     void printSaleReceipt(receipt, snapshot.store, changeAmount);
+    if (applied.some((line) => line.paymentMethod === 'DINHEIRO')) void openCashDrawer();
     setCart([]);
     setCatalogItems([]);
     setQuery('');
@@ -1137,8 +1145,12 @@ export function App() {
       case 'version':
         setMessage(`Kanguru PDV versão ${appVersion ?? '-'}. O PDV procura atualizações sozinho ao abrir e a cada 4 horas.`);
         break;
+      case 'printer': setPrinterOpen(true); break;
+      case 'drawer':
+        void openCashDrawer().then((ok) => setMessage(ok ? 'Gaveta aberta.' : 'Não foi possível abrir a gaveta. Confira a impressora em Configurações › Impressora.'));
+        break;
       default:
-        setMessage('Em breve: depende da impressão direta na impressora.');
+        break;
     }
   }
 
@@ -1490,6 +1502,7 @@ export function App() {
           + (resolution && resolution.changeCents > 0 ? ` Troco: ${currency.format(resolution.changeCents / 100)}.` : '')
       );
       void deliverReceipt(saleId, resolution ? resolution.changeCents / 100 : 0);
+      if (resolution?.applied.some((line) => line.paymentMethod === 'DINHEIRO')) void openCashDrawer();
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -2154,7 +2167,17 @@ export function App() {
       <main className="sale-shell menu-shell">
         <TopBar {...topBarProps} subtitle="Kanguru PDV" />
         {message && <div className="menu-notice"><Notice message={message} /></div>}
-        <HomeMenu offline={offlineNow} cashOpen={Boolean(cashSession)} version={appVersion} onAction={handleMenuAction} />
+        <HomeMenu offline={offlineNow} drawerAvailable={Boolean(directPrinter)} cashOpen={Boolean(cashSession)} version={appVersion} onAction={handleMenuAction} />
+        {printerOpen && (
+          <PrinterSettingsModal
+            onClose={() => setPrinterOpen(false)}
+            onSaved={(text) => {
+              setPrinterOpen(false);
+              setDirectPrinterState(getDirectPrinter());
+              setMessage(text);
+            }}
+          />
+        )}
         {lookupOpen && <ProductLookupModal onClose={() => setLookupOpen(false)} />}
         {nfceModal}
       </main>
