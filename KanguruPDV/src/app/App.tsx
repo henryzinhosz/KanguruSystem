@@ -131,10 +131,10 @@ type FiscalChoice = 'NAO_FISCAL' | 'NFCE';
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   DINHEIRO: 'Dinheiro',
   PIX: 'Pix',
-  CREDITO: 'Credito',
-  DEBITO: 'Debito',
+  CREDITO: 'Crédito',
+  DEBITO: 'Débito',
   VOUCHER: 'Vale-troca',
-  CREDIARIO: 'Crediario',
+  CREDIARIO: 'Crediário',
 };
 
 interface CartItem extends PosCatalogItem {
@@ -342,7 +342,8 @@ export function App() {
   const [reservationsLoading, setReservationsLoading] = useState(false);
   const [conversionReservation, setConversionReservation] = useState<PosReservation | null>(null);
   const [conversionPaymentLines, setConversionPaymentLines] = useState<PaymentLine[]>([]);
-  const [refundPaymentMethod, setRefundPaymentMethod] = useState<PaymentMethod>('DINHEIRO');
+  // Cancelamento de reserva com sinal: pergunta como o sinal foi devolvido ao cliente.
+  const [cancelTarget, setCancelTarget] = useState<PosReservation | null>(null);
   const [reservationCustomerName, setReservationCustomerName] = useState('');
   const [reservationCustomerPhone, setReservationCustomerPhone] = useState('');
   const [reservationCustomerCpf, setReservationCustomerCpf] = useState('');
@@ -1496,13 +1497,18 @@ export function App() {
     }
   }
 
-  async function cancelReservation(reservation: PosReservation) {
-    const refundMethod = reservation.depositAmount > 0 ? refundPaymentMethod : null;
-    const confirmation = reservation.depositAmount > 0
-      ? `Cancelar a reserva e registrar a devolução manual de ${currency.format(reservation.depositAmount)} por ${refundMethod}? O estorno no adquirente deve ser feito separadamente.`
-      : `Cancelar a reserva de ${reservation.customerName}?`;
-    if (!window.confirm(confirmation)) return;
+  // Com sinal abre a janela da forma de devolucao; sem sinal so confirma.
+  function cancelReservation(reservation: PosReservation) {
+    if (reservation.depositAmount > 0) {
+      setCancelTarget(reservation);
+      return;
+    }
+    if (!window.confirm(`Cancelar a reserva de ${reservation.customerName}?`)) return;
+    void confirmCancelReservation(reservation, null);
+  }
 
+  async function confirmCancelReservation(reservation: PosReservation, refundMethod: PaymentMethod | null) {
+    setCancelTarget(null);
     setBusy(true);
     setMessage(null);
     try {
@@ -1999,15 +2005,6 @@ export function App() {
             </div>
           </div>
           <div className="header-actions reservation-header-actions">
-            <label className="reservation-method-label">
-              Método da devolução manual
-              <select value={refundPaymentMethod} onChange={(event) => setRefundPaymentMethod(event.target.value as PaymentMethod)}>
-                <option value="DINHEIRO">Dinheiro</option>
-                <option value="PIX">Pix</option>
-                <option value="CREDITO">Crédito</option>
-                <option value="DEBITO">Débito</option>
-              </select>
-            </label>
             <button className="primary-action new-reservation-button" type="button" onClick={startNewReservation} disabled={busy}>
               <Plus size={18} /> Nova reserva
             </button>
@@ -2078,7 +2075,7 @@ export function App() {
                       <button className="text-action reservation-reprint" type="button" disabled={busy} onClick={() => void printVoucher(voucherFromReservation(reservation))}>
                         Reimprimir voucher
                       </button>
-                      <button className="reservation-cancel" type="button" disabled={busy} onClick={() => void cancelReservation(reservation)}>
+                      <button className="reservation-cancel" type="button" disabled={busy} onClick={() => cancelReservation(reservation)}>
                         Cancelar reserva
                       </button>
                     </div>
@@ -2112,6 +2109,32 @@ export function App() {
             nfceConfig={nfceConfig}
             onConfirm={(fiscal) => void convertReservationToSale(conversionReservation, conversionPaymentLines, fiscal)}
           />
+        )}
+        {cancelTarget && (
+          <div className="modal-backdrop" role="presentation">
+            <section className="serial-unit-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-reservation-title">
+              <div className="modal-heading">
+                <div>
+                  <p className="eyebrow">Cancelar reserva de {cancelTarget.customerName}</p>
+                  <h2 id="cancel-reservation-title">Como o sinal de {currency.format(cancelTarget.depositAmount)} foi devolvido?</h2>
+                </div>
+                <button className="icon-button" type="button" title="Voltar" onClick={() => setCancelTarget(null)}><X size={20} /></button>
+              </div>
+              <p className="modal-copy">
+                A devolução fica registrada no caixa e entra no fechamento. Estorno no cartão ou Pix deve ser feito na maquininha/banco.
+              </p>
+              <div className="cancel-refund-options">
+                {(['DINHEIRO', 'PIX', 'CREDITO', 'DEBITO'] as PaymentMethod[]).map((method) => (
+                  <button key={method} className="reservation-nav" type="button" disabled={busy} onClick={() => void confirmCancelReservation(cancelTarget, method)}>
+                    {PAYMENT_METHOD_LABELS[method]}
+                  </button>
+                ))}
+              </div>
+              <div className="modal-actions">
+                <button className="text-action" type="button" onClick={() => setCancelTarget(null)}>Não cancelar</button>
+              </div>
+            </section>
+          </div>
         )}
         {nfceModal}
       </main>
