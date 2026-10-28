@@ -86,6 +86,8 @@ export interface ClosingReport {
   counts: CashCounts;
   closedBy: string;
   closedAt: Date;
+  // Caixa parcial: o mesmo relatorio com o caixa ainda aberto (sem contagem nem diferenca).
+  partial?: boolean;
 }
 
 const pad = (label: string, width: number) => (label + '.'.repeat(width)).slice(0, width);
@@ -118,7 +120,7 @@ export function buildClosingHtml(data: ClosingReport, store: PosStoreProfile | n
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>Fechamento de caixa</title>
+<title>${data.partial ? 'Caixa parcial' : 'Fechamento de caixa'}</title>
 <style>
   @page { size: 80mm auto; margin: 0; }
   * { box-sizing: border-box; }
@@ -140,12 +142,13 @@ export function buildClosingHtml(data: ClosingReport, store: PosStoreProfile | n
 <body>
   ${store?.tradeName ? `<div class="store">${e(store.tradeName)}</div>` : ''}
   <div class="dash"></div>
-  <div class="title">FECHAMENTO DE CAIXA</div>
+  <div class="title">${data.partial ? 'CAIXA PARCIAL' : 'FECHAMENTO DE CAIXA'}</div>
+  ${data.partial ? '<div style="text-align:center">Caixa ainda aberto (sem fechamento)</div>' : ''}
   <div class="dash"></div>
   <div>PDV: ${e(summary.cashNumber)}${report?.terminalName && report.terminalName !== summary.cashNumber ? ` (${e(report.terminalName)})` : ''}</div>
   ${closingRow('Data Abertura', `${opened.toLocaleDateString('pt-BR')} ${time(opened)}`)}
   ${closingRow('No. Abertura', report ? String(report.sessionNumber).padStart(2, '0') : '--')}
-  ${closingRow('Fechamento', `${data.closedAt.toLocaleDateString('pt-BR')} ${time(data.closedAt)}`)}
+  ${closingRow(data.partial ? 'Emitido em' : 'Fechamento', `${data.closedAt.toLocaleDateString('pt-BR')} ${time(data.closedAt)}`)}
   ${closingRow('Responsavel', summary.openedByName.toUpperCase())}
   ${closingRow('Operador', (data.closedBy || summary.openedByName).toUpperCase())}
   ${closingRow('Fundo Inicial', money(summary.openingFloatAmount))}
@@ -163,8 +166,11 @@ export function buildClosingHtml(data: ClosingReport, store: PosStoreProfile | n
   ${report.returnCredits > 0 ? closingRow('Vales emitidos', money(report.returnCredits)) : ''}
   <div class="gap"></div>` : ''}
   <table>
-    <tr><th>Contagem</th><th>Sistema</th><th>Contado</th><th>Dif.</th></tr>
-    ${methods.map((method) => `<tr><td>${method.label}</td><td>${money(method.expected)}</td><td>${money(method.counted)}</td><td>${money(method.counted - method.expected)}</td></tr>`).join('')}
+    ${data.partial
+      ? `<tr><th>Contagem</th><th>Sistema</th></tr>
+    ${methods.map((method) => `<tr><td>${method.label}</td><td>${money(method.expected)}</td></tr>`).join('')}`
+      : `<tr><th>Contagem</th><th>Sistema</th><th>Contado</th><th>Dif.</th></tr>
+    ${methods.map((method) => `<tr><td>${method.label}</td><td>${money(method.expected)}</td><td>${money(method.counted)}</td><td>${money(method.counted - method.expected)}</td></tr>`).join('')}`}
   </table>
   <div class="sum"></div>
   ${closingRow('TOTAL FINALIZADOR', money(finalizer))}

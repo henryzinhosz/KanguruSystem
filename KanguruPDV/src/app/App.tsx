@@ -1,18 +1,15 @@
 ﻿import { FormEvent, useEffect, useRef, useState } from 'react';
 import {
-  BanknoteArrowDown,
-  BanknoteArrowUp,
-  CheckCircle2,
+  ArrowLeft,
   CircleAlert,
   ClipboardList,
   CreditCard,
+  LayoutGrid,
   LockKeyhole,
   Minus,
   Plus,
-  Printer,
   ScanBarcode,
   Search,
-  ShieldCheck,
   Trash2,
   UserRound,
   WalletCards,
@@ -48,6 +45,10 @@ import { ReturnModal, type ReturnDone } from './ReturnModal';
 import { getCustomerCreditBalance } from '../services/supabase/returns';
 import { searchPosCustomers } from '../services/supabase/customers';
 import { setUpdateAllowed } from './UpdateNotice';
+import { getVersion } from '@tauri-apps/api/app';
+import { TopBar } from './TopBar';
+import { HomeMenu, type MenuAction } from './HomeMenu';
+import { ProductLookupModal } from './ProductLookupModal';
 import {
   cacheTerminal,
   enqueueOfflineMovement,
@@ -111,6 +112,7 @@ import {
 
 type Screen =
   | 'loading'
+  | 'menu'
   | 'activation'
   | 'set-password'
   | 'unlock'
@@ -391,11 +393,17 @@ export function App() {
   const [customerCredit, setCustomerCredit] = useState(0);
   // Modo offline: cliente digitado sem internet (CPF + nome).
   const [offlineCustomerOpen, setOfflineCustomerOpen] = useState(false);
+  // Menu inicial (2.10): consulta de produto, versao do app e numero da abertura na barra.
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [sessionNumber, setSessionNumber] = useState<number | null>(null);
+  const offlineInfo = useOfflineState();
+  const offlineNow = offlineInfo.offline;
 
   async function routeAfterUnlock() {
     const openCash = await getOpenCashSession();
     setCashSession(openCash);
-    setScreen(openCash ? 'sale' : 'cash-open');
+    setScreen(openCash ? 'menu' : 'cash-open');
   }
 
   useEffect(() => {
@@ -516,7 +524,7 @@ export function App() {
       return;
     }
     setCashSession(snapshot.cash);
-    setScreen('sale');
+    setScreen('menu');
     setMessage('MODO OFFLINE: vendas ficam guardadas neste computador e são enviadas quando a internet voltar.');
   }
 
@@ -527,7 +535,7 @@ export function App() {
     try {
       const opened = await openCashSession(cashNumber, responsibleName, valueAsNumber(openingFloat));
       setCashSession(opened);
-      setScreen('sale');
+      setScreen('menu');
       void printCashReport({
         subtitle: 'Abertura de PDV',
         date: new Date(opened.openedAt),
@@ -568,7 +576,7 @@ export function App() {
       });
       setMovementAmount('');
       setMovementReason('');
-      setScreen('sale');
+      setScreen('menu');
       setMessage(`${movementType === 'SANGRIA' ? 'Sangria' : 'Suprimento'} registrado com sucesso.`);
     } catch (error) {
       setMessage(errorMessage(error));
@@ -1042,6 +1050,97 @@ export function App() {
     setMessage(`Venda registrada SEM INTERNET${changeAmount > 0 ? ` (troco: ${currency.format(changeAmount)})` : ''}. Ela será enviada automaticamente quando a conexão voltar.${fiscalNote}`);
   }
 
+  function configureComunicador() {
+    const port = window.prompt('Porta do Comunicador Offline da Focus neste computador (em branco = desligado):', getComunicadorPort() ?? '');
+    if (port === null) return;
+    const clean = port.replace(/\D/g, '');
+    setComunicadorPort(clean || null);
+    setMessage(clean ? `Comunicador Offline configurado na porta ${clean}.` : 'Comunicador Offline desligado neste computador.');
+  }
+
+  // Caixa parcial: relatorio do caixa ainda aberto, sem contagem.
+  async function printPartialReport() {
+    setBusy(true);
+    try {
+      const summary = await getCashClosureSummary();
+      const report = await getCashSessionReport().catch(() => null);
+      await printClosingReport({
+        summary,
+        report,
+        counts: {
+          cash: summary.expectedCashAmount,
+          pix: summary.expectedPixAmount,
+          credit: summary.expectedCreditAmount,
+          debit: summary.expectedDebitAmount,
+          voucher: summary.expectedVoucherAmount,
+          creditAccount: summary.expectedCreditAccountAmount,
+        },
+        closedBy: summary.openedByName,
+        closedAt: new Date(),
+        partial: true,
+      }, await loadStoreProfile());
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleMenuAction(action: MenuAction) {
+    setMessage(null);
+    switch (action) {
+      case 'sale': setScreen('sale'); break;
+      case 'reservations': void openReservations(); break;
+      case 'returns':
+        setScreen('receipts');
+        setMessage('Busque a venda (data, número ou CPF) e use "Trocar / Devolver".');
+        break;
+      case 'warranty': setScreen('warranty'); break;
+      case 'receipts':
+        if (offlineNow) void reprintLastOfflineReceipt();
+        else setScreen('receipts');
+        break;
+      case 'today-sales': setScreen('receipts'); break;
+      case 'new-reservation': startNewReservation(); break;
+      case 'sangria':
+      case 'suprimento':
+        setMovementType(action === 'sangria' ? 'SANGRIA' : 'SUPRIMENTO');
+        setScreen('cash-movement');
+        break;
+      case 'partial': void printPartialReport(); break;
+      case 'open-cash': setScreen('cash-open'); break;
+      case 'close-cash':
+        if (offlineNow || offlineInfo.pending > 0 || offlineInfo.errors > 0) {
+          setMessage('Para fechar o caixa é preciso internet e todas as vendas feitas sem internet enviadas.');
+          return;
+        }
+        void openClosing();
+        break;
+      case 'reprint-opening':
+        if (cashSession) {
+          void printCashReport({
+            subtitle: 'Abertura de PDV',
+            date: new Date(cashSession.openedAt),
+            cashNumber: cashSession.cashNumber,
+            operator: cashSession.openedByName,
+            cashAmount: cashSession.openingFloatAmount,
+          });
+        }
+        break;
+      case 'lock':
+        setPassword('');
+        setScreen('unlock');
+        break;
+      case 'product-lookup': setLookupOpen(true); break;
+      case 'comunicador': configureComunicador(); break;
+      case 'version':
+        setMessage(`Kanguru PDV versão ${appVersion ?? '-'}. O PDV procura atualizações sozinho ao abrir e a cada 4 horas.`);
+        break;
+      default:
+        setMessage('Em breve: depende da impressão direta na impressora.');
+    }
+  }
+
   async function reprintLastOfflineReceipt() {
     const last = await getLastOfflineReceipt<{ receipt: PosSaleReceipt; changeAmount: number }>();
     if (!last) {
@@ -1478,6 +1577,31 @@ export function App() {
     };
   }, [terminal, cashSession]);
 
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion(null));
+  }, []);
+
+  useEffect(() => {
+    if (!cashSession || offlineNow) return;
+    getCashSessionReport().then((report) => setSessionNumber(report?.sessionNumber ?? null)).catch(() => undefined);
+  }, [cashSession, offlineNow]);
+
+  useEffect(() => {
+    if (screen !== 'sale') return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      if (serialProduct || adminApprovalOpen || customerPickerOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
+      if (catalogItems.length > 0 || query) {
+        setCatalogItems([]);
+        setQuery('');
+        return;
+      }
+      setScreen('menu');
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   // Aviso de atualizacao so fora de uma venda/reserva em andamento.
   useEffect(() => {
     const sellingNow = (screen === 'sale' || screen === 'new-reservation') && cart.length > 0;
@@ -1502,8 +1626,6 @@ export function App() {
     />
   );
 
-  const offlineInfo = useOfflineState();
-  const offlineNow = offlineInfo.offline;
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
   const cartHasBackorder = cart.some((item) => item.backorder);
   const reservationDepositAmount = valueAsNumber(reservationDeposit);
@@ -1708,8 +1830,8 @@ export function App() {
             {busy ? 'Registrando...' : 'Confirmar'}
           </button>
         </form>
-        <button className="text-action" type="button" onClick={() => setScreen('sale')}>
-          Voltar para venda
+        <button className="text-action" type="button" onClick={() => setScreen('menu')}>
+          Voltar ao menu
         </button>
         <Notice message={message} />
       </AuthFrame>
@@ -1804,8 +1926,8 @@ export function App() {
             </div>
           </div>
           <div className="header-actions">
-            <button className="text-action reservation-back" type="button" onClick={() => setScreen('sale')}>
-              Voltar para venda
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('menu')}>
+              Voltar ao menu
             </button>
           </div>
         </header>
@@ -1840,8 +1962,8 @@ export function App() {
             >
               Comunicador Offline{getComunicadorPort() ? ` (porta ${getComunicadorPort()})` : ''}
             </button>
-            <button className="text-action reservation-back" type="button" onClick={() => { setMessage(null); setScreen('sale'); }}>
-              Voltar para venda
+            <button className="text-action reservation-back" type="button" onClick={() => { setMessage(null); setScreen('menu'); }}>
+              Voltar ao menu
             </button>
           </div>
         </header>
@@ -1890,8 +2012,8 @@ export function App() {
             <button className="primary-action new-reservation-button" type="button" onClick={startNewReservation} disabled={busy}>
               <Plus size={18} /> Nova reserva
             </button>
-            <button className="text-action reservation-back" type="button" onClick={() => setScreen('sale')}>
-              Voltar para venda
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('menu')}>
+              Voltar ao menu
             </button>
           </div>
         </header>
@@ -1997,73 +2119,41 @@ export function App() {
     );
   }
 
+  const topBarProps = {
+    storeName: terminal?.tradeName ?? terminal?.unitId ?? '',
+    cashNumber: cashSession?.cashNumber ?? null,
+    cashDate: cashSession ? new Date(cashSession.openedAt).toLocaleDateString('pt-BR') : null,
+    sessionNumber,
+    operator: cashSession?.openedByName ?? null,
+  };
+
+  if (screen === 'menu') {
+    return (
+      <main className="sale-shell menu-shell">
+        <TopBar {...topBarProps} subtitle="Kanguru PDV" />
+        {message && <div className="menu-notice"><Notice message={message} /></div>}
+        <HomeMenu offline={offlineNow} cashOpen={Boolean(cashSession)} version={appVersion} onAction={handleMenuAction} />
+        {lookupOpen && <ProductLookupModal onClose={() => setLookupOpen(false)} />}
+        {nfceModal}
+      </main>
+    );
+  }
+
   return (
     <main className="sale-shell sale-shell-fit">
-      <header className="sale-header">
-        <div>
-          <Brand compact />
-          <div>
-            <strong>{reservationMode ? 'Nova reserva' : cashSession?.cashNumber}</strong>
-            <span>
-              {terminal?.tradeName ?? terminal?.unitId} | Aberto por {cashSession?.openedByName}
-            </span>
-          </div>
-        </div>
-        {reservationMode ? (
-          <div className="header-actions">
-            <button className="text-action reservation-back" type="button" onClick={leaveNewReservation} disabled={busy}>
-              Voltar para reservas
-            </button>
-          </div>
+      <TopBar
+        {...topBarProps}
+        subtitle={reservationMode ? 'Nova reserva' : 'Nova venda'}
+        leading={reservationMode ? (
+          <button className="top-bar-menu" type="button" onClick={leaveNewReservation} disabled={busy}>
+            <ArrowLeft size={18} /> Reservas
+          </button>
         ) : (
-          <div className="header-actions">
-            <button className="reservation-nav" type="button" onClick={() => void openReservations()} disabled={busy || offlineNow} title={offlineNow ? 'Indisponível sem internet' : undefined}>
-              <ClipboardList size={18} /> Reservas
-            </button>
-            <button className="reservation-nav" type="button" onClick={() => setScreen('warranty')} disabled={busy || offlineNow} title={offlineNow ? 'Indisponível sem internet' : undefined}>
-              <ShieldCheck size={18} /> Garantia
-            </button>
-            <button
-              className="icon-button"
-              type="button"
-              title="Registrar sangria"
-              onClick={() => {
-                setMovementType('SANGRIA');
-                setScreen('cash-movement');
-              }}
-            >
-              <BanknoteArrowDown size={20} />
-            </button>
-            <button
-              className="icon-button"
-              type="button"
-              title="Registrar suprimento"
-              onClick={() => {
-                setMovementType('SUPRIMENTO');
-                setScreen('cash-movement');
-              }}
-            >
-              <BanknoteArrowUp size={20} />
-            </button>
-            <button className="icon-button" type="button" title={offlineNow ? 'Sem internet: reimprimir a última venda offline' : 'Cupons: reimprimir e emitir NFC-e pendente'} onClick={() => { setMessage(null); if (offlineNow) void reprintLastOfflineReceipt(); else setScreen('receipts'); }} disabled={busy}>
-              <Printer size={20} />
-            </button>
-            <button className="icon-button" type="button" title="Fechar caixa" onClick={() => {
-              if (offlineNow || offlineInfo.pending > 0 || offlineInfo.errors > 0) {
-                setMessage('Para fechar o caixa é preciso internet e todas as vendas feitas sem internet enviadas.');
-                return;
-              }
-              void openClosing();
-            }}>
-              <LockKeyhole size={20} />
-            </button>
-            <span className="operator-badge">
-              <CheckCircle2 size={18} />
-              Caixa aberto
-            </span>
-          </div>
+          <button className="top-bar-menu" type="button" onClick={() => setScreen('menu')} disabled={busy}>
+            <LayoutGrid size={18} /> Menu <small>(Esc)</small>
+          </button>
         )}
-      </header>
+      />
 
       <section className="sale-layout">
         <section className="catalog-panel">

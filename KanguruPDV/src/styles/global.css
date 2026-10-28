@@ -1434,3 +1434,363 @@ small {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* ---------- 2.10: barra superior fixa ---------- */
+.top-bar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.25rem;
+  padding: 0.75rem clamp(1rem, 3vw, 2rem);
+  border-bottom: 1px solid #c5d3c1;
+  background: #fbfcf7;
+  font-family: 'Trebuchet MS', sans-serif;
+}
+
+.top-bar-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.top-bar-identity strong,
+.top-bar-identity span {
+  display: block;
+}
+
+.top-bar-identity strong {
+  font-size: 1.05rem;
+}
+
+.top-bar-identity span {
+  color: #4d5f50;
+  font-size: 0.82rem;
+}
+
+.top-bar-logo {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 50%;
+  background: #c9592d;
+}
+
+.top-bar-menu {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid #b4c7b1;
+  border-radius: 10px;
+  padding: 0 1rem;
+  color: #285e3a;
+  background: #fff;
+  font: 700 0.95rem 'Trebuchet MS', sans-serif;
+  cursor: pointer;
+}
+
+.top-bar-menu small {
+  color: #4d5f50;
+  font-weight: 400;
+}
+
+.top-bar-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1.2rem;
+  font-size: 0.9rem;
+}
+
+.top-bar-info small {
+  color: #4d5f50;
+  font-size: 0.85rem;
+}
+
+.top-bar-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  color: #1f5a33;
+  background: #e3f1e6;
+  font-weight: 700;
+}
+
+.top-bar-status i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2f8a4c;
+}
+
+.top-bar-status.is-offline {
+  color: #8c2a2a;
+  background: #f8dcdc;
+}
+
+.top-bar-status.is-offline i {
+  background: #b3261e;
+}
+
+.top-bar-clock {
+  min-width: 4ch;
+  color: #285e3a;
+  font-size: 1.45rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+/* ---------- 2.10: menu inicial em mosaico (tons pastel) ---------- */
+.menu-shell {
+  display: flex;
+  min-height: 100vh;
+  flex-direction: column;
+}
+
+.menu-notice {
+  padding: 0 clamp(1rem, 3vw, 2rem);
+}
+
+.home-menu {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-rows: 1fr auto;
+  gap: 1.5rem;
+  padding: 1.5rem clamp(1rem, 3vw, 2rem) 0;
+}
+
+.menu-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.menu-group-label {
+  margin: 0 0 0.5rem;
+  color: #4d5f50;
+  font: 700 0.75rem 'Trebuchet MS', sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.menu-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.menu-grid-sale {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.menu-grid-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.menu-grid-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.menu-tile {
+  display: flex;
+  min-height: 132px;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border: 1px solid;
+  border-radius: 14px;
+  padding: 1.1rem 1.25rem;
+  font-family: 'Trebuchet MS', sans-serif;
+  text-align: left;
+  cursor: pointer;
+  transition: filter 0.12s ease, transform 0.12s ease;
+}
+
+.menu-tile:hover:not(:disabled) {
+  filter: brightness(0.97);
+}
+
+.menu-tile:active:not(:disabled) {
+  transform: scale(0.99);
+}
+
+.menu-tile:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.menu-tile.is-big {
+  grid-column: span 2;
+  grid-row: span 2;
+  min-height: 276px;
+}
+
+.menu-tile.is-big .menu-tile-label {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 2.1rem;
+}
+
+.menu-tile.is-compact {
+  min-height: 112px;
+}
+
+.menu-grid-two .menu-tile {
+  min-height: 100px;
+}
+
+.menu-tile-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.menu-tile kbd {
+  font: 700 0.8rem 'Trebuchet MS', sans-serif;
+  opacity: 0.75;
+}
+
+.menu-tile-label {
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.menu-tile.is-compact .menu-tile-label {
+  font-size: 1.05rem;
+}
+
+.menu-tile-sub {
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.tone-green { border-color: #b9dcc2; color: #1f5a33; background: #dcefe0; }
+.tone-blue { border-color: #bcd3ec; color: #1f4f7a; background: #dce9f7; }
+.tone-orange { border-color: #f3c9a5; color: #8a4416; background: #fde6d2; }
+.tone-red { border-color: #ecbcbc; color: #8c2a2a; background: #f8dcdc; }
+.tone-purple { border-color: #d0c2ea; color: #57368c; background: #e8e0f5; }
+
+.menu-footer {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin: 0 calc(-1 * clamp(1rem, 3vw, 2rem));
+  border-top: 1px solid #c5d3c1;
+  padding: 0.6rem clamp(1rem, 3vw, 2rem);
+  color: #4d5f50;
+  background: #fbfcf7;
+  font: 0.82rem 'Trebuchet MS', sans-serif;
+}
+
+.menu-footer b {
+  color: #172218;
+}
+
+/* Sub-menu em janela, opcoes numeradas */
+.submenu {
+  display: flex;
+  width: min(100%, 560px);
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 0;
+  border-radius: 18px;
+  padding: 1.6rem 1.75rem;
+  color: #172218;
+  background: #fbfcf7;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+}
+
+.submenu-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+
+.submenu-heading h2 {
+  margin: 0.1rem 0 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.8rem;
+}
+
+.submenu-option {
+  display: flex;
+  min-height: 60px;
+  align-items: center;
+  gap: 1rem;
+  border: 1px solid;
+  border-color: inherit;
+  border-radius: 12px;
+  padding: 0.9rem 1.1rem;
+  color: #172218;
+  background: #fff;
+  font: 700 1.1rem 'Trebuchet MS', sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.submenu-option small {
+  display: block;
+  margin-top: 0.1rem;
+  color: #4d5f50;
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.submenu-option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.submenu.tone-orange .submenu-option { border-color: #f3c9a5; }
+.submenu.tone-red .submenu-option { border-color: #ecbcbc; }
+.submenu.tone-purple .submenu-option { border-color: #d0c2ea; }
+
+.submenu-number {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border-radius: 8px;
+  background: currentColor;
+}
+
+.submenu.tone-orange .submenu-number { color: #8a4416; background: #fde6d2; }
+.submenu.tone-red .submenu-number { color: #8c2a2a; background: #f8dcdc; }
+.submenu.tone-purple .submenu-number { color: #57368c; background: #e8e0f5; }
+
+.submenu-hint {
+  margin: 0.25rem 0 0;
+  color: #4d5f50;
+  font: 0.82rem 'Trebuchet MS', sans-serif;
+}
+
+.lookup-modal {
+  width: min(100%, 680px);
+}
+
+.lookup-list {
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+@media (max-width: 900px) {
+  .home-menu {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .menu-grid-sale,
+  .menu-grid-three {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
