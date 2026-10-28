@@ -1,6 +1,14 @@
-import type { Session } from '@supabase/supabase-js';
+import { isAuthRetryableFetchError, type Session } from '@supabase/supabase-js';
 import { deviceSessionStorage } from '../device-session';
 import { supabase } from './client';
+
+// Falha de conexao (sem internet): o PDV entra no modo offline em vez de reativar o terminal.
+export class OfflineError extends Error {
+  constructor() {
+    super('Sem conexão com a internet.');
+    this.name = 'OfflineError';
+  }
+}
 
 export const terminalAuth = {
   async restore(): Promise<Session | null> {
@@ -14,6 +22,11 @@ export const terminalAuth = {
       refresh_token: stored.refreshToken,
     });
 
+    // Sem internet a renovacao falha por rede: NUNCA apagar a sessao guardada (ela e a
+    // identidade do terminal ativado). So descarta quando o servidor recusou de verdade.
+    if (error && isAuthRetryableFetchError(error)) {
+      throw new OfflineError();
+    }
     if (error || !data.session || !data.session.user.is_anonymous) {
       await deviceSessionStorage.clear();
       return null;

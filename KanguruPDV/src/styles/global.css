@@ -1390,3 +1390,47 @@ small {
   margin-top: 0.4rem;
   color: #285e3a;
 }
+
+/* Modo offline: faixa no topo */
+.offline-banner {
+  position: fixed;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: calc(100% - 2rem);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 0.45rem 1rem;
+  color: #3d2c00;
+  background: #ffd76a;
+  font: 700 0.9rem 'Trebuchet MS', sans-serif;
+}
+
+.offline-banner.is-offline {
+  color: #fff;
+  background: #b3261e;
+}
+
+.offline-banner span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-weight: 400;
+}
+
+.offline-banner-link {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}

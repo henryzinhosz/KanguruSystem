@@ -48,6 +48,35 @@ import { ReturnModal, type ReturnDone } from './ReturnModal';
 import { getCustomerCreditBalance } from '../services/supabase/returns';
 import { searchPosCustomers } from '../services/supabase/customers';
 import { setUpdateAllowed } from './UpdateNotice';
+import {
+  cacheTerminal,
+  enqueueOfflineMovement,
+  enqueueOfflineSale,
+  findOfflineSeller,
+  findOfflineSerial,
+  getCachedTerminal,
+  getLastOfflineReceipt,
+  getSnapshot,
+  isNetworkError,
+  isOffline,
+  offlineSerialUnits,
+  oldestPendingAt,
+  probeOnline,
+  refreshCounts,
+  refreshSnapshot,
+  rememberAdminPassword,
+  saveLastOfflineReceipt,
+  searchOffline,
+  setOffline,
+  syncOutbox,
+  useOfflineState,
+  verifyAdminPasswordOffline,
+  type OfflineSaleItem,
+  type OfflineSalePayload,
+} from '../offline/offline';
+import { emitLocalNfce, getComunicadorPort, setComunicadorPort } from '../offline/comunicador';
+import { OfflineCustomerModal } from './OfflineCustomerModal';
+import type { PosSaleReceipt } from '../services/supabase/sales';
 import { printClosingReport, printManagerialReport, type ManagerialReport } from './cashReportPrint';
 import { printSaleReceipt } from './receiptPrint';
 import {
@@ -360,6 +389,8 @@ export function App() {
   // Troca/devolucao (2.9): venda aberta no modal e saldo de vale-troca do cliente da venda.
   const [returnSaleId, setReturnSaleId] = useState<string | null>(null);
   const [customerCredit, setCustomerCredit] = useState(0);
+  // Modo offline: cliente digitado sem internet (CPF + nome).
+  const [offlineCustomerOpen, setOfflineCustomerOpen] = useState(false);
 
   async function routeAfterUnlock() {
     const openCash = await getOpenCashSession();
@@ -379,10 +410,21 @@ export function App() {
         }
         setTerminal(context);
         setCashNumber(context.displayName);
+        void cacheTerminal(context);
         setScreen(context.needsAdminPassword ? 'set-password' : 'unlock');
       } catch (error) {
-        setMessage(errorMessage(error));
-        setScreen('activation');
+        // Sem internet: nunca voltar para a ativacao; usa o terminal guardado e o modo offline.
+        const cached = isNetworkError(error) ? await getCachedTerminal() : null;
+        if (cached) {
+          setOffline(true);
+          setTerminal(cached);
+          setCashNumber(cached.displayName);
+          setMessage('Sem internet: desbloqueie com a senha administrativa para vender no modo offline.');
+          setScreen('unlock');
+          return;
+        }
+        setMessage(isNetworkError(error) ? 'Sem internet. Conecte o computador à internet para ativar o PDV.' : errorMessage(error));
+        setScreen(isNetworkError(error) ? 'loading' : 'activation');
       }
     })();
     return () => listener.subscription.unsubscribe();
@@ -437,15 +479,45 @@ export function App() {
     setBusy(true);
     setMessage(null);
     try {
+      if (isOffline()) {
+        await unlockOffline();
+        return;
+      }
       const context = await requireAdminPassword(password);
       setTerminal(context);
+      void cacheTerminal(context);
+      void rememberAdminPassword(password);
       setPassword('');
       await routeAfterUnlock();
+      void refreshSnapshot();
     } catch (error) {
+      if (isNetworkError(error)) {
+        setOffline(true);
+        await unlockOffline();
+        return;
+      }
       setMessage(errorMessage(error));
     } finally {
       setBusy(false);
     }
+  }
+
+  // Desbloqueio sem internet: confere a senha com o hash guardado no ultimo desbloqueio online.
+  async function unlockOffline() {
+    if (!(await verifyAdminPasswordOffline(password))) {
+      setMessage('Senha incorreta (sem internet, vale a senha do último desbloqueio feito com internet).');
+      return;
+    }
+    setPassword('');
+    const snapshot = await getSnapshot();
+    if (!snapshot?.cash) {
+      setMessage('Sem internet e sem caixa aberto guardado: abra o caixa quando a internet voltar.');
+      setScreen('unlock');
+      return;
+    }
+    setCashSession(snapshot.cash);
+    setScreen('sale');
+    setMessage('MODO OFFLINE: vendas ficam guardadas neste computador e são enviadas quando a internet voltar.');
   }
 
   async function handleCashOpen(event: FormEvent<HTMLFormElement>) {
@@ -476,12 +548,16 @@ export function App() {
     setMessage(null);
     try {
       const operator = responsibleName.trim() || cashSession?.openedByName || '';
-      await recordCashMovement(
-        movementType,
-        valueAsNumber(movementAmount),
-        movementReason,
-        operator
-      );
+      if (isOffline()) {
+        await enqueueOfflineMovement({ type: movementType, amount: valueAsNumber(movementAmount), reason: movementReason, operatorName: operator });
+      } else {
+        await recordCashMovement(
+          movementType,
+          valueAsNumber(movementAmount),
+          movementReason,
+          operator
+        );
+      }
       void printCashReport({
         subtitle: movementType === 'SANGRIA' ? 'Sangria' : 'Suprimento',
         date: new Date(),
@@ -564,7 +640,18 @@ export function App() {
     setBusy(true);
     setMessage(null);
     try {
-      const found = await searchPosItems(trimmedQuery);
+      let found: PosCatalogItem[];
+      if (isOffline()) {
+        found = await searchOffline(trimmedQuery);
+      } else {
+        try {
+          found = await searchPosItems(trimmedQuery);
+        } catch (searchError) {
+          if (!isNetworkError(searchError)) throw searchError;
+          setOffline(true);
+          found = await searchOffline(trimmedQuery);
+        }
+      }
       const normalizedQuery = normalizeSku(trimmedQuery);
       const exactSkuMatches = found.filter((item) => normalizeSku(item.sku) === normalizedQuery);
 
@@ -584,7 +671,14 @@ export function App() {
       // Nao e codigo de produto: pode ser o serial (ou IMEI) de uma unidade bipada.
       if (exactSkuMatches.length === 0 && !/\s/.test(trimmedQuery)) {
         // Falha nesta consulta extra nao pode impedir a busca normal por nome.
-        const scanned = await findPosSerialUnit(trimmedQuery).catch(() => null);
+        if (isOffline()) {
+          const local = await findOfflineSerial(trimmedQuery);
+          if (local) {
+            addSerialUnitToCart(local.product, local.unit);
+            return;
+          }
+        }
+        const scanned = isOffline() ? null : await findPosSerialUnit(trimmedQuery).catch(() => null);
         if (scanned) {
           if (scanned.serialUnit) {
             addSerialUnitToCart(scanned.product, scanned.serialUnit);
@@ -632,7 +726,9 @@ export function App() {
       setSerialUnitsError(null);
       setSerialUnitsLoading(true);
       try {
-        const availableUnits = await getPosAvailableSerialUnits(product.id, terminal.unitId);
+        const availableUnits = isOffline()
+          ? await offlineSerialUnits(product.id)
+          : await getPosAvailableSerialUnits(product.id, terminal.unitId);
         setSerialUnits(availableUnits);
       } catch (error) {
         setSerialUnitsError(errorMessage(error));
@@ -745,6 +841,10 @@ export function App() {
       return;
     }
     const needsApproval = cartHasOverLimitDiscount();
+    if (needsApproval && isOffline()) {
+      setMessage('Sem internet não dá para liberar desconto acima do limite (a senha é conferida no servidor). Ajuste o desconto.');
+      return;
+    }
     if (needsApproval && !adminApprovalOpen) {
       setAdminApprovalPassword('');
       setAdminApprovalError(null);
@@ -755,6 +855,14 @@ export function App() {
     setMessage(null);
     setAdminApprovalError(null);
     const saleId = crypto.randomUUID();
+    if (isOffline()) {
+      try {
+        await finalizeOffline(saleId, resolution.applied, resolution.changeCents / 100);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const result = await saleRpc.processTransaction({
         saleId,
@@ -824,12 +932,123 @@ export function App() {
       );
       void deliverReceipt(saleId, resolution.changeCents / 100);
     } catch (error) {
+      // Caiu a internet no meio: registra offline com o mesmo id (o envio e idempotente).
+      if (isNetworkError(error)) {
+        setOffline(true);
+        await finalizeOffline(saleId, resolution.applied, resolution.changeCents / 100);
+        return;
+      }
       const text = errorMessage(error);
       setMessage(text);
       if (adminApprovalOpen) setAdminApprovalError(text);
     } finally {
       setBusy(false);
     }
+  }
+
+  // Venda sem internet: guarda na fila, desconta da copia local e imprime o cupom.
+  // NFC-e pelo Comunicador Offline (contingencia); se nao der, sai como Nao Fiscal.
+  async function finalizeOffline(saleId: string, applied: PaymentLine[], changeAmount: number) {
+    const snapshot = await getSnapshot();
+    if (!snapshot?.cash || !saleSeller) {
+      setMessage('Sem internet e sem os dados do caixa guardados: não é possível vender offline.');
+      return;
+    }
+    if (applied.some((line) => line.paymentMethod === 'VOUCHER')) {
+      setMessage('Vale-troca não pode ser usado sem internet (o saldo é conferido no servidor).');
+      return;
+    }
+    const items: OfflineSaleItem[] = cart.map((item) => ({
+      itemType: item.itemType,
+      ...(item.itemType === 'SERVICE' ? { serviceId: item.id } : { productId: item.id }),
+      itemSku: item.sku,
+      itemName: item.name,
+      quantity: item.quantity,
+      discountPercent: item.discountPercent,
+      unitPrice: item.sellPrice,
+      lineTotal: discountedLineTotal(item),
+      ...(item.serialUnit ? { serials: [item.serialUnit.serialNumber] } : {}),
+    }));
+    const timestamp = new Date().toISOString();
+    const payload: OfflineSalePayload = {
+      saleId,
+      invoiceNumber: `PDV-${Date.now()}`,
+      timestamp,
+      cashSessionId: snapshot.cash.id,
+      sellerCode: saleSeller.code,
+      sellerName: saleSeller.name,
+      clientCpf: saleCustomer?.cpf ?? null,
+      clientName: saleCustomer?.name ?? null,
+      items,
+      payments: applied.map((line) => ({ paymentMethod: line.paymentMethod, amount: Number(line.amount.toFixed(2)) })),
+      nfce: null,
+    };
+    let fiscalNote = '';
+    if (fiscalChoiceRef.current === 'NFCE') {
+      const oldest = await oldestPendingAt();
+      if (oldest && Date.now() - oldest.getTime() > 24 * 60 * 60 * 1000) {
+        fiscalNote = ' NFC-e não emitida: há vendas sem internet há mais de 24 horas (prazo da contingência). Saiu como Não Fiscal.';
+      } else if (!snapshot.nfce?.configured) {
+        fiscalNote = ' NFC-e não configurada para esta loja: saiu como Não Fiscal.';
+      } else {
+        const local = await emitLocalNfce(payload, snapshot);
+        if (local.ok) payload.nfce = local.nfce;
+        else fiscalNote = ` NFC-e não emitida (${local.message}). Saiu como Não Fiscal.`;
+      }
+    }
+    await enqueueOfflineSale(payload);
+    const receipt: PosSaleReceipt = {
+      saleId,
+      receiptNumber: null,
+      timestamp,
+      items: items.map((item) => ({
+        itemType: item.itemType, itemSku: item.itemSku, itemName: item.itemName, quantity: item.quantity,
+        unitPrice: item.unitPrice, discountPercent: item.discountPercent, lineTotal: item.lineTotal, serials: item.serials ?? [],
+      })),
+      grossAmount,
+      depositApplied: 0,
+      paymentMethod: applied.length === 1 ? applied[0].paymentMethod : 'DIVIDIDO',
+      payments: payload.payments,
+      sellerName: saleSeller.name,
+      clientName: payload.clientName,
+      clientCpf: payload.clientCpf,
+      fiscalStatus: payload.nfce ? 'AUTORIZADA' : null,
+      nfce: payload.nfce
+        ? {
+            environment: (payload.nfce.environment as 'homologacao' | 'producao') ?? null,
+            number: (payload.nfce.number as string | null) ?? null,
+            series: (payload.nfce.series as string | null) ?? null,
+            key: (payload.nfce.key as string | null) ?? null,
+            protocol: (payload.nfce.protocol as string | null) ?? null,
+            qrcodeUrl: (payload.nfce.qrcodeUrl as string | null) ?? null,
+            consultUrl: (payload.nfce.consultUrl as string | null) ?? null,
+            authorizedAt: timestamp,
+            taxTotal: Number(payload.nfce.taxTotal ?? 0),
+            message: null,
+            contingency: true,
+            contingencyDone: false,
+          }
+        : null,
+    };
+    await saveLastOfflineReceipt({ receipt, changeAmount });
+    void printSaleReceipt(receipt, snapshot.store, changeAmount);
+    setCart([]);
+    setCatalogItems([]);
+    setQuery('');
+    setPaymentLines([]);
+    setSaleSellerCode('');
+    setSaleSeller(null);
+    setSaleCustomer(null);
+    setMessage(`Venda registrada SEM INTERNET${changeAmount > 0 ? ` (troco: ${currency.format(changeAmount)})` : ''}. Ela será enviada automaticamente quando a conexão voltar.${fiscalNote}`);
+  }
+
+  async function reprintLastOfflineReceipt() {
+    const last = await getLastOfflineReceipt<{ receipt: PosSaleReceipt; changeAmount: number }>();
+    if (!last) {
+      setMessage('Nenhuma venda feita sem internet para reimprimir.');
+      return;
+    }
+    void printSaleReceipt(last.receipt, (await getSnapshot())?.store ?? null, last.changeAmount);
   }
 
   async function confirmDiscountApproval() {
@@ -1200,7 +1419,8 @@ export function App() {
 
   useEffect(() => {
     if (screen !== 'sale' && screen !== 'receipts') return;
-    getPosNfceStatus().then(setNfceConfig).catch(() => setNfceConfig(null));
+    // Sem internet vale a configuracao guardada (NFC-e pelo Comunicador Offline).
+    getPosNfceStatus().then(setNfceConfig).catch(async () => setNfceConfig((await getSnapshot())?.nfce ?? null));
   }, [screen]);
 
   useEffect(() => {
@@ -1229,6 +1449,35 @@ export function App() {
     };
   }, [nfceConfig?.configured, screen]);
 
+  useEffect(() => {
+    if (!terminal) return;
+    let cancelled = false;
+    let lastSnapshot = 0;
+    async function tick() {
+      const online = await probeOnline();
+      if (cancelled) return;
+      const wasOffline = isOffline();
+      setOffline(!online);
+      if (!online) return;
+      if (wasOffline) setMessage('Internet de volta. Enviando as vendas feitas sem internet...');
+      const result = await syncOutbox();
+      if (result.sent > 0 || result.failed > 0) {
+        setMessage(`Vendas sem internet enviadas: ${result.sent}${result.failed > 0 ? `; ${result.failed} com erro (veja na faixa no topo)` : ''}${result.conflicts > 0 ? `; ${result.conflicts} divergência(s) para o gerente conferir no ERP` : ''}.`);
+      }
+      if (cashSession && Date.now() - lastSnapshot > 5 * 60 * 1000) {
+        lastSnapshot = Date.now();
+        void refreshSnapshot();
+      }
+    }
+    void refreshCounts();
+    void tick();
+    const timer = window.setInterval(() => void tick(), 20 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [terminal, cashSession]);
+
   // Aviso de atualizacao so fora de uma venda/reserva em andamento.
   useEffect(() => {
     const sellingNow = (screen === 'sale' || screen === 'new-reservation') && cart.length > 0;
@@ -1253,6 +1502,8 @@ export function App() {
     />
   );
 
+  const offlineInfo = useOfflineState();
+  const offlineNow = offlineInfo.offline;
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
   const cartHasBackorder = cart.some((item) => item.backorder);
   const reservationDepositAmount = valueAsNumber(reservationDeposit);
@@ -1575,6 +1826,20 @@ export function App() {
             </div>
           </div>
           <div className="header-actions">
+            <button
+              className="text-action"
+              type="button"
+              title="Porta do Comunicador Offline da Focus neste computador (NFC-e sem internet)"
+              onClick={() => {
+                const port = window.prompt('Porta do Comunicador Offline da Focus neste computador (em branco = desligado):', getComunicadorPort() ?? '');
+                if (port === null) return;
+                const clean = port.replace(/D/g, '');
+                setComunicadorPort(clean || null);
+                setMessage(clean ? `Comunicador Offline configurado na porta ${clean}.` : 'Comunicador Offline desligado neste computador.');
+              }}
+            >
+              Comunicador Offline{getComunicadorPort() ? ` (porta ${getComunicadorPort()})` : ''}
+            </button>
             <button className="text-action reservation-back" type="button" onClick={() => { setMessage(null); setScreen('sale'); }}>
               Voltar para venda
             </button>
@@ -1752,10 +2017,10 @@ export function App() {
           </div>
         ) : (
           <div className="header-actions">
-            <button className="reservation-nav" type="button" onClick={() => void openReservations()} disabled={busy}>
+            <button className="reservation-nav" type="button" onClick={() => void openReservations()} disabled={busy || offlineNow} title={offlineNow ? 'Indisponível sem internet' : undefined}>
               <ClipboardList size={18} /> Reservas
             </button>
-            <button className="reservation-nav" type="button" onClick={() => setScreen('warranty')} disabled={busy}>
+            <button className="reservation-nav" type="button" onClick={() => setScreen('warranty')} disabled={busy || offlineNow} title={offlineNow ? 'Indisponível sem internet' : undefined}>
               <ShieldCheck size={18} /> Garantia
             </button>
             <button
@@ -1780,10 +2045,16 @@ export function App() {
             >
               <BanknoteArrowUp size={20} />
             </button>
-            <button className="icon-button" type="button" title="Cupons: reimprimir e emitir NFC-e pendente" onClick={() => { setMessage(null); setScreen('receipts'); }} disabled={busy}>
+            <button className="icon-button" type="button" title={offlineNow ? 'Sem internet: reimprimir a última venda offline' : 'Cupons: reimprimir e emitir NFC-e pendente'} onClick={() => { setMessage(null); if (offlineNow) void reprintLastOfflineReceipt(); else setScreen('receipts'); }} disabled={busy}>
               <Printer size={20} />
             </button>
-            <button className="icon-button" type="button" title="Fechar caixa" onClick={() => void openClosing()}>
+            <button className="icon-button" type="button" title="Fechar caixa" onClick={() => {
+              if (offlineNow || offlineInfo.pending > 0 || offlineInfo.errors > 0) {
+                setMessage('Para fechar o caixa é preciso internet e todas as vendas feitas sem internet enviadas.');
+                return;
+              }
+              void openClosing();
+            }}>
               <LockKeyhole size={20} />
             </button>
             <span className="operator-badge">
@@ -1980,7 +2251,7 @@ export function App() {
                     </div>
                     <div className="sale-customer-actions">
                       <button className="text-action" type="button" onClick={() => setCustomerForm({ customer: saleCustomer, cpf: '' })}>Editar</button>
-                      <button className="text-action" type="button" onClick={() => setCustomerPickerOpen(true)}>Trocar</button>
+                      <button className="text-action" type="button" onClick={() => (offlineNow ? setOfflineCustomerOpen(true) : setCustomerPickerOpen(true))}>Trocar</button>
                       <button className="text-action" type="button" onClick={() => setSaleCustomer(null)}>Remover</button>
                     </div>
                     {customerCredit > 0 && (
@@ -1991,7 +2262,7 @@ export function App() {
                     )}
                   </div>
                 ) : (
-                  <button className="customer-pick" type="button" disabled={busy} onClick={() => setCustomerPickerOpen(true)}>
+                  <button className="customer-pick" type="button" disabled={busy} onClick={() => (offlineNow ? setOfflineCustomerOpen(true) : setCustomerPickerOpen(true))}>
                     <Search size={16} /> Selecionar ou cadastrar cliente
                   </button>
                 )}
@@ -2051,6 +2322,15 @@ export function App() {
         </aside>
       </section>
       {nfceModal}
+      {offlineCustomerOpen && (
+        <OfflineCustomerModal
+          onConfirm={(customer) => {
+            setSaleCustomer(customer);
+            setOfflineCustomerOpen(false);
+          }}
+          onClose={() => setOfflineCustomerOpen(false)}
+        />
+      )}
       {serialProduct && (
         <SerialUnitModal
           product={serialProduct}
@@ -2490,7 +2770,12 @@ function SellerCodeField({ label, value, seller, disabled, onValue, onSeller }: 
     let cancelled = false;
     setStatus('loading');
     const timer = window.setTimeout(() => {
-      findPosSeller(normalized)
+      // Sem internet: confere o codigo na copia local dos vendedores da loja.
+      (isOffline() ? findOfflineSeller(normalized) : findPosSeller(normalized).catch((error) => {
+        if (!isNetworkError(error)) throw error;
+        setOffline(true);
+        return findOfflineSeller(normalized);
+      }))
         .then((found) => {
           if (cancelled) return;
           onSeller(found);

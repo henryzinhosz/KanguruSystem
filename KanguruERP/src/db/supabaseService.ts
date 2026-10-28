@@ -1387,6 +1387,22 @@ export const supabaseService = {
     }));
   },
 
+  // === Modo offline do PDV: divergencias das vendas feitas sem internet ===
+  async getOfflineConflicts(): Promise<{ id: string; unitId: string; saleId: string; kind: string; detail: string; createdAt: string }[]> {
+    const { data, error } = await supabase
+      .from("pos_offline_conflicts")
+      .select("id, unit_id, sale_id, kind, detail, created_at")
+      .eq("resolved", false)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data || []).map(row => ({ id: row.id, unitId: row.unit_id, saleId: row.sale_id, kind: row.kind, detail: row.detail, createdAt: row.created_at }));
+  },
+
+  async resolveOfflineConflict(conflictId: string, resolvedBy: string): Promise<void> {
+    const { error } = await supabase.rpc("resolve_pos_offline_conflict", { p_conflict_id: conflictId, p_resolved_by: resolvedBy });
+    if (error) throw error;
+  },
+
   // === Avariados (2.9): saldo por loja (sem serial) e unidades serializadas avariadas ===
   async getDamagedStock(): Promise<{ unitId: string; productId: string; quantity: number; serials: string[] }[]> {
     const rows = new Map<string, { unitId: string; productId: string; quantity: number; serials: string[] }>();

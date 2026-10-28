@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { printSalesHistory } from './historyPrint';
 import { supabaseService } from '../db/supabaseService';
+import { OfflineConflictsPanel } from './OfflineConflictsPanel';
 
 const NFCE_CANCEL_WINDOW_MS = 30 * 60 * 1000;
 const RETURN_METHOD_LABELS: Record<string, string> = {
@@ -417,6 +418,8 @@ export default function FinanceiroView({
               <span>{saleError}</span>
             </div>
           )}
+
+          <OfflineConflictsPanel storeConfigs={storeConfigs} userName={currentUser.name} />
 
           {/* Seletores: data, loja e tipo de relatorio */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">

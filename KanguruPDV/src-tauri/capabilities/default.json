@@ -1,7 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissoes da janela principal do PDV (atualizacao automatica e reinicio).",
-  "windows": ["main"],
-  "permissions": ["core:default", "updater:default", "process:allow-restart"]
+  "description": "Permissoes da janela principal do PDV (atualizacao automatica, reinicio e banco local do modo offline).",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "updater:default",
+    "process:allow-restart",
+    "sql:default",
+    "sql:allow-execute",
+    "sql:allow-select",
+    "sql:allow-load"
+  ]
 }
