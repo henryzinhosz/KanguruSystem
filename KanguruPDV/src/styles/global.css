@@ -1336,3 +1336,57 @@ small {
 .update-notes {
   white-space: pre-line;
 }
+
+/* Trocas e devolucoes */
+.return-modal {
+  width: min(100%, 620px);
+}
+
+.return-items {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0.8rem 0;
+}
+
+.return-item {
+  border: 1px solid #d0dacd;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  background: #fff;
+}
+
+.return-item-head strong,
+.return-item-head small {
+  display: block;
+}
+
+.return-serials {
+  display: grid;
+  gap: 0.3rem;
+  margin-top: 0.4rem;
+}
+
+.return-serial {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+}
+
+.return-serial input {
+  width: 18px;
+  min-height: auto;
+}
+
+.return-qty {
+  margin: 0.5rem 0 0;
+}
+
+.sale-customer-credit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+  color: #285e3a;
+}

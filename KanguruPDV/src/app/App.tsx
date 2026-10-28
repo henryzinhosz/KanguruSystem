@@ -43,6 +43,9 @@ import {
   type PosNfceStatus,
 } from '../services/supabase/sales';
 import { ReceiptsPanel } from './ReceiptsPanel';
+import { ReturnModal, type ReturnDone } from './ReturnModal';
+import { getCustomerCreditBalance } from '../services/supabase/returns';
+import { searchPosCustomers } from '../services/supabase/customers';
 import { setUpdateAllowed } from './UpdateNotice';
 import { printClosingReport, printManagerialReport, type ManagerialReport } from './cashReportPrint';
 import { printSaleReceipt } from './receiptPrint';
@@ -98,7 +101,7 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   PIX: 'Pix',
   CREDITO: 'Credito',
   DEBITO: 'Debito',
-  VOUCHER: 'Voucher',
+  VOUCHER: 'Vale-troca',
   CREDIARIO: 'Crediario',
 };
 
@@ -353,6 +356,9 @@ export function App() {
   const [nfceEmitting, setNfceEmitting] = useState(false);
   const [nfceProblem, setNfceProblem] = useState<{ saleId: string; change: number; status: NfceStatus; message: string | null } | null>(null);
   const fiscalChoiceRef = useRef<FiscalChoice>('NAO_FISCAL');
+  // Troca/devolucao (2.9): venda aberta no modal e saldo de vale-troca do cliente da venda.
+  const [returnSaleId, setReturnSaleId] = useState<string | null>(null);
+  const [customerCredit, setCustomerCredit] = useState(0);
 
   async function routeAfterUnlock() {
     const openCash = await getOpenCashSession();
@@ -891,6 +897,30 @@ export function App() {
     }
   }
 
+  // Troca: volta para a venda com o cliente selecionado; o vale ja esta no CPF dele.
+  async function finishReturn(result: ReturnDone) {
+    setReturnSaleId(null);
+    setMessage(result.message);
+    if (!result.exchange) return;
+    const found = await searchPosCustomers(result.exchange.cpf).catch(() => []);
+    const customer = found.find((item) => item.cpf === result.exchange?.cpf);
+    if (customer) setSaleCustomer(customer);
+    setScreen('sale');
+    setMessage(`${result.message} Escolha os produtos da troca e clique em "Usar vale-troca" (${currency.format(result.exchange.amount)}).`);
+  }
+
+  // Vale-troca como forma de pagamento (VOUCHER): cobre o que falta, ate o saldo do CPF.
+  function applyCustomerCredit() {
+    const others = paymentLines.filter((line) => line.paymentMethod !== 'VOUCHER');
+    const othersTotal = others.reduce((sum, line) => sum + line.amount, 0);
+    const amount = Math.round(Math.min(customerCredit, Math.max(0, grossAmount - othersTotal)) * 100) / 100;
+    if (amount <= 0) {
+      setMessage('As formas de pagamento já cobrem o total da venda.');
+      return;
+    }
+    setPaymentLines([{ paymentMethod: 'VOUCHER', amount }, ...others]);
+  }
+
   async function printVoucher(data: ReservationVoucherData) {
     printReservationVoucher(data, await loadStoreProfile());
   }
@@ -1170,6 +1200,14 @@ export function App() {
     if (screen !== 'sale' && screen !== 'receipts') return;
     getPosNfceStatus().then(setNfceConfig).catch(() => setNfceConfig(null));
   }, [screen]);
+
+  useEffect(() => {
+    if (!saleCustomer) {
+      setCustomerCredit(0);
+      return;
+    }
+    getCustomerCreditBalance(saleCustomer.cpf).then(setCustomerCredit).catch(() => setCustomerCredit(0));
+  }, [saleCustomer, screen]);
 
   // Aviso de atualizacao so fora de uma venda/reserva em andamento.
   useEffect(() => {
@@ -1528,7 +1566,16 @@ export function App() {
           busy={busy || nfceEmitting}
           onReprint={(saleId) => printReceipt(saleId)}
           onEmitNfce={(saleId) => emitNfce(saleId, 0)}
+          onReturn={(saleId) => { setMessage(null); setReturnSaleId(saleId); }}
         />
+        {returnSaleId && (
+          <ReturnModal
+            saleId={returnSaleId}
+            loadStore={loadStoreProfile}
+            onClose={() => setReturnSaleId(null)}
+            onDone={(result) => void finishReturn(result)}
+          />
+        )}
         {nfceModal}
       </main>
     );
@@ -1916,6 +1963,12 @@ export function App() {
                       <button className="text-action" type="button" onClick={() => setCustomerPickerOpen(true)}>Trocar</button>
                       <button className="text-action" type="button" onClick={() => setSaleCustomer(null)}>Remover</button>
                     </div>
+                    {customerCredit > 0 && (
+                      <div className="sale-customer-credit">
+                        <small>Vale-troca disponível: {currency.format(customerCredit)}</small>
+                        <button className="text-action" type="button" disabled={busy || grossAmount <= 0} onClick={applyCustomerCredit}>Usar vale-troca</button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <button className="customer-pick" type="button" disabled={busy} onClick={() => setCustomerPickerOpen(true)}>

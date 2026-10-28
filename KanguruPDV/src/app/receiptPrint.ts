@@ -15,7 +15,7 @@ const PAYMENT_LABELS: Record<string, string> = {
   PIX: 'PIX',
   CREDITO: 'CARTÃO DE CRÉDITO',
   DEBITO: 'CARTÃO DE DÉBITO',
-  VOUCHER: 'VOUCHER',
+  VOUCHER: 'VALE-TROCA',
   CREDIARIO: 'CREDIÁRIO',
 };
 
@@ -183,7 +183,7 @@ const PAYMENT_NFCE_LABELS: Record<string, string> = {
   PIX: 'PIX',
   CREDITO: 'Cartão de Crédito',
   DEBITO: 'Cartão de Débito',
-  VOUCHER: 'Vale',
+  VOUCHER: 'Vale-troca',
   CREDIARIO: 'Crédito Loja',
 };
 

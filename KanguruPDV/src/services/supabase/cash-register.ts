@@ -114,6 +114,9 @@ export interface CashSessionReport {
   cancelledTotal: number;
   depositsReceived: number;
   depositsRefunded: number;
+  returnCount: number;
+  returnRefunds: number;
+  returnCredits: number;
 }
 
 export async function getCashSessionReport(): Promise<CashSessionReport | null> {
@@ -135,5 +138,8 @@ export async function getCashSessionReport(): Promise<CashSessionReport | null> 
     cancelledTotal: numberValue(row.cancelledTotal),
     depositsReceived: numberValue(row.depositsReceived),
     depositsRefunded: numberValue(row.depositsRefunded),
+    returnCount: numberValue(row.returnCount),
+    returnRefunds: numberValue(row.returnRefunds),
+    returnCredits: numberValue(row.returnCredits),
   };
 }

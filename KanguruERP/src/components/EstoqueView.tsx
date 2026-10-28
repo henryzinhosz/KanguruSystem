@@ -129,7 +129,15 @@ export default function EstoqueView({
   const [categoryFilter, setCategoryFilter] = useState('Todas');
   
   // UI Tabs inside Estoque
-  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'garantias'>('catalogo');
+  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'garantias' | 'avariados'>('catalogo');
+  // Avariados (2.9): produtos devolvidos com defeito, fora da venda.
+  const [damaged, setDamaged] = useState<{ unitId: string; productId: string; quantity: number; serials: string[] }[] | null>(null);
+  const [damagedError, setDamagedError] = useState('');
+  useEffect(() => {
+    if (activeSubTab !== 'avariados') return;
+    setDamagedError('');
+    supabaseService.getDamagedStock().then(setDamaged).catch(() => { setDamaged([]); setDamagedError('Não foi possível carregar os avariados.'); });
+  }, [activeSubTab]);
 
   // Form states: New Product
   const [showAddProductModal, setShowAddProductModal] = useState(false);
@@ -727,6 +735,18 @@ export default function EstoqueView({
           >
             <Layers className="w-4 h-4 mr-1.5" />
             Entrada de Estoque
+          </button>
+          <button
+            id="tab-estoque-avariados"
+            onClick={() => setActiveSubTab('avariados')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeSubTab === 'avariados'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <Package className="w-4 h-4 mr-1.5" />
+            Avariados
           </button>
         </div>
 
@@ -1481,6 +1501,37 @@ export default function EstoqueView({
       )}
 
       {/* 3. VIEW: Consulta Garantia */}
+      {activeSubTab === 'avariados' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-100">
+            <h3 className="text-sm font-bold text-slate-900">Avariados</h3>
+            <p className="text-xs text-slate-500">Produtos devolvidos com defeito pelo PDV. Ficam fora do estoque de venda.</p>
+          </div>
+          {damagedError && <p className="p-4 text-xs text-rose-700">{damagedError}</p>}
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 text-slate-500 uppercase text-[10px]">
+              <tr><th className="p-3 text-left">Produto</th><th className="p-3 text-left">Loja</th><th className="p-3 text-right">Quantidade</th><th className="p-3 text-left">Seriais</th></tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {damaged === null && <tr><td colSpan={4} className="p-4 text-slate-400">Carregando...</td></tr>}
+              {damaged !== null && damaged.length === 0 && <tr><td colSpan={4} className="p-4 text-slate-400">Nenhum produto avariado.</td></tr>}
+              {(damaged || []).map(row => {
+                const product = products.find(item => item.id === row.productId);
+                const store = storeConfigs.find(item => item.unitId === row.unitId);
+                return (
+                  <tr key={`${row.unitId}-${row.productId}`}>
+                    <td className="p-3 font-bold text-slate-800">{product?.name ?? row.productId}<span className="block font-normal text-slate-400">{product?.sku}</span></td>
+                    <td className="p-3 text-slate-600">{store?.tradeName || row.unitId}</td>
+                    <td className="p-3 text-right font-mono">{row.quantity}</td>
+                    <td className="p-3 text-slate-500">{row.serials.join(', ') || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {activeSubTab === 'garantias' && (
         <div className="max-w-2xl mx-auto bg-white p-6 rounded-xl border border-slate-200 shadow-sm font-sans space-y-6">
           <div className="text-center space-y-1">

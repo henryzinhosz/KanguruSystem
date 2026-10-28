@@ -26,7 +26,8 @@ const PAYMENT_CODES: Record<string, string> = {
   CREDITO: '03',
   DEBITO: '04',
   CREDIARIO: '05',
-  VOUCHER: '10',
+  // VOUCHER = vale-troca (credito da loja no CPF do cliente, 2.9).
+  VOUCHER: '05',
   PIX: '17',
 };
 

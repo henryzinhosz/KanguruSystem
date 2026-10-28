@@ -41,6 +41,14 @@ import { printSalesHistory } from './historyPrint';
 import { supabaseService } from '../db/supabaseService';
 
 const NFCE_CANCEL_WINDOW_MS = 30 * 60 * 1000;
+const RETURN_METHOD_LABELS: Record<string, string> = {
+  TROCA: "troca",
+  VALE: "vale-troca",
+  DINHEIRO: "dinheiro",
+  PIX: "PIX",
+  CREDITO: "estorno crédito",
+  DEBITO: "estorno débito",
+};
 const NFCE_STATUS_LABELS: Record<NfceStatus, string> = {
   PENDENTE: 'pendente',
   AUTORIZADA: 'autorizada',
@@ -597,6 +605,14 @@ export default function FinanceiroView({
                                 {s.nfceDanfeUrl && <a href={s.nfceDanfeUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-700 hover:underline">DANFE</a>}
                               </span>
                             )}
+                            {(s.returns || []).map(item => (
+                              <span key={item.id} className="mt-0.5 block text-[10px] font-normal text-rose-700" title={item.reason}>
+                                Devolução nº {item.returnNumber}: -{formatMoney(item.totalAmount)} ({RETURN_METHOD_LABELS[item.refundMethod]})
+                                {item.fiscalStatus && <span className="ml-1 text-slate-500">NF-e {item.nfeNumber ? `nº ${item.nfeNumber} ` : ""}{item.fiscalStatus === "AUTORIZADA" ? "autorizada" : item.fiscalStatus === "ERRO" ? "com erro" : "pendente"}</span>}
+                                {item.nfeXmlUrl && <a href={item.nfeXmlUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-700 hover:underline">XML</a>}
+                                {item.nfeDanfeUrl && <a href={item.nfeDanfeUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-700 hover:underline">DANFE</a>}
+                              </span>
+                            ))}
                           </td>
                           <td className="px-3 py-2.5 font-medium text-slate-700">{storeName(s.unitId)}</td>
                           <td className="px-3 py-2.5 text-center">
@@ -627,7 +643,10 @@ export default function FinanceiroView({
                             )}
                           </td>
                           <td className="px-3 py-2.5 text-center">
-                            {isCompleted && (
+                            {isCompleted && (s.returns || []).length > 0 && (
+                              <span className="text-[9px] text-slate-400 font-semibold block" title="Venda com troca/devolução não pode ser estornada">Com devolução</span>
+                            )}
+                            {isCompleted && (s.returns || []).length === 0 && (
                               <button
                                 type="button"
                                 onClick={() => void handleCancelSale(s.id)}

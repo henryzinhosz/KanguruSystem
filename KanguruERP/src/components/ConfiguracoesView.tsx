@@ -31,6 +31,7 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   contactEmail: '',
   reservationVoucherTerms: '',
   instagram: '',
+  exchangeDays: 7,
   fixedCost: 0,
   maxItemDiscountPercent: 0,
   paymentFees: { DINHEIRO: 0, PIX: 0, CREDITO: 0, DEBITO: 0 }
@@ -170,6 +171,7 @@ export default function ConfiguracoesView({
       contactEmail: store.contactEmail || '',
       reservationVoucherTerms: store.reservationVoucherTerms || '',
       instagram: store.instagram || '',
+      exchangeDays: store.exchangeDays ?? 7,
       fixedCost: store.fixedCost,
       maxItemDiscountPercent: store.maxItemDiscountPercent,
       paymentFees: store.paymentFees
@@ -484,6 +486,15 @@ function StoreFields({ form, onChange }: {
         <ValueInput
           value={form.maxItemDiscountPercent || null}
           onValueChange={value => onChange('maxItemDiscountPercent', Math.min(100, value ?? 0))}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Prazo de troca (dias) <span className="font-normal text-slate-400">(depois dele, troca/devolução no PDV só com a senha administrativa)</span>
+        <ValueInput
+          decimals={0}
+          value={form.exchangeDays ?? 7}
+          onValueChange={value => onChange('exchangeDays', Math.min(365, Math.max(0, value ?? 0)))}
           className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
         />
       </label>

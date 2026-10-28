@@ -5,6 +5,7 @@ import {
   StockInventory, 
   StockMovement, 
   Sale,
+  SaleReturnInfo,
   StoreNfceStatus,
   SalePaymentLine,
   Expense, 
@@ -1314,6 +1315,40 @@ export const supabaseService = {
       });
     }
 
+    // Trocas/devolucoes (2.9). Tolerante a falha antes da migration 20261030.
+    const returnsBySale = new Map<string, SaleReturnInfo[]>();
+    const { data: returnRows, error: returnsError } = await supabase
+      .from('sale_returns')
+      .select('id, sale_id, return_number, created_at, refund_method, total_amount, reason, fiscal_status, nfe_number, nfe_xml_url, nfe_danfe_url')
+      .order('created_at', { ascending: true });
+    if (!returnsError) {
+      const costBack = new Map<string, number>();
+      const { data: itemRows } = await supabase
+        .from('sale_return_items')
+        .select('return_id, quantity, unit_cost, destination');
+      (itemRows || []).forEach(item => {
+        if (item.destination !== 'ESTOQUE') return;
+        costBack.set(item.return_id, (costBack.get(item.return_id) ?? 0) + Number(item.unit_cost ?? 0) * Number(item.quantity));
+      });
+      (returnRows || []).forEach(r => {
+        const list = returnsBySale.get(r.sale_id) ?? [];
+        list.push({
+          id: r.id,
+          returnNumber: r.return_number,
+          createdAt: r.created_at,
+          refundMethod: r.refund_method,
+          totalAmount: Number(r.total_amount),
+          costBack: Math.round((costBack.get(r.id) ?? 0) * 100) / 100,
+          reason: r.reason,
+          fiscalStatus: r.fiscal_status ?? undefined,
+          nfeNumber: r.nfe_number ?? undefined,
+          nfeXmlUrl: r.nfe_xml_url ?? undefined,
+          nfeDanfeUrl: r.nfe_danfe_url ?? undefined
+        });
+        returnsBySale.set(r.sale_id, list);
+      });
+    }
+
     return (data || []).map(s => ({
       id: s.id,
       invoiceNumber: s.invoice_number,
@@ -1346,8 +1381,33 @@ export const supabaseService = {
       nfceXmlUrl: s.nfce_xml_url ?? undefined,
       nfceDanfeUrl: s.nfce_danfe_url ?? undefined,
       nfceMessage: s.nfce_message ?? undefined,
-      nfceAuthorizedAt: s.nfce_authorized_at ?? undefined
+      nfceAuthorizedAt: s.nfce_authorized_at ?? undefined,
+      returns: returnsBySale.get(s.id)
     }));
+  },
+
+  // === Avariados (2.9): saldo por loja (sem serial) e unidades serializadas avariadas ===
+  async getDamagedStock(): Promise<{ unitId: string; productId: string; quantity: number; serials: string[] }[]> {
+    const rows = new Map<string, { unitId: string; productId: string; quantity: number; serials: string[] }>();
+    const { data: stock, error: stockError } = await supabase
+      .from('product_damaged_stock')
+      .select('unit_id, product_id, quantity')
+      .gt('quantity', 0);
+    if (stockError) throw stockError;
+    (stock || []).forEach(row => rows.set(`${row.unit_id}|${row.product_id}`, { unitId: row.unit_id, productId: row.product_id, quantity: Number(row.quantity), serials: [] }));
+    const { data: units, error: unitsError } = await supabase
+      .from('product_serial_units')
+      .select('unit_id, product_id, serial_number')
+      .eq('status', 'AVARIADO');
+    if (unitsError) throw unitsError;
+    (units || []).forEach(unit => {
+      const key = `${unit.unit_id}|${unit.product_id}`;
+      const row = rows.get(key) ?? { unitId: unit.unit_id, productId: unit.product_id, quantity: 0, serials: [] };
+      row.quantity += 1;
+      row.serials.push(unit.serial_number);
+      rows.set(key, row);
+    });
+    return Array.from(rows.values());
   },
 
   // === NFC-e (2.8b) ===
@@ -1554,7 +1614,8 @@ export const supabaseService = {
       phone: c.phone || undefined,
       contactEmail: c.contact_email || undefined,
       reservationVoucherTerms: c.reservation_voucher_terms || undefined,
-      instagram: c.instagram || undefined
+      instagram: c.instagram || undefined,
+      exchangeDays: c.exchange_days == null ? undefined : Number(c.exchange_days)
     }));
   },
 
@@ -1572,7 +1633,8 @@ export const supabaseService = {
       phone: c.phone || null,
       contact_email: c.contactEmail || null,
       reservation_voucher_terms: c.reservationVoucherTerms?.trim() || null,
-      instagram: c.instagram?.trim() || null
+      instagram: c.instagram?.trim() || null,
+      ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {})
     };
 
     const { error } = await supabase.from('store_configs').upsert(payload);

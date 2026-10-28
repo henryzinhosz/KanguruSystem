@@ -104,7 +104,7 @@ export function buildClosingHtml(data: ClosingReport, store: PosStoreProfile | n
     { label: 'CREDITO', expected: summary.expectedCreditAmount, counted: counts.credit },
     { label: 'DEBITO', expected: summary.expectedDebitAmount, counted: counts.debit },
     { label: 'PIX', expected: summary.expectedPixAmount, counted: counts.pix },
-    { label: 'VOUCHER', expected: summary.expectedVoucherAmount, counted: counts.voucher },
+    { label: 'VALE-TROCA', expected: summary.expectedVoucherAmount, counted: counts.voucher },
     { label: 'CREDIARIO', expected: summary.expectedCreditAccountAmount, counted: counts.creditAccount },
   ].filter((method, index) => index < 4 || method.expected !== 0 || method.counted !== 0);
   // Total finalizador = o que entrou por venda/sinal (sem fundo, suprimentos e sangrias).
@@ -159,6 +159,8 @@ export function buildClosingHtml(data: ClosingReport, store: PosStoreProfile | n
   ${closingRow('RES. OPERACIONAL', money(report.grossTotal))}
   ${report.depositsReceived > 0 || report.depositsRefunded > 0 ? closingRow('Sinais recebidos', money(report.depositsReceived)) : ''}
   ${report.depositsRefunded > 0 ? closingRow('Sinais devolvidos', money(report.depositsRefunded)) : ''}
+  ${report.returnCount > 0 ? closingRow('Devolucoes (-)', money(report.returnRefunds)) : ''}
+  ${report.returnCredits > 0 ? closingRow('Vales emitidos', money(report.returnCredits)) : ''}
   <div class="gap"></div>` : ''}
   <table>
     <tr><th>Contagem</th><th>Sistema</th><th>Contado</th><th>Dif.</th></tr>

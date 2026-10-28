@@ -304,6 +304,23 @@ export interface Sale {
   nfceDanfeUrl?: string;
   nfceMessage?: string;
   nfceAuthorizedAt?: string;
+  // Trocas/devolucoes (2.9) desta venda.
+  returns?: SaleReturnInfo[];
+}
+
+export interface SaleReturnInfo {
+  id: string;
+  returnNumber: number;
+  createdAt: string;
+  refundMethod: 'TROCA' | 'VALE' | 'DINHEIRO' | 'PIX' | 'CREDITO' | 'DEBITO';
+  totalAmount: number;
+  // Custo das unidades que voltaram ao estoque (avariado continua como custo).
+  costBack: number;
+  reason: string;
+  fiscalStatus?: 'PENDENTE' | 'AUTORIZADA' | 'ERRO';
+  nfeNumber?: string;
+  nfeXmlUrl?: string;
+  nfeDanfeUrl?: string;
 }
 
 export type NfceStatus = 'PENDENTE' | 'AUTORIZADA' | 'ERRO' | 'CANCELADA';
@@ -375,6 +392,7 @@ export interface StoreConfig {
   // Texto das regras impresso no voucher de reserva do PDV (vazio = texto padrao).
   reservationVoucherTerms?: string;
   instagram?: string; // perfil da loja (QR code do cupom)
+  exchangeDays?: number; // prazo de troca em dias (2.9; padrao 7)
   paymentFees: {
     DINHEIRO: number; // percentage (e.g. 0)
     PIX: number; // percentage (e.g. 0.005 = 0.5%)

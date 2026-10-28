@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Printer, Search, Send } from 'lucide-react';
+import { Printer, RotateCcw, Search, Send } from 'lucide-react';
 import { searchPosSales, type NfceStatus, type PosSaleSummary } from '../services/supabase/sales';
 import { formatCpf } from './reservationVoucher';
 import { maskCpf } from './cpf';
@@ -29,9 +29,10 @@ interface ReceiptsPanelProps {
   busy: boolean;
   onReprint: (saleId: string) => Promise<void>;
   onEmitNfce: (saleId: string) => Promise<void>;
+  onReturn: (saleId: string) => void;
 }
 
-export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce }: ReceiptsPanelProps) {
+export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce, onReturn }: ReceiptsPanelProps) {
   const [mode, setMode] = useState<SearchMode>('date');
   const [value, setValue] = useState(todayValue);
   const [results, setResults] = useState<PosSaleSummary[]>([]);
@@ -139,6 +140,11 @@ export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce }: R
                 {canEmit && (
                   <button className="reservation-nav" type="button" disabled={busy} onClick={() => void onEmitNfce(sale.saleId).then(runSearch)}>
                     <Send size={16} /> Emitir NFC-e
+                  </button>
+                )}
+                {sale.status === 'CONCLUIDA' && (
+                  <button className="reservation-nav" type="button" disabled={busy} onClick={() => onReturn(sale.saleId)}>
+                    <RotateCcw size={16} /> Trocar / Devolver
                   </button>
                 )}
                 <button className="reservation-nav" type="button" disabled={busy} onClick={() => void onReprint(sale.saleId)}>
