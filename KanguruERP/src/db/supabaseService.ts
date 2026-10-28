@@ -1382,6 +1382,7 @@ export const supabaseService = {
       nfceDanfeUrl: s.nfce_danfe_url ?? undefined,
       nfceMessage: s.nfce_message ?? undefined,
       nfceAuthorizedAt: s.nfce_authorized_at ?? undefined,
+      nfceContingencyPending: s.nfce_contingency === true && s.nfce_contingency_done !== true,
       returns: returnsBySale.get(s.id)
     }));
   },

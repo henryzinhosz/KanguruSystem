@@ -37,6 +37,7 @@ import {
   getPosNfceStatus,
   getPosSaleReceipt,
   saleRpc,
+  syncNfceContingency,
   type NfceStatus,
   type PaymentLine,
   type PaymentMethodKey,
@@ -876,9 +877,10 @@ export function App() {
     try {
       const result = await emitPosNfce(saleId);
       if (result.status === 'AUTORIZADA') {
-        setMessage(changeAmount > 0
-          ? `NFC-e autorizada. Troco: ${currency.format(changeAmount)}.`
-          : 'NFC-e autorizada.');
+        const label = result.contingency
+          ? 'NFC-e emitida em CONTINGÊNCIA (Sefaz fora do ar): entregue a via do consumidor e guarde a via do estabelecimento. A nota é enviada à Sefaz automaticamente.'
+          : 'NFC-e autorizada.';
+        setMessage(changeAmount > 0 ? `${label} Troco: ${currency.format(changeAmount)}.` : label);
         await printReceipt(saleId, changeAmount);
       } else {
         setNfceProblem({ saleId, change: changeAmount, status: result.status, message: result.message });
@@ -1208,6 +1210,24 @@ export function App() {
     }
     getCustomerCreditBalance(saleCustomer.cpf).then(setCustomerCredit).catch(() => setCustomerCredit(0));
   }, [saleCustomer, screen]);
+
+  // Contingencia: acompanha as NFC-e emitidas com a Sefaz fora do ar (ao abrir e a cada 10 min).
+  useEffect(() => {
+    if (!nfceConfig?.configured || (screen !== 'sale' && screen !== 'receipts')) return;
+    let cancelled = false;
+    async function check() {
+      const result = await syncNfceContingency();
+      if (!cancelled && result && result.errors > 0) {
+        setMessage(`Atenção: ${result.errors} NFC-e emitida(s) em contingência foram recusadas pela Sefaz. Veja em Cupons e notas e corrija em até 24 horas.`);
+      }
+    }
+    void check();
+    const timer = window.setInterval(() => void check(), 10 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [nfceConfig?.configured, screen]);
 
   // Aviso de atualizacao so fora de uma venda/reserva em andamento.
   useEffect(() => {

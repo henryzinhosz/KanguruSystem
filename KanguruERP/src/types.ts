@@ -304,6 +304,8 @@ export interface Sale {
   nfceDanfeUrl?: string;
   nfceMessage?: string;
   nfceAuthorizedAt?: string;
+  // Emitida em contingencia (Sefaz fora do ar) e ainda nao efetivada pela Sefaz.
+  nfceContingencyPending?: boolean;
   // Trocas/devolucoes (2.9) desta venda.
   returns?: SaleReturnInfo[];
 }

@@ -601,6 +601,7 @@ export default function FinanceiroView({
                                   NFC-e {s.nfceNumber ? `nº ${s.nfceNumber} ` : ''}{NFCE_STATUS_LABELS[s.fiscalStatus]}
                                 </span>
                                 {s.nfceEnvironment === 'homologacao' && <span className="ml-1 text-slate-400">(teste)</span>}
+                                {s.nfceContingencyPending && <span className="ml-1 font-bold text-amber-700" title="Emitida com a Sefaz fora do ar; aguardando a Sefaz efetivar (até 24 h)">(contingência)</span>}
                                 {s.nfceXmlUrl && <a href={s.nfceXmlUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-700 hover:underline">XML</a>}
                                 {s.nfceDanfeUrl && <a href={s.nfceDanfeUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-700 hover:underline">DANFE</a>}
                               </span>

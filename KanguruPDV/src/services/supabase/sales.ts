@@ -144,6 +144,9 @@ export interface PosNfceData {
   authorizedAt: string | null;
   taxTotal: number | null;
   message: string | null;
+  // Emitida em contingencia offline (Sefaz fora do ar) e se a Sefaz ja efetivou.
+  contingency?: boolean;
+  contingencyDone?: boolean;
 }
 
 // Sem saleId: a ultima venda deste terminal (reimpressao).
@@ -204,6 +207,7 @@ export async function getPosNfceStatus(): Promise<PosNfceStatus> {
 export interface NfceEmitResult {
   status: NfceStatus;
   message: string | null;
+  contingency?: boolean;
 }
 
 // Emite a NFC-e da venda (Edge Function nfce-emit; a chave da Focus fica no servidor).
@@ -222,7 +226,16 @@ export async function emitPosNfce(saleId: string): Promise<NfceEmitResult> {
   return {
     status: (row.status as NfceStatus) ?? 'ERRO',
     message: (row.message as string | undefined) ?? (row.error as string | undefined) ?? null,
+    contingency: row.contingency === true,
   };
+}
+
+// Acompanha as NFC-e em contingencia da loja ate a Sefaz efetivar (Edge Function).
+export async function syncNfceContingency(): Promise<{ pending: number; effective: number; errors: number } | null> {
+  const { data, error } = await supabase.functions.invoke('nfce-contingency-sync', { body: {} });
+  if (error || !data) return null;
+  const row = data as Record<string, unknown>;
+  return { pending: Number(row.pending ?? 0), effective: Number(row.effective ?? 0), errors: Number(row.errors ?? 0) };
 }
 
 export interface PosSaleSummary {
@@ -239,6 +252,7 @@ export interface PosSaleSummary {
   fiscalStatus: NfceStatus | null;
   nfceNumber: string | null;
   nfceMessage: string | null;
+  nfceContingency: boolean;
 }
 
 // Busca para reimpressao: por data (AAAA-MM-DD), numero (cupom ou NFC-e) ou CPF.
@@ -263,5 +277,6 @@ export async function searchPosSales(filter: { date?: string; number?: string; c
     fiscalStatus: (row.fiscalStatus as NfceStatus | null) ?? null,
     nfceNumber: (row.nfceNumber as string | null) ?? null,
     nfceMessage: (row.nfceMessage as string | null) ?? null,
+    nfceContingency: row.nfceContingency === true,
   }));
 }

@@ -130,7 +130,11 @@ export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce, onR
                     <span className={`receipt-tag nfce-${sale.fiscalStatus.toLowerCase()}`} title={sale.nfceMessage ?? undefined}>
                       NFC-e {sale.nfceNumber ? `nº ${sale.nfceNumber} ` : ''}{NFCE_LABELS[sale.fiscalStatus]}
                     </span>
-                  ) : (
+                  ) : null}
+                  {sale.nfceContingency && sale.fiscalStatus === 'AUTORIZADA' ? (
+                    <span className="receipt-tag nfce-pendente" title="Emitida com a Sefaz fora do ar; aguardando a Sefaz efetivar (até 24 h)">em contingência</span>
+                  ) : null}
+                  {sale.fiscalStatus ? null : (
                     <span className="receipt-tag">Não fiscal</span>
                   )}
                 </span>

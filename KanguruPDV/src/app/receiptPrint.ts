@@ -93,6 +93,47 @@ function buildNfceHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, l
       : '',
   ].join('');
 
+  // Contingencia offline: aviso no cupom e duas vias (consumidor e estabelecimento), como manda a lei.
+  const contingency = nfce.contingency === true && nfce.contingencyDone !== true;
+  const danfeSection = (via: string) => `
+  <div class="issuer">
+    <img src="${logo}" alt="">
+    <div>${storeLines}</div>
+  </div>
+  <div class="title">DOCUMENTO AUXILIAR DA NOTA FISCAL<br>DE CONSUMIDOR ELETRÔNICA</div>
+  ${nfce.environment === 'homologacao' ? '<div class="homolog">EMITIDA EM AMBIENTE DE HOMOLOGAÇÃO - SEM VALOR FISCAL</div>' : ''}
+  ${contingency ? '<div class="homolog contingency">EMITIDA EM CONTINGÊNCIA<br>Pendente de autorização</div>' : ''}
+  <div class="columns">#|COD|DESC|QTD|UN| VL UN R$|(VLTR R$)*|VL ITEM R$</div>
+  ${itemRows}
+  <div class="totals">
+    <div class="row"><span>QTD. TOTAL DE ITENS</span><span>${String(items.length).padStart(3, '0')}</span></div>
+    <div class="row"><span>SUBTOTAL</span><span>${money(listTotal)}</span></div>
+    <div class="row"><span>DESCONTOS</span><span>${money(discount)}</span></div>
+    <div class="gap"></div>
+    <div class="row"><span>VALOR TOTAL R$</span><span>${money(productsTotal)}</span></div>
+    <div class="row"><span>FORMA DE PAGAMENTO</span><span>Valor Pago</span></div>
+  </div>
+  ${payments.map((payment) => `<div class="row payment"><span>${payment.paymentMethod === 'SINAL' ? 'Sinal da reserva' : e(PAYMENT_NFCE_LABELS[payment.paymentMethod] ?? payment.paymentMethod)}</span><span>${money(payment.amount)}</span></div>`).join('')}
+  ${changeAmount > 0 ? `<div class="row payment"><span>Troco</span><span>${money(changeAmount)}</span></div>` : ''}
+  <div class="consult">Consulte pela Chave de Acesso em<br>${e(consultUrl)}</div>
+  <div class="access-key">${e(formatAccessKey(nfce.key ?? ''))}</div>
+  <div class="auth">
+    ${qrDataUrl ? `<img src="${qrDataUrl}" alt="">` : ''}
+    <div class="auth-info">
+      <strong>Número ${e(String(nfce.number ?? '').padStart(9, '0'))} - Série ${e(String(nfce.series ?? '').padStart(3, '0'))}</strong><br>
+      Emissão ${issued.toLocaleDateString('pt-BR')} ${issued.toLocaleTimeString('pt-BR')}<br>
+      ${via}<br><br>
+      Protocolo de Autorização ${e(nfce.protocol ?? '')}<br>
+      Data de Autorização ${authorized.toLocaleDateString('pt-BR')} ${authorized.toLocaleTimeString('pt-BR')}<br>
+      ${cpf.length === 11 ? `CONSUMIDOR CPF: ${formatCpf(cpf)}${receipt.clientName ? `<br>${e(receipt.clientName.toUpperCase())}` : ''}` : 'CONSUMIDOR NÃO IDENTIFICADO'}
+    </div>
+  </div>
+  <div class="taxes">*Tributos Totais Incidentes (Lei Federal 12.741/2012): R$ ${money(taxTotal)}</div>
+  <div class="store-footer">
+    <div class="row"><span>Cupom: ${formatReceiptNumber(receipt.receiptNumber)}</span><span>${receipt.sellerName ? `Vendedor: ${e(receipt.sellerName.toUpperCase())}` : ''}</span></div>
+    <div>${RECEIPT_FOOTER}</div>
+  </div>`;
+
   return `<!doctype html>
 <html lang="pt-BR">
 <head>
@@ -111,6 +152,8 @@ function buildNfceHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, l
   .issuer-address { font-size: 10px; font-weight: normal; }
   .title { margin: 6px 0 2px; text-align: center; font-size: 13px; line-height: 1.25; }
   .homolog { text-align: center; font-size: 11px; margin: 2px 0; }
+  .contingency { font-size: 13px; border: 2px solid #000; padding: 2px; }
+  .page-break { break-after: page; page-break-after: always; height: 10mm; }
   .columns { font-size: 9px; font-weight: normal; margin-bottom: 1px; }
   .mono { font-family: 'Courier New', Courier, monospace; font-size: 11.5px; font-weight: bold; }
   .item-values { padding-left: 6ch; }
@@ -131,42 +174,7 @@ function buildNfceHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, l
 </style>
 </head>
 <body>
-  <div class="issuer">
-    <img src="${logo}" alt="">
-    <div>${storeLines}</div>
-  </div>
-  <div class="title">DOCUMENTO AUXILIAR DA NOTA FISCAL<br>DE CONSUMIDOR ELETRÔNICA</div>
-  ${nfce.environment === 'homologacao' ? '<div class="homolog">EMITIDA EM AMBIENTE DE HOMOLOGAÇÃO - SEM VALOR FISCAL</div>' : ''}
-  <div class="columns">#|COD|DESC|QTD|UN| VL UN R$|(VLTR R$)*|VL ITEM R$</div>
-  ${itemRows}
-  <div class="totals">
-    <div class="row"><span>QTD. TOTAL DE ITENS</span><span>${String(items.length).padStart(3, '0')}</span></div>
-    <div class="row"><span>SUBTOTAL</span><span>${money(listTotal)}</span></div>
-    <div class="row"><span>DESCONTOS</span><span>${money(discount)}</span></div>
-    <div class="gap"></div>
-    <div class="row"><span>VALOR TOTAL R$</span><span>${money(productsTotal)}</span></div>
-    <div class="row"><span>FORMA DE PAGAMENTO</span><span>Valor Pago</span></div>
-  </div>
-  ${payments.map((payment) => `<div class="row payment"><span>${payment.paymentMethod === 'SINAL' ? 'Sinal da reserva' : e(PAYMENT_NFCE_LABELS[payment.paymentMethod] ?? payment.paymentMethod)}</span><span>${money(payment.amount)}</span></div>`).join('')}
-  ${changeAmount > 0 ? `<div class="row payment"><span>Troco</span><span>${money(changeAmount)}</span></div>` : ''}
-  <div class="consult">Consulte pela Chave de Acesso em<br>${e(consultUrl)}</div>
-  <div class="access-key">${e(formatAccessKey(nfce.key ?? ''))}</div>
-  <div class="auth">
-    ${qrDataUrl ? `<img src="${qrDataUrl}" alt="">` : ''}
-    <div class="auth-info">
-      <strong>Número ${e(String(nfce.number ?? '').padStart(9, '0'))} - Série ${e(String(nfce.series ?? '').padStart(3, '0'))}</strong><br>
-      Emissão ${issued.toLocaleDateString('pt-BR')} ${issued.toLocaleTimeString('pt-BR')}<br>
-      Via Consumidor<br><br>
-      Protocolo de Autorização ${e(nfce.protocol ?? '')}<br>
-      Data de Autorização ${authorized.toLocaleDateString('pt-BR')} ${authorized.toLocaleTimeString('pt-BR')}<br>
-      ${cpf.length === 11 ? `CONSUMIDOR CPF: ${formatCpf(cpf)}${receipt.clientName ? `<br>${e(receipt.clientName.toUpperCase())}` : ''}` : 'CONSUMIDOR NÃO IDENTIFICADO'}
-    </div>
-  </div>
-  <div class="taxes">*Tributos Totais Incidentes (Lei Federal 12.741/2012): R$ ${money(taxTotal)}</div>
-  <div class="store-footer">
-    <div class="row"><span>Cupom: ${formatReceiptNumber(receipt.receiptNumber)}</span><span>${receipt.sellerName ? `Vendedor: ${e(receipt.sellerName.toUpperCase())}` : ''}</span></div>
-    <div>${RECEIPT_FOOTER}</div>
-  </div>
+  ${contingency ? `${danfeSection('Via Consumidor')}<div class="page-break"></div>${danfeSection('Via Estabelecimento')}` : danfeSection('Via Consumidor')}
 </body>
 </html>`;
 }

@@ -255,7 +255,9 @@ Deno.serve(async (request) => {
   // Grava o resultado da Focus na venda.
   async function saveResult(ref: string, body: Record<string, unknown>) {
     const status = String(body.status ?? '');
-    if (status === 'autorizado') {
+    // Sefaz fora do ar: a Focus emite em contingencia offline e efetiva depois (ate 24 h).
+    const contingency = body.contingencia_offline === true;
+    if (status === 'autorizado' || contingency) {
       await db.from('sales').update({
         fiscal_type: 'NFCE', fiscal_status: 'AUTORIZADA', nfce_ref: ref, nfce_environment: setting!.environment,
         nfce_number: body.numero != null ? String(body.numero) : null,
@@ -269,8 +271,10 @@ Deno.serve(async (request) => {
         nfce_message: body.mensagem_sefaz ?? null,
         nfce_authorized_at: new Date().toISOString(),
         nfce_tax_total: round2(taxTotal),
+        nfce_contingency: contingency,
+        nfce_contingency_done: contingency ? body.contingencia_offline_efetivada === true : false,
       }).eq('tenant_id', terminal!.tenant_id).eq('id', sale!.id);
-      return json({ status: 'AUTORIZADA', number: body.numero ?? null });
+      return json({ status: 'AUTORIZADA', number: body.numero ?? null, contingency });
     }
     const message = String(body.mensagem_sefaz ?? body.mensagem ?? 'NFC-e não autorizada pela Sefaz.');
     await db.from('sales').update({
@@ -286,7 +290,7 @@ Deno.serve(async (request) => {
       if (response.ok) {
         const body = await response.json();
         await logEvent('CONSULTAR', sale.nfce_ref, response.status, String(body.status ?? ''), body.mensagem_sefaz ?? null);
-        if (body.status === 'autorizado') {
+        if (body.status === 'autorizado' || body.contingencia_offline === true) {
           body.protocolo = body.protocolo_nota_fiscal?.numero_protocolo ?? body.protocolo;
           return await saveResult(sale.nfce_ref, body);
         }
