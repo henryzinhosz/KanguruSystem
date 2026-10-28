@@ -5,6 +5,7 @@ import type { PosCatalogItem, PosSerialUnit } from '../services/supabase/product
 import type { PosStoreProfile, TerminalContext } from '../services/supabase/terminal';
 import type { PosSeller } from '../services/supabase/sellers';
 import { offlineStore, type OutboxEntry } from './offlineDb';
+import { terminalAuth } from '../services/supabase/auth';
 
 // Modo offline do PDV (desenho aprovado 2026-10-28): copia local dos dados da loja, venda e
 // sangria/suprimento sem internet, envio automatico quando a conexao volta.
@@ -49,6 +50,7 @@ const PASSWORD_KEY = 'admin-password';
 const LAST_RECEIPT_KEY = 'last-offline-receipt';
 
 export async function refreshSnapshot(): Promise<OfflineSnapshot | null> {
+  if (!(await ensureTerminalSession())) return null;
   const { data, error } = await supabase.rpc('get_pos_offline_snapshot');
   if (error || !data) return null;
   const snapshot = data as OfflineSnapshot;
@@ -317,16 +319,45 @@ export async function oldestPendingAt(): Promise<Date | null> {
 // ---------- Envio quando a internet volta ----------
 let syncRunning = false;
 
+// Garante a sessao do terminal antes de falar com o servidor. Se o PDV foi aberto sem internet,
+// a sessao guardada nunca foi carregada (sem ela o servidor recusa tudo como anonimo).
+export async function ensureTerminalSession(): Promise<boolean> {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const session = data.session;
+    if (session && (session.expires_at ?? 0) * 1000 > Date.now() + 60 * 1000) return true;
+    if (session) {
+      const refreshed = await supabase.auth.refreshSession();
+      if (refreshed.data.session) return true;
+    }
+    return (await terminalAuth.restore()) !== null;
+  } catch {
+    return false;
+  }
+}
+
+// Recusa por falta de sessao (nao e erro da venda): tenta de novo no proximo ciclo.
+function isSessionError(message: string): boolean {
+  return /permission denied for function|active terminal session required|jwt|not authenticated/i.test(message);
+}
+
 export async function syncOutbox(retryErrors = false): Promise<{ sent: number; failed: number; conflicts: number }> {
   if (syncRunning) return { sent: 0, failed: 0, conflicts: 0 };
   syncRunning = true;
   setState({ syncing: true });
+  if (!(await ensureTerminalSession())) {
+    syncRunning = false;
+    setState({ syncing: false });
+    return { sent: 0, failed: 0, conflicts: 0 };
+  }
   let sent = 0;
   let failed = 0;
   let conflicts = 0;
   try {
     const store = await offlineStore();
-    const entries = await store.list(retryErrors ? ['PENDENTE', 'ERRO'] : ['PENDENTE']);
+    // Registros que falharam so por falta de sessao voltam a ser enviados sozinhos.
+    const entries = (await store.list(['PENDENTE', 'ERRO']))
+      .filter((entry) => retryErrors || entry.status === 'PENDENTE' || isSessionError(entry.lastError ?? ''));
     for (const entry of entries) {
       try {
         if (entry.kind === 'SALE') {
@@ -345,6 +376,10 @@ export async function syncOutbox(retryErrors = false): Promise<{ sent: number; f
           break;
         }
         const message = error instanceof Error ? error.message : String((error as { message?: string })?.message ?? error);
+        if (isSessionError(message)) {
+          await store.update(entry.id, { status: 'PENDENTE', attempts: entry.attempts + 1, lastError: null });
+          break;
+        }
         await store.update(entry.id, { status: 'ERRO', attempts: entry.attempts + 1, lastError: message.slice(0, 500) });
         failed += 1;
       }

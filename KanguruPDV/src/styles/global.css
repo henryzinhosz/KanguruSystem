@@ -1394,7 +1394,7 @@ small {
 /* Modo offline: faixa no topo */
 .offline-banner {
   position: fixed;
-  top: 6px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 60;
