@@ -39,11 +39,11 @@ não apaga mais.
    `KanguruERP/supabase/migrations/20261101_pos_offline.sql`.
 3. **Edge Functions:** atualizar a `nfce-emit` e criar a `nfce-contingency-sync`
    (`supabase/functions/nfce-contingency-sync/index.ts`; a URL deve terminar em `/nfce-contingency-sync`).
-4. Claude publica o **PDV 0.1.9** (`node scripts/release-pdv.mjs "notas"`) e o PC da loja atualiza pelo aviso.
+4. O PDV **0.2.0 ou mais novo** (já publicado) contém tudo: confira no menu › Configurações › Versão e atualize pelo aviso se preciso.
 5. **No PC da loja:**
    - desbloquear o PDV **uma vez com internet**, para ele guardar a senha;
    - **instalar o Comunicador Offline** pelo painel da Focus, ativar e importar o certificado;
-   - no PDV, em **Cupons e notas › Comunicador Offline**, informar a porta que o Comunicador mostrar.
+   - no PDV, em **Menu › Configurações › Comunicador Offline** (ou Cupons e notas › Comunicador Offline), informar a porta que o Comunicador mostrar.
 
 ## Testes
 
