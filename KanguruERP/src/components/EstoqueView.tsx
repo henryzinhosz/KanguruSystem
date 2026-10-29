@@ -194,6 +194,7 @@ export default function EstoqueView({
   
   // Form states: Transfer
   const [transferProductId, setTransferProductId] = useState('');
+  const [transferSearch, setTransferSearch] = useState('');
   const [transferFrom, setTransferFrom] = useState('');
   const [transferTo, setTransferTo] = useState('');
   const [transferQty, setTransferQty] = useState(1);
@@ -276,6 +277,44 @@ export default function EstoqueView({
       .catch(() => { if (active) setNextItemCode(''); });
     return () => { active = false; };
   }, [showAddProductModal]);
+
+  // Transferencia: busca por codigo ou nome (como no PDV). Enter com codigo exato, resultado unico
+  // ou serial bipado seleciona o produto; o serial ja escolhe a loja de origem e entra na lista.
+  const transferResults = (() => {
+    const query = transferSearch.trim().toLowerCase();
+    if (!query) return [];
+    return products.filter(product => product.name.toLowerCase().includes(query) || product.sku.toLowerCase().includes(query));
+  })();
+  const selectTransferProduct = (productId: string) => {
+    setTransferProductId(productId);
+    setTransferSearch('');
+    setTransferSerialInput('');
+    setTransferError('');
+  };
+  const handleTransferSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const code = transferSearch.trim().toUpperCase();
+    if (!code) return;
+    const exact = products.filter(product => product.sku.toUpperCase() === code);
+    const match = exact.length === 1 ? exact[0] : (transferResults.length === 1 ? transferResults[0] : null);
+    if (match) {
+      selectTransferProduct(match.id);
+      return;
+    }
+    for (const item of inventory) {
+      const holder = Object.values(item.quantities).find(unit => (unit.serials || []).some(serial => serial.toUpperCase() === code));
+      if (holder) {
+        selectTransferProduct(item.productId);
+        setTransferFrom(holder.unitId);
+        if (transferTo === holder.unitId) setTransferTo(stores.find(store => store.unitId !== holder.unitId)?.unitId || '');
+        setTransferSerialInput((holder.serials || []).find(serial => serial.toUpperCase() === code) || code);
+        setTransferQty(1);
+        return;
+      }
+    }
+    setTransferError('Nenhum produto ou serial encontrado com esse código.');
+  };
 
   // Leitor de codigo de barras na Entrada de Estoque: codigo exato + Enter seleciona o produto.
   const handleStockEntrySearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -1265,24 +1304,65 @@ export default function EstoqueView({
             </div>
 
             <form onSubmit={handleTransferSubmit} className="space-y-4 text-xs">
-              {/* Product Select */}
+              {/* Product Search (como no PDV) */}
               <div className="space-y-1.5">
-                <label className="font-medium text-slate-700">Selecione o Produto</label>
-                <select
-                  value={transferProductId}
-                  onChange={(e) => {
-                    setTransferProductId(e.target.value);
-                    setTransferError('');
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-amber-500 text-slate-800"
-                >
-                  <option value="">-- Selecione o Produto --</option>
-                  {products.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} (Código: {p.sku})
-                    </option>
-                  ))}
-                </select>
+                <label className="font-medium text-slate-700">Produto <span className="font-normal text-slate-400">(código, nome ou serial; pode bipar)</span></label>
+                {transferProductId ? (
+                  <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-200 rounded-lg p-2.5">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">{products.find(p => p.id === transferProductId)?.name}</p>
+                      <p className="text-[11px] text-slate-500 font-mono">
+                        Código: {products.find(p => p.id === transferProductId)?.sku} · Na origem: {getUnitStock(transferProductId, transferFrom)} un
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setTransferProductId(''); setTransferSerialInput(''); }}
+                      className="text-[10px] font-bold uppercase px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600"
+                    >
+                      Trocar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={transferSearch}
+                        onChange={(e) => { setTransferSearch(e.target.value); setTransferError(''); }}
+                        onKeyDown={handleTransferSearchKeyDown}
+                        placeholder="Digite ou bipe o código, o nome ou o serial"
+                        className="w-full bg-slate-50 text-slate-800 rounded-lg pl-9 pr-4 py-2.5 border border-slate-200 outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
+                      />
+                    </div>
+                    {transferSearch.trim() && (
+                      <div className="max-h-64 overflow-y-auto space-y-1.5">
+                        {transferResults.slice(0, 10).map(product => (
+                          <button
+                            key={product.id}
+                            type="button"
+                            onClick={() => selectTransferProduct(product.id)}
+                            className="w-full text-left p-2.5 rounded-lg border bg-slate-50 border-slate-200 hover:bg-slate-100 transition flex items-start justify-between gap-3"
+                          >
+                            <span>
+                              <span className="block text-sm font-bold text-slate-900">{product.name}</span>
+                              <span className="block text-[11px] text-slate-500 font-mono">Código: {product.sku}</span>
+                            </span>
+                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-500 shrink-0">
+                              {getUnitStock(product.id, transferFrom)} un na origem
+                            </span>
+                          </button>
+                        ))}
+                        {transferResults.length === 0 && (
+                          <p className="p-3 text-center text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                            Nenhum produto encontrado. Se for um serial, aperte Enter.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Source Warehouse */}
