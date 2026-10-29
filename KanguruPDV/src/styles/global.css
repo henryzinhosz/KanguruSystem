@@ -1813,10 +1813,13 @@ small {
   min-height: 42px;
 }
 
-/* Venda: "Cupons e notas" ocupa as duas ultimas colunas da linha de baixo */
-.menu-grid-sale > .menu-tile:last-child {
-  grid-column: span 2;
-}
+.trade-in-panel { max-width: 760px; }
+.trade-in-section { margin: 1.4rem 0 0.2rem; font-size: 1rem; color: #24452c; border-bottom: 1px solid #d7e3d4; padding-bottom: 0.3rem; }
+.trade-in-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1rem; }
+.trade-in-customer { display: flex; align-items: center; gap: 0.75rem; padding: 0.7rem 0.9rem; border: 1px solid #c9dbc5; border-radius: 6px; background: #f4f9f2; }
+.trade-in-customer span { display: grid; flex: 1; }
+.trade-in-customer small { color: #5c7360; }
+@media (max-width: 640px) { .trade-in-grid { grid-template-columns: 1fr; } }
 
 /* Cancelamento de reserva com sinal: forma da devolucao */
 .cancel-refund-options {

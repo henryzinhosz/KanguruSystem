@@ -42,6 +42,7 @@ import {
 } from '../services/supabase/sales';
 import { ReceiptsPanel } from './ReceiptsPanel';
 import { ReturnModal, type ReturnDone } from './ReturnModal';
+import { TradeInPanel, type TradeInDone } from './TradeInPanel';
 import { getCustomerCreditBalance } from '../services/supabase/returns';
 import { searchPosCustomers } from '../services/supabase/customers';
 import { setUpdateAllowed } from './UpdateNotice';
@@ -124,6 +125,7 @@ type Screen =
   | 'new-reservation'
   | 'receipts'
   | 'warranty'
+  | 'trade-in'
   | 'cash-movement'
   | 'cash-close';
 type PaymentMethod = PaymentMethodKey;
@@ -375,6 +377,9 @@ export function App() {
   const [adminApprovalError, setAdminApprovalError] = useState<string | null>(null);
   // Codigo do vendedor (obrigatorio): venda, nova reserva e conversao de reserva.
   const [saleSellerCode, setSaleSellerCode] = useState('');
+  const [tradeSellerCode, setTradeSellerCode] = useState('');
+  const [tradeSeller, setTradeSeller] = useState<PosSeller | null>(null);
+  const [tradeInKey, setTradeInKey] = useState(0);
   const [saleSeller, setSaleSeller] = useState<PosSeller | null>(null);
   const [reservationSellerCode, setReservationSellerCode] = useState('');
   const [reservationSeller, setReservationSeller] = useState<PosSeller | null>(null);
@@ -1105,6 +1110,12 @@ export function App() {
         setMessage('Busque a venda (data, número ou CPF) e use "Trocar / Devolver".');
         break;
       case 'warranty': setScreen('warranty'); break;
+      case 'trade-in':
+        setTradeInKey((key) => key + 1);
+        setTradeSellerCode('');
+        setTradeSeller(null);
+        setScreen('trade-in');
+        break;
       case 'receipts':
         if (offlineNow) void reprintLastOfflineReceipt();
         else setScreen('receipts');
@@ -1228,6 +1239,22 @@ export function App() {
     } catch (error) {
       setMessage(`Operação registrada, mas o relatório não pôde ser impresso: ${errorMessage(error)}`);
     }
+  }
+
+  // Troca Gamer concluida: dinheiro abre a gaveta; "usar o vale agora" vai para a venda com o cliente.
+  async function finishTradeIn(result: TradeInDone) {
+    const { record } = result;
+    const text = `Troca Gamer nº ${record.tradeNumber} registrada: ${currency.format(record.amount)}.`;
+    if (!result.useVoucherNow) {
+      setMessage(text);
+      setScreen('menu');
+      return;
+    }
+    const found = await searchPosCustomers(record.customerCpf).catch(() => []);
+    const customer = found.find((item) => item.cpf === record.customerCpf);
+    if (customer) setSaleCustomer(customer);
+    setScreen('sale');
+    setMessage(`${text} Escolha os produtos e clique em "Usar vale-troca" (${currency.format(record.amount)}).`);
   }
 
   // Troca: volta para a venda com o cliente selecionado; o vale ja esta no CPF dele.
@@ -1929,6 +1956,44 @@ export function App() {
         </form>
         <Notice message={message} />
       </AuthFrame>
+    );
+  }
+
+  if (screen === 'trade-in') {
+    return (
+      <main className="sale-shell">
+        <header className="sale-header">
+          <div>
+            <Brand compact />
+            <div>
+              <strong>Troca Gamer</strong>
+              <span>{terminal?.tradeName ?? terminal?.unitId}</span>
+            </div>
+          </div>
+          <div className="header-actions">
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('menu')}>
+              Voltar ao menu
+            </button>
+          </div>
+        </header>
+        <TradeInPanel
+          key={tradeInKey}
+          seller={tradeSeller}
+          sellerSlot={(
+            <SellerCodeField
+              label="Código do vendedor"
+              value={tradeSellerCode}
+              seller={tradeSeller}
+              disabled={false}
+              onValue={setTradeSellerCode}
+              onSeller={setTradeSeller}
+            />
+          )}
+          loadStore={loadStoreProfile}
+          onPaidCash={() => void openCashDrawer()}
+          onDone={(result) => void finishTradeIn(result)}
+        />
+      </main>
     );
   }
 

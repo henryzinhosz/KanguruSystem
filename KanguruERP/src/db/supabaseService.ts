@@ -1538,7 +1538,17 @@ export const supabaseService = {
       unitId: t.unit_id,
       timestamp: t.timestamp,
       status: t.status,
-      createdProductId: t.created_product_id || undefined
+      createdProductId: t.created_product_id || undefined,
+      tradeNumber: t.trade_number == null ? undefined : Number(t.trade_number),
+      sellerPhone: t.seller_phone || undefined,
+      sellerAddress: t.seller_address || undefined,
+      sellerDocument: t.seller_document || undefined,
+      serialNumber: t.serial_number || undefined,
+      imei: t.imei || undefined,
+      accessories: t.accessories || undefined,
+      paymentMethod: t.payment_method || undefined,
+      staffCode: t.staff_code || undefined,
+      staffName: t.staff_name || undefined
     }));
   },
 
@@ -1631,6 +1641,7 @@ export const supabaseService = {
       phone: c.phone || undefined,
       contactEmail: c.contact_email || undefined,
       reservationVoucherTerms: c.reservation_voucher_terms || undefined,
+      tradeInTerms: c.trade_in_terms || undefined,
       instagram: c.instagram || undefined,
       exchangeDays: c.exchange_days == null ? undefined : Number(c.exchange_days)
     }));
@@ -1650,6 +1661,7 @@ export const supabaseService = {
       phone: c.phone || null,
       contact_email: c.contactEmail || null,
       reservation_voucher_terms: c.reservationVoucherTerms?.trim() || null,
+      trade_in_terms: c.tradeInTerms?.trim() || null,
       instagram: c.instagram?.trim() || null,
       ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {})
     };

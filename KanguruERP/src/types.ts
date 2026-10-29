@@ -358,6 +358,17 @@ export interface TradeIn {
   timestamp: string;
   status: 'AVALIADO' | 'APROVADO' | 'CANCELADO';
   createdProductId?: string; // product ID entered into stock after confirmation
+  // Troca Gamer registrada no PDV (migration 20261103)
+  tradeNumber?: number;
+  sellerPhone?: string;
+  sellerAddress?: string;
+  sellerDocument?: string;
+  serialNumber?: string;
+  imei?: string;
+  accessories?: string;
+  paymentMethod?: 'VALE' | 'DINHEIRO' | 'PIX';
+  staffCode?: string;
+  staffName?: string;
 }
 
 // Dados para estocar o videogame da Troca Gamer (produto serializado + unidade com serial real).
@@ -411,6 +422,8 @@ export interface StoreConfig {
   contactEmail?: string;
   // Texto das regras impresso no voucher de reserva do PDV (vazio = texto padrao).
   reservationVoucherTerms?: string;
+  // Texto das declaracoes do termo da Troca Gamer (vazio = texto padrao).
+  tradeInTerms?: string;
   instagram?: string; // perfil da loja (QR code do cupom)
   exchangeDays?: number; // prazo de troca em dias (2.9; padrao 7)
   paymentFees: {

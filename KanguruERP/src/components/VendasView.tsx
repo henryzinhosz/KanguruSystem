@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { 
   User, 
   UserRole, 
@@ -13,12 +13,7 @@ import {
   TradeInApproval,
   StoreConfig
 } from '../types';
-import { 
-  Plus, 
-  CheckCircle, 
-  Coins,
-  ArrowRight
-} from 'lucide-react';
+import { Coins } from 'lucide-react';
 import ValueInput from './ValueInput';
 import { sanitizeItemCode } from '../db/itemCode';
 import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fiscal';
@@ -33,7 +28,6 @@ interface VendasViewProps {
   inventory: StockInventory[];
   tradeIns: TradeIn[];
   storeConfigs: StoreConfig[];
-  registerTradeIn: (trade: Omit<TradeIn, 'id' | 'operatorId' | 'operatorName' | 'timestamp' | 'status'>) => TradeIn;
   approveTradeIn: (tradeId: string, details: TradeInApproval) => Promise<void>;
   cancelTradeIn: (tradeId: string) => void;
 }
@@ -44,7 +38,6 @@ export default function VendasView({
   inventory,
   tradeIns,
   storeConfigs,
-  registerTradeIn,
   approveTradeIn,
   cancelTradeIn
 }: VendasViewProps) {
@@ -54,19 +47,6 @@ export default function VendasView({
 
   // Filter state for Store (Consolidated or specific store)
   const [selectedStoreFilter, setSelectedStoreFilter] = useState<string>('consolidado');
-
-  // New trade registration target physical store state
-  const [tradeUnitId, setTradeUnitId] = useState<string>('');
-
-  // Trade-In form states
-  const [tradeSellerName, setTradeSellerName] = useState('');
-  const [tradeSellerCpf, setTradeSellerCpf] = useState('');
-  const [tradeDesc, setTradeDesc] = useState('');
-  const tradeCategory = 'Videogames';
-  const [tradeCondition, setTradeCondition] = useState('Excelente');
-  const [tradeValuation, setTradeValuation] = useState<number>(0);
-  const [tradeSuccess, setTradeSuccess] = useState(false);
-  const [tradeError, setTradeError] = useState('');
 
   // Trade-In approval modal states
   const [tradeToApprove, setTradeToApprove] = useState<TradeIn | null>(null);
@@ -87,39 +67,6 @@ export default function VendasView({
   const [approveError, setApproveError] = useState('');
   const [approveSaving, setApproveSaving] = useState(false);
 
-  useEffect(() => {
-    if (!stores.length) return;
-    setTradeUnitId(previous => stores.some(store => store.unitId === previous) ? previous : defaultStoreId);
-  }, [storeConfigs]);
-
-  // Register Trade-In buyback appraisal
-  const handleTradeInSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setTradeSuccess(false);
-    setTradeError('');
-
-    if (!tradeUnitId || !tradeSellerName || !tradeSellerCpf || !tradeDesc || tradeValuation <= 0) {
-      setTradeError('Preencha todos os campos obrigatórios da avaliação de usado.');
-      return;
-    }
-
-    registerTradeIn({
-      sellerName: tradeSellerName,
-      sellerCpf: tradeSellerCpf,
-      itemDescription: tradeDesc,
-      category: tradeCategory,
-      condition: tradeCondition,
-      valuationAmount: tradeValuation,
-      unitId: tradeUnitId
-    });
-
-    setTradeSuccess(true);
-    setTradeSellerName('');
-    setTradeSellerCpf('');
-    setTradeDesc('');
-    setTradeValuation(0);
-  };
-
   // Open Approval details
   const handleOpenApproval = (trade: TradeIn) => {
     setTradeToApprove(trade);
@@ -127,8 +74,8 @@ export default function VendasView({
     setApproveName(`${trade.itemDescription} (Usado)`);
     setApproveSellPrice(Math.round(trade.valuationAmount * 150) / 100); // sugestao: compra + 50%
     setApproveWarranty(3);
-    setApproveSerial('');
-    setApproveImei('');
+    setApproveSerial(trade.serialNumber || '');
+    setApproveImei(trade.imei || '');
     setApproveNcm(TRADE_FISCAL_DEFAULTS.ncm);
     setApproveOrigin(TRADE_FISCAL_DEFAULTS.origin);
     setApproveCsosn(TRADE_FISCAL_DEFAULTS.csosn);
@@ -207,7 +154,7 @@ export default function VendasView({
             <Coins className="w-5 h-5 text-blue-600 mr-2" />
             Troca Gamer (Compra de Videogames Usados)
           </h2>
-          <p className="text-xs text-slate-400">Avaliação de videogames usados trazidos por clientes e entrada no estoque com o número de série.</p>
+          <p className="text-xs text-slate-400">Os vendedores registram a troca no PDV (com o termo impresso). Aqui você confere os dados e estoca o videogame.</p>
         </div>
         {isAdmin && (
           <div className="flex items-center space-x-2 shrink-0">
@@ -226,130 +173,12 @@ export default function VendasView({
       </div>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 font-sans">
-        {/* Trade-in valuation Form */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-1 space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center">
-              <Plus className="w-4 h-4 text-blue-600 mr-1.5" />
-              Nova Avaliação
-            </h3>
-            <p className="text-xs text-slate-400">Insira a descrição do item e os dados do vendedor para formalização do termo.</p>
-          </div>
-
-          <form onSubmit={handleTradeInSubmit} className="space-y-4 text-xs">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Nome do Vendedor</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Arthur Pendragon"
-                  value={tradeSellerName}
-                  onChange={(e) => {
-                    setTradeSellerName(e.target.value);
-                    setTradeSuccess(false);
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold text-slate-700"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">CPF do Vendedor</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: 000.000.000-00"
-                  value={tradeSellerCpf}
-                  onChange={(e) => {
-                    setTradeSellerCpf(e.target.value);
-                    setTradeSuccess(false);
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono font-semibold text-slate-700"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Loja Avaliadora</label>
-                <select
-                  value={tradeUnitId}
-                  onChange={(e) => setTradeUnitId(e.target.value)}
-                  required
-                  disabled={stores.length === 0}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold text-slate-700"
-                >
-                  {stores.length === 0 && <option value="">Nenhuma loja cadastrada</option>}
-                  {stores.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.unitId}</option>)}
-                </select>
-              </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-slate-700">Descrição do Videogame</label>
-              <input
-                type="text"
-                required
-                placeholder="Ex: PlayStation 5 Slim 1TB c/ 1 Controle"
-                value={tradeDesc}
-                onChange={(e) => {
-                  setTradeDesc(e.target.value);
-                  setTradeSuccess(false);
-                }}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold text-slate-700"
-              />
-            </div>
-
-            <div>
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Condição Física Geral</label>
-                <select
-                  value={tradeCondition}
-                  onChange={(e) => setTradeCondition(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold text-slate-700"
-                >
-                  <option value="Lacrado">Novo / Lacrado (Preço Cheio)</option>
-                  <option value="Excelente">Excelente (Sem marcas, c/ caixa)</option>
-                  <option value="Bom">Bom (Sinais leves de uso)</option>
-                  <option value="Avariado">Avariado / Desgastado</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-slate-700">Valor Proposto da Compra (R$)</label>
-              <ValueInput
-                required
-                value={tradeValuation || null}
-                onValueChange={(value) => setTradeValuation(value ?? 0)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
-              />
-            </div>
-
-            {tradeSuccess && (
-              <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-[10px] text-center font-medium">
-                Avaliação registrada no banco! Itens prontos para estocagem.
-              </div>
-            )}
-
-            {tradeError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-[10px] text-center font-medium">
-                {tradeError}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition font-bold"
-            >
-              Registrar Avaliação
-            </button>
-          </form>
-        </div>
-
+      <div className="font-sans">
         {/* Evaluations active and queue */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <div>
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Histórico de Compra de Usados</h3>
-            <p className="text-xs text-slate-400">Veja avaliações pendentes de cadastro ou as já aprovadas e cadastradas em estoque.</p>
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Trocas registradas</h3>
+            <p className="text-xs text-slate-400">"Aguardando" = já paga ao cliente no PDV, falta conferir e estocar.</p>
           </div>
 
           <div className="overflow-x-auto">
@@ -367,9 +196,16 @@ export default function VendasView({
                 {filteredTradeIns.map(trade => (
                   <tr key={trade.id} className="hover:bg-slate-50/50">
                     <td className="px-3 py-2.5">
-                      <span className="font-bold text-slate-900 block">{trade.itemDescription}</span>
+                      <span className="font-bold text-slate-900 block">
+                        {trade.tradeNumber ? `Nº ${trade.tradeNumber} · ` : ''}{trade.itemDescription}
+                      </span>
+                      {trade.serialNumber && (
+                        <span className="text-[10px] text-slate-500 font-mono block">S/N: {trade.serialNumber}{trade.imei ? ` · IMEI: ${trade.imei}` : ''}</span>
+                      )}
+                      {trade.accessories && <span className="text-[10px] text-slate-500 block">Itens: {trade.accessories}</span>}
                       <span className="text-[10px] text-slate-400 font-medium block">
-                        Estado: {trade.condition}
+                        {new Date(trade.timestamp).toLocaleString('pt-BR')} · Estado: {trade.condition}
+                        {trade.staffName && ` · Vendedor: ${trade.staffCode ? `${trade.staffCode} - ` : ''}${trade.staffName}`}
                         {currentUser.unitId === 'central' && ` | Loja: ${
                           trade.unitId === 'loja_1' ? 'CG' : trade.unitId === 'loja_2' ? 'Barra' : trade.unitId === 'loja_3' ? 'Jacarepaguá' : 'Geral'
                         }`}
@@ -378,9 +214,16 @@ export default function VendasView({
                     <td className="px-3 py-2.5 font-medium text-slate-700">
                       {trade.sellerName}
                       <span className="block font-mono text-[10px] text-slate-400">CPF: {trade.sellerCpf}</span>
+                      {trade.sellerPhone && <span className="block text-[10px] text-slate-400">Tel.: {trade.sellerPhone}</span>}
+                      {trade.sellerDocument && <span className="block text-[10px] text-slate-400">RG/CNH: {trade.sellerDocument}</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right font-bold text-slate-900 font-mono">
-                      R$ {trade.valuationAmount.toLocaleString('pt-BR')}
+                      R$ {trade.valuationAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      {trade.paymentMethod && (
+                        <span className="block text-[10px] font-semibold text-slate-400">
+                          {trade.paymentMethod === 'VALE' ? 'Vale-troca' : trade.paymentMethod === 'DINHEIRO' ? 'Dinheiro' : 'Pix'}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-center">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -401,11 +244,14 @@ export default function VendasView({
                             onClick={() => handleOpenApproval(trade)}
                             className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[10px] transition"
                           >
-                            Estocar Usado
+                            Conferir e Estocar
                           </button>
                           <button
                             id={`btn-cancel-trade-${trade.id}`}
-                            onClick={() => cancelTradeIn(trade.id)}
+                            onClick={() => {
+                              const paid = trade.paymentMethod ? ' O valor já foi pago ao cliente no PDV; dispensar só tira a troca da lista e NÃO devolve o dinheiro nem cancela o vale.' : '';
+                              if (window.confirm(`Dispensar esta troca?${paid}`)) cancelTradeIn(trade.id);
+                            }}
                             className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[10px] transition border border-slate-200"
                           >
                             Dispensar

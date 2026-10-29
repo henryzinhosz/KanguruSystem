@@ -16,6 +16,9 @@ interface ConfiguracoesViewProps {
 }
 
 // Mesmo texto padrao do PDV (KanguruPDV/src/app/reservationVoucher.ts).
+// Mesmo texto padrao do PDV (KanguruPDV/src/app/tradeInTermPrint.ts).
+const DEFAULT_TRADE_IN_TERMS = 'Declaro, para todos os fins de direito, que sou o legítimo proprietário do equipamento descrito acima, que ele tem origem lícita e não é produto de furto, roubo, receptação ou de qualquer outro crime, assumindo integral responsabilidade civil e criminal por esta declaração.\n\nDeclaro que o equipamento está livre de dívidas, alienação, penhora ou bloqueio, e transfiro à loja a sua propriedade pelo valor acima, dando plena e total quitação, sem nada mais a reclamar.\n\nEstou ciente de que a loja pode consultar a procedência do equipamento e comunicar às autoridades competentes qualquer suspeita de irregularidade.\n\nAutorizo o uso dos meus dados pessoais exclusivamente para o registro desta operação, nos termos da Lei Geral de Proteção de Dados (Lei nº 13.709/2018).';
+
 const DEFAULT_VOUCHER_TERMS =
   'Reserva de compra garantida. Para retirada do produto, apresente este voucher juntamente com a nota emitida. ' +
   'Não será aceita desistência nem devolução de valores e itens negociados. ' +
@@ -30,6 +33,7 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   phone: '',
   contactEmail: '',
   reservationVoucherTerms: '',
+  tradeInTerms: '',
   instagram: '',
   exchangeDays: 7,
   fixedCost: 0,
@@ -170,6 +174,7 @@ export default function ConfiguracoesView({
       phone: store.phone || '',
       contactEmail: store.contactEmail || '',
       reservationVoucherTerms: store.reservationVoucherTerms || '',
+      tradeInTerms: store.tradeInTerms || '',
       instagram: store.instagram || '',
       exchangeDays: store.exchangeDays ?? 7,
       fixedCost: store.fixedCost,
@@ -505,6 +510,16 @@ function StoreFields({ form, onChange }: {
           value={form.reservationVoucherTerms || ''}
           placeholder={DEFAULT_VOUCHER_TERMS}
           onChange={event => onChange('reservationVoucherTerms', event.target.value)}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Declarações do termo da Troca Gamer desta loja <span className="font-normal text-slate-400">(impressas no termo de compra de videogame usado; uma linha em branco separa os parágrafos; em branco usa o texto padrão)</span>
+        <textarea
+          rows={6}
+          value={form.tradeInTerms || ''}
+          placeholder={DEFAULT_TRADE_IN_TERMS}
+          onChange={event => onChange('tradeInTerms', event.target.value)}
           className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
         />
       </label>

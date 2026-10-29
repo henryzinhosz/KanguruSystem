@@ -236,7 +236,6 @@ export default function App() {
               inventory={inventory}
               tradeIns={tradeIns}
               storeConfigs={storeConfigs}
-              registerTradeIn={registerTradeIn}
               approveTradeIn={approveTradeIn}
               cancelTradeIn={cancelTradeIn}
             />

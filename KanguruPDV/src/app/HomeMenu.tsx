@@ -4,6 +4,7 @@ import {
   BanknoteArrowUp,
   ChartLine,
   ClipboardList,
+  Gamepad2,
   Inbox,
   Lock,
   Receipt,
@@ -19,7 +20,7 @@ import {
 // atalhos de teclado (F1, 1-0) e sub-menus em janela numerada.
 
 export type MenuAction =
-  | 'sale' | 'reservations' | 'returns' | 'warranty' | 'receipts' | 'new-reservation'
+  | 'sale' | 'trade-in' | 'reservations' | 'returns' | 'warranty' | 'receipts' | 'new-reservation'
   | 'sangria' | 'suprimento' | 'partial' | 'drawer'
   | 'open-cash' | 'close-cash' | 'reprint-opening' | 'lock'
   | 'product-lookup' | 'today-sales'
@@ -78,6 +79,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
   };
 
   const tiles: { key: string; action: MenuAction; disabled: boolean }[] = [
+    { key: '1', action: 'trade-in', disabled: offline || !cashOpen },
     { key: '2', action: 'reservations', disabled: offline || !cashOpen },
     { key: '3', action: 'returns', disabled: offline || !cashOpen },
     { key: '4', action: 'warranty', disabled: offline },
@@ -139,6 +141,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
           {tile('reservations', 'green', <ClipboardList size={28} strokeWidth={1.8} />, 'Reservas', '2', offline || !cashOpen)}
           {tile('returns', 'green', <RotateCcw size={28} strokeWidth={1.8} />, 'Trocas e devoluções', '3', offline || !cashOpen)}
           {tile('warranty', 'green', <ShieldCheck size={28} strokeWidth={1.8} />, 'Garantia', '4', offline)}
+          {tile('trade-in', 'green', <Gamepad2 size={28} strokeWidth={1.8} />, 'Troca Gamer', '1', offline || !cashOpen)}
           {tile('receipts', 'green', <Receipt size={28} strokeWidth={1.8} />, 'Cupons e notas', '5')}
         </div>
       </section>
