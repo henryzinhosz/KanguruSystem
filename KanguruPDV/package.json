@@ -11,12 +11,17 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-sql": "^2.6.0",
+    "@tauri-apps/plugin-updater": "^2.14.0",
     "lucide-react": "^0.544.0",
+    "qrcode": "^1.5.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.8.3",
+    "@types/qrcode": "^1.5.5",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.2",

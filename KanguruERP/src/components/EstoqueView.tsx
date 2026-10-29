@@ -20,6 +20,7 @@ import {
 import { formatMoney } from '../db/finance';
 import { supabaseService } from '../db/supabaseService';
 import { sanitizeItemCode } from '../db/itemCode';
+import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fiscal';
 import ValueInput from './ValueInput';
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
@@ -55,7 +56,8 @@ import {
   Info,
   Calendar,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Pencil
 } from 'lucide-react';
 
 interface EstoqueViewProps {
@@ -72,6 +74,7 @@ interface EstoqueViewProps {
     initialSerials?: string[]
   ) => Promise<Product>;
   editProduct: (product: Product) => void;
+  saveProduct: (product: Product) => Promise<void>;
   registerMovement: (
     productId: string,
     fromUnitId: string,
@@ -86,6 +89,15 @@ interface EstoqueViewProps {
     productId: string,
     unitId: string,
     units: SerializedStockEntryUnit[],
+    reason: string
+  ) => Promise<void>;
+  registerTransfer: (
+    productId: string,
+    fromUnitId: string,
+    toUnitId: string,
+    qty: number,
+    serials: string[],
+    cardCondition: CardCondition | undefined,
     reason: string
   ) => Promise<void>;
   registerStockEntry: (
@@ -109,8 +121,10 @@ export default function EstoqueView({
   storeConfigs,
   addProduct,
   editProduct,
+  saveProduct,
   registerMovement,
   registerSerializedStockEntry,
+  registerTransfer,
   registerStockEntry,
   productStoreCosts
 }: EstoqueViewProps) {
@@ -125,7 +139,15 @@ export default function EstoqueView({
   const [categoryFilter, setCategoryFilter] = useState('Todas');
   
   // UI Tabs inside Estoque
-  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'garantias'>('catalogo');
+  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'avariados'>('catalogo');
+  // Avariados (2.9): produtos devolvidos com defeito, fora da venda.
+  const [damaged, setDamaged] = useState<{ unitId: string; productId: string; quantity: number; serials: string[] }[] | null>(null);
+  const [damagedError, setDamagedError] = useState('');
+  useEffect(() => {
+    if (activeSubTab !== 'avariados') return;
+    setDamagedError('');
+    supabaseService.getDamagedStock().then(setDamaged).catch(() => { setDamaged([]); setDamagedError('Não foi possível carregar os avariados.'); });
+  }, [activeSubTab]);
 
   // Form states: New Product
   const [showAddProductModal, setShowAddProductModal] = useState(false);
@@ -142,6 +164,15 @@ export default function EstoqueView({
   const [newProdQty, setNewProdQty] = useState(0);
   const [newProdMinStock, setNewProdMinStock] = useState('');
   const [newProdMaxDiscount, setNewProdMaxDiscount] = useState<number | null>(null);
+  // Edicao de produto existente (mesmo formulario do cadastro) e dados fiscais (2.8a).
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [newProdCest, setNewProdCest] = useState('');
+  const [newProdOrigin, setNewProdOrigin] = useState('');
+  const [newProdCst, setNewProdCst] = useState('');
+  const [newProdCsosn, setNewProdCsosn] = useState('');
+  const [newProdIcmsRate, setNewProdIcmsRate] = useState<number | null>(null);
+  const [newProdIcmsReduction, setNewProdIcmsReduction] = useState<number | null>(null);
+  const [newProdTaxBurden, setNewProdTaxBurden] = useState<number | null>(null);
   const [maxDiscountDrafts, setMaxDiscountDrafts] = useState<Record<string, number | null>>({});
   const [newProdError, setNewProdError] = useState('');
   const [newProdSaving, setNewProdSaving] = useState(false);
@@ -163,6 +194,7 @@ export default function EstoqueView({
   
   // Form states: Transfer
   const [transferProductId, setTransferProductId] = useState('');
+  const [transferSearch, setTransferSearch] = useState('');
   const [transferFrom, setTransferFrom] = useState('');
   const [transferTo, setTransferTo] = useState('');
   const [transferQty, setTransferQty] = useState(1);
@@ -171,10 +203,9 @@ export default function EstoqueView({
   const [transferReason, setTransferReason] = useState('');
   const [transferError, setTransferError] = useState('');
   const [transferSuccess, setTransferSuccess] = useState(false);
+  const [transferSaving, setTransferSaving] = useState(false);
 
-  // Warranty Query States
-  const [warrantyQuerySerial, setWarrantyQuerySerial] = useState('');
-  const [warrantyQueryResult, setWarrantyQueryResult] = useState<any | null>(null);
+
 
   const selectedStockEntryProduct = products.find(product => product.id === stockEntryProductId) || null;
   const stockEntryResults = products.filter(product => {
@@ -247,6 +278,44 @@ export default function EstoqueView({
     return () => { active = false; };
   }, [showAddProductModal]);
 
+  // Transferencia: busca por codigo ou nome (como no PDV). Enter com codigo exato, resultado unico
+  // ou serial bipado seleciona o produto; o serial ja escolhe a loja de origem e entra na lista.
+  const transferResults = (() => {
+    const query = transferSearch.trim().toLowerCase();
+    if (!query) return [];
+    return products.filter(product => product.name.toLowerCase().includes(query) || product.sku.toLowerCase().includes(query));
+  })();
+  const selectTransferProduct = (productId: string) => {
+    setTransferProductId(productId);
+    setTransferSearch('');
+    setTransferSerialInput('');
+    setTransferError('');
+  };
+  const handleTransferSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const code = transferSearch.trim().toUpperCase();
+    if (!code) return;
+    const exact = products.filter(product => product.sku.toUpperCase() === code);
+    const match = exact.length === 1 ? exact[0] : (transferResults.length === 1 ? transferResults[0] : null);
+    if (match) {
+      selectTransferProduct(match.id);
+      return;
+    }
+    for (const item of inventory) {
+      const holder = Object.values(item.quantities).find(unit => (unit.serials || []).some(serial => serial.toUpperCase() === code));
+      if (holder) {
+        selectTransferProduct(item.productId);
+        setTransferFrom(holder.unitId);
+        if (transferTo === holder.unitId) setTransferTo(stores.find(store => store.unitId !== holder.unitId)?.unitId || '');
+        setTransferSerialInput((holder.serials || []).find(serial => serial.toUpperCase() === code) || code);
+        setTransferQty(1);
+        return;
+      }
+    }
+    setTransferError('Nenhum produto ou serial encontrado com esse código.');
+  };
+
   // Leitor de codigo de barras na Entrada de Estoque: codigo exato + Enter seleciona o produto.
   const handleStockEntrySearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter') return;
@@ -275,6 +344,59 @@ export default function EstoqueView({
     focusSerialInput(index + 1);
   };
 
+  const resetProductForm = () => {
+    setEditingProductId(null);
+    setNewProdName('');
+    setNewProdSku('');
+    setNewProdCategory('Videogames');
+    setNewProdBrand('');
+    setNewProdCost(0);
+    setNewProdSell(0);
+    setNewProdNcm('');
+    setNewProdWarranty(12);
+    setNewProdSerialized(false);
+    setNewProdStore(defaultStoreId);
+    setNewProdQty(0);
+    setNewProdMinStock('');
+    setNewProdMaxDiscount(null);
+    setNewProdCest('');
+    setNewProdOrigin('');
+    setNewProdCst('');
+    setNewProdCsosn('');
+    setNewProdIcmsRate(null);
+    setNewProdIcmsReduction(null);
+    setNewProdTaxBurden(null);
+  };
+
+  const openNewProduct = () => {
+    resetProductForm();
+    setShowAddProductModal(true);
+  };
+
+  const openEditProduct = (product: Product) => {
+    resetProductForm();
+    setEditingProductId(product.id);
+    setNewProdName(product.name);
+    setNewProdSku(product.sku);
+    setNewProdCategory(product.category);
+    setNewProdBrand(product.brand);
+    setNewProdCost(product.costPrice);
+    setNewProdSell(product.sellPrice);
+    setNewProdNcm(product.ncm);
+    setNewProdWarranty(product.warrantyMonths);
+    setNewProdSerialized(product.isSerialized);
+    setNewProdMinStock(product.minStock == null ? '' : String(product.minStock));
+    setNewProdMaxDiscount(product.maxDiscountPercent ?? null);
+    setNewProdCest(product.cest ?? '');
+    setNewProdOrigin(product.icmsOrigin ?? '');
+    setNewProdCst(product.icmsCst ?? '');
+    setNewProdCsosn(product.csosn ?? '');
+    setNewProdIcmsRate(product.icmsRate ?? null);
+    setNewProdIcmsReduction(product.icmsReduction ?? null);
+    setNewProdTaxBurden(product.taxBurdenPercent ?? null);
+    setShowAddProductModal(true);
+  };
+
   // Handle Add Product Submit
   const handleAddProductSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -286,12 +408,53 @@ export default function EstoqueView({
 
     // Codigo em branco: o banco gera o proximo numero automatico.
     if (!trimmedName) return;
+    // Dados fiscais obrigatorios (2.8b): sem eles o produto nao sai na NFC-e.
+    const fiscalError = productFiscalError({
+      ncm: trimmedNcm,
+      origin: newProdOrigin,
+      cst: newProdCst,
+      csosn: newProdCsosn,
+      cest: newProdCest,
+      icmsRate: newProdIcmsRate,
+      icmsReduction: newProdIcmsReduction,
+      taxBurden: newProdTaxBurden
+    });
+    if (fiscalError) {
+      setNewProdError(fiscalError);
+      return;
+    }
+    const fiscalFields = {
+      cest: newProdCest.trim() || null,
+      icmsOrigin: newProdOrigin || null,
+      icmsCst: newProdCst || null,
+      csosn: newProdCsosn || null,
+      icmsRate: newProdIcmsRate,
+      icmsReduction: newProdIcmsReduction,
+      taxBurdenPercent: newProdTaxBurden
+    };
 
     const minStockValue = newProdMinStock.trim() === '' ? null : Math.max(0, parseInt(newProdMinStock, 10) || 0);
 
     setNewProdSaving(true);
     try {
-      await addProduct({
+      const editing = editingProductId ? products.find(product => product.id === editingProductId) : undefined;
+      if (editing) {
+        await saveProduct({
+          ...editing,
+          sku: trimmedSku || editing.sku,
+          name: trimmedName,
+          category: newProdCategory,
+          brand: trimmedBrand,
+          costPrice: newProdCost,
+          sellPrice: newProdSell,
+          ncm: trimmedNcm,
+          warrantyMonths: newProdWarranty,
+          isSerialized: newProdSerialized,
+          minStock: minStockValue,
+          maxDiscountPercent: newProdMaxDiscount,
+          ...fiscalFields
+        });
+      } else await addProduct({
       sku: trimmedSku,
       name: trimmedName,
       category: newProdCategory,
@@ -303,10 +466,11 @@ export default function EstoqueView({
       isSerialized: newProdSerialized,
       isUsed: false,
       minStock: minStockValue,
-      maxDiscountPercent: newProdMaxDiscount
+      maxDiscountPercent: newProdMaxDiscount,
+      ...fiscalFields
       });
     } catch (error: any) {
-      setNewProdError(error?.message || 'Não foi possível cadastrar o produto.');
+      setNewProdError(error?.message || 'Não foi possível salvar o produto.');
       return;
     } finally {
       setNewProdSaving(false);
@@ -325,6 +489,7 @@ export default function EstoqueView({
     setNewProdQty(0);
     setNewProdMinStock('');
     setNewProdMaxDiscount(null);
+    resetProductForm();
     setShowAddProductModal(false);
   };
 
@@ -458,8 +623,9 @@ export default function EstoqueView({
   };
 
   // Handle Transfer Submit (Atomic operation)
-  const handleTransferSubmit = (e: React.FormEvent) => {
+  const handleTransferSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (transferSaving) return;
     setTransferError('');
     setTransferSuccess(false);
 
@@ -508,86 +674,29 @@ export default function EstoqueView({
       serialsToTransfer = inputSerials;
     }
 
-    // Execute transfer
-    registerMovement(
-      transferProductId,
-      transferFrom,
-      transferTo,
-      'TRANSFERENCIA',
-      transferQty,
-      serialsToTransfer,
-      selectedProduct?.category === 'Cards' ? transferCardCondition : undefined,
-      transferReason || 'Transferência entre unidades'
-    );
+    // Executa no banco (custo da origem vai junto); so mostra sucesso se o banco confirmar
+    setTransferSaving(true);
+    try {
+      await registerTransfer(
+        transferProductId,
+        transferFrom,
+        transferTo,
+        transferQty,
+        serialsToTransfer,
+        selectedProduct?.category === 'Cards' ? transferCardCondition : undefined,
+        transferReason || 'Transferência entre unidades'
+      );
+    } catch (err) {
+      setTransferError((err as { message?: string })?.message || 'Não foi possível concluir a transferência.');
+      return;
+    } finally {
+      setTransferSaving(false);
+    }
 
     setTransferSuccess(true);
     setTransferQty(1);
     setTransferSerialInput('');
     setTransferReason('');
-  };
-
-  // Warranty Query execution
-  const executeWarrantyQuery = (e: React.FormEvent) => {
-    e.preventDefault();
-    setWarrantyQueryResult(null);
-
-    if (!warrantyQuerySerial) return;
-
-    // Search active inventory first
-    let foundInInventory: any = null;
-    inventory.forEach(inv => {
-      const prod = products.find(p => p.id === inv.productId);
-      Object.entries(inv.quantities).forEach(([unitId, data]) => {
-        if (data.serials?.includes(warrantyQuerySerial)) {
-          foundInInventory = {
-            product: prod,
-            location: stores.find(store => store.unitId === unitId)?.tradeName || unitId,
-            status: 'Em Estoque',
-            warrantyTerm: `${prod?.warrantyMonths} meses (Ativa na venda)`
-          };
-        }
-      });
-    });
-
-    if (foundInInventory) {
-      setWarrantyQueryResult(foundInInventory);
-      return;
-    }
-
-    // Search sales records
-    let foundInSales: any = null;
-    sales.forEach(s => {
-      s.items.forEach(item => {
-        if (item.serials?.includes(warrantyQuerySerial)) {
-          const prod = products.find(p => p.id === item.productId);
-          
-          // Calculate warranty expiration
-          const saleDate = new Date(s.timestamp);
-          const expDate = new Date(saleDate);
-          expDate.setMonth(saleDate.getMonth() + (prod?.warrantyMonths || 0));
-          const daysLeft = Math.ceil((expDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-          const isExpired = daysLeft < 0;
-
-          foundInSales = {
-            product: prod,
-            invoice: s.invoiceNumber,
-            saleDate: saleDate.toLocaleDateString('pt-BR'),
-            client: s.clientName || 'Consumidor Final',
-            clientCpf: s.clientCpf || 'Não Informado',
-            store: stores.find(store => store.unitId === s.unitId)?.tradeName || s.unitId,
-            status: isExpired ? 'Garantia Expirada' : 'Garantia Ativa',
-            expDate: expDate.toLocaleDateString('pt-BR'),
-            daysLeft: isExpired ? 0 : daysLeft
-          };
-        }
-      });
-    });
-
-    if (foundInSales) {
-      setWarrantyQueryResult(foundInSales);
-    } else {
-      setWarrantyQueryResult({ status: 'Não Encontrado' });
-    }
   };
 
   return (
@@ -619,12 +728,36 @@ export default function EstoqueView({
             <Layers className="w-4 h-4 mr-1.5" />
             Entrada de Estoque
           </button>
+          <button
+            id="tab-estoque-transferencias"
+            onClick={() => setActiveSubTab('transferencias')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeSubTab === 'transferencias'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <Shuffle className="w-4 h-4 mr-1.5" />
+            Transferências
+          </button>
+          <button
+            id="tab-estoque-avariados"
+            onClick={() => setActiveSubTab('avariados')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeSubTab === 'avariados'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <Package className="w-4 h-4 mr-1.5" />
+            Avariados
+          </button>
         </div>
 
         {activeSubTab === 'catalogo' && (
           <button
             id="btn-add-product"
-            onClick={() => setShowAddProductModal(true)}
+            onClick={openNewProduct}
             className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition flex items-center shadow-xs"
           >
             <Plus className="w-4 h-4 mr-1.5" />
@@ -699,7 +832,15 @@ export default function EstoqueView({
                         }`}>
                           Estoque: {totalStock} un
                         </span>
-                        <h3 className="text-sm font-bold text-slate-900 mt-1 font-sans">{p.name}</h3>
+                        <h3 className="text-sm font-bold text-slate-900 mt-1 font-sans flex items-center gap-1.5">
+                          {p.name}
+                          {isAdmin && (
+                            <button type="button" onClick={() => openEditProduct(p)} title="Editar produto" aria-label={`Editar ${p.name}`} className="p-1 text-blue-700 rounded hover:bg-blue-50">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {(!p.ncm || !p.icmsOrigin || !(p.csosn || p.icmsCst)) && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100" title="Sem os dados fiscais a NFC-e é recusada: edite o produto">DADOS FISCAIS PENDENTES</span>}
+                        </h3>
                         <p className="text-xs text-slate-400 font-mono mt-0.5">Código: {p.sku}</p>
                       </div>
                       <div className="text-right">
@@ -1163,24 +1304,65 @@ export default function EstoqueView({
             </div>
 
             <form onSubmit={handleTransferSubmit} className="space-y-4 text-xs">
-              {/* Product Select */}
+              {/* Product Search (como no PDV) */}
               <div className="space-y-1.5">
-                <label className="font-medium text-slate-700">Selecione o Produto</label>
-                <select
-                  value={transferProductId}
-                  onChange={(e) => {
-                    setTransferProductId(e.target.value);
-                    setTransferError('');
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-amber-500 text-slate-800"
-                >
-                  <option value="">-- Selecione o Produto --</option>
-                  {products.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} (Código: {p.sku})
-                    </option>
-                  ))}
-                </select>
+                <label className="font-medium text-slate-700">Produto <span className="font-normal text-slate-400">(código, nome ou serial; pode bipar)</span></label>
+                {transferProductId ? (
+                  <div className="flex items-center justify-between gap-3 bg-blue-50 border border-blue-200 rounded-lg p-2.5">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">{products.find(p => p.id === transferProductId)?.name}</p>
+                      <p className="text-[11px] text-slate-500 font-mono">
+                        Código: {products.find(p => p.id === transferProductId)?.sku} · Na origem: {getUnitStock(transferProductId, transferFrom)} un
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setTransferProductId(''); setTransferSerialInput(''); }}
+                      className="text-[10px] font-bold uppercase px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600"
+                    >
+                      Trocar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={transferSearch}
+                        onChange={(e) => { setTransferSearch(e.target.value); setTransferError(''); }}
+                        onKeyDown={handleTransferSearchKeyDown}
+                        placeholder="Digite ou bipe o código, o nome ou o serial"
+                        className="w-full bg-slate-50 text-slate-800 rounded-lg pl-9 pr-4 py-2.5 border border-slate-200 outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
+                      />
+                    </div>
+                    {transferSearch.trim() && (
+                      <div className="max-h-64 overflow-y-auto space-y-1.5">
+                        {transferResults.slice(0, 10).map(product => (
+                          <button
+                            key={product.id}
+                            type="button"
+                            onClick={() => selectTransferProduct(product.id)}
+                            className="w-full text-left p-2.5 rounded-lg border bg-slate-50 border-slate-200 hover:bg-slate-100 transition flex items-start justify-between gap-3"
+                          >
+                            <span>
+                              <span className="block text-sm font-bold text-slate-900">{product.name}</span>
+                              <span className="block text-[11px] text-slate-500 font-mono">Código: {product.sku}</span>
+                            </span>
+                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-white border border-slate-200 text-slate-500 shrink-0">
+                              {getUnitStock(product.id, transferFrom)} un na origem
+                            </span>
+                          </button>
+                        ))}
+                        {transferResults.length === 0 && (
+                          <p className="p-3 text-center text-slate-400 bg-slate-50 rounded-lg border border-dashed border-slate-200">
+                            Nenhum produto encontrado. Se for um serial, aperte Enter.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
 
               {/* Source Warehouse */}
@@ -1293,9 +1475,10 @@ export default function EstoqueView({
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition font-bold"
+                disabled={transferSaving}
+                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white rounded-lg transition font-bold"
               >
-                Efetivar Movimentação
+                {transferSaving ? 'Transferindo...' : 'Efetivar Movimentação'}
               </button>
             </form>
           </div>
@@ -1363,124 +1546,50 @@ export default function EstoqueView({
         </div>
       )}
 
-      {/* 3. VIEW: Consulta Garantia */}
-      {activeSubTab === 'garantias' && (
-        <div className="max-w-2xl mx-auto bg-white p-6 rounded-xl border border-slate-200 shadow-sm font-sans space-y-6">
-          <div className="text-center space-y-1">
-            <h3 className="text-lg font-bold text-slate-950">Consulta Rápida de Garantia e Série</h3>
-            <p className="text-xs text-slate-400">Localize consoles, placas e peças de hardware pelo número de série único ou CPF do cliente.</p>
+      {/* 3. VIEW: Avariados */}
+      {activeSubTab === 'avariados' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+          <div className="p-4 border-b border-slate-100">
+            <h3 className="text-sm font-bold text-slate-900">Avariados</h3>
+            <p className="text-xs text-slate-500">Produtos devolvidos com defeito pelo PDV. Ficam fora do estoque de venda.</p>
           </div>
-
-          <form onSubmit={executeWarrantyQuery} className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                id="query-serial-number"
-                type="text"
-                placeholder="Insira o número de série (Ex: PS5-L1-01, RTX-L1-01)..."
-                value={warrantyQuerySerial}
-                onChange={(e) => setWarrantyQuerySerial(e.target.value)}
-                className="w-full bg-slate-50 text-slate-800 text-xs rounded-lg pl-9 pr-4 py-2.5 border border-slate-200 outline-none focus:ring-1 focus:ring-amber-500 font-mono"
-              />
-            </div>
-            <button
-              type="submit"
-              className="px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition"
-            >
-              Consultar
-            </button>
-          </form>
-
-          {/* Results Block */}
-          {warrantyQueryResult && (
-            <div className="border border-slate-150 rounded-xl overflow-hidden text-xs">
-              {warrantyQueryResult.status === 'Não Encontrado' ? (
-                <div className="p-6 bg-rose-50/50 text-center text-rose-700 font-medium space-y-2">
-                  <ShieldAlert className="w-8 h-8 text-rose-500 mx-auto" />
-                  <p>Número de série não cadastrado no sistema ou vendido sem vínculo.</p>
-                </div>
-              ) : (
-                <div>
-                  <div className={`p-4 text-white flex justify-between items-center ${
-                    warrantyQueryResult.status === 'Em Estoque' || warrantyQueryResult.status === 'Garantia Ativa'
-                      ? 'bg-emerald-600'
-                      : 'bg-rose-600'
-                  }`}>
-                    <div>
-                      <h4 className="font-bold text-sm">{warrantyQueryResult.product?.name}</h4>
-                      <p className="opacity-80 text-[10px] font-mono">Código: {warrantyQueryResult.product?.sku} | S/N: {warrantyQuerySerial}</p>
-                    </div>
-                    <span className="font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white/20 text-[10px]">
-                      {warrantyQueryResult.status}
-                    </span>
-                  </div>
-
-                  <div className="p-4 space-y-3 font-sans bg-slate-50">
-                    {warrantyQueryResult.status === 'Em Estoque' ? (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Localização Ativa</span>
-                          <span className="font-medium text-slate-800">{warrantyQueryResult.location}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Garantia Futura</span>
-                          <span className="font-medium text-slate-800">{warrantyQueryResult.warrantyTerm}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Cliente Comprador</span>
-                          <span className="font-semibold text-slate-800">{warrantyQueryResult.client}</span>
-                          <span className="block text-[10px] font-mono text-slate-400">CPF: {warrantyQueryResult.clientCpf}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Loja Física Vendedora</span>
-                          <span className="font-medium text-slate-800">{warrantyQueryResult.store}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Data da Compra</span>
-                          <span className="font-medium text-slate-800 flex items-center">
-                            <Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" />
-                            {warrantyQueryResult.saleDate}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Data de Expiração</span>
-                          <span className="font-semibold text-slate-800 flex items-center">
-                            <Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" />
-                            {warrantyQueryResult.expDate}
-                          </span>
-                          {warrantyQueryResult.status === 'Garantia Ativa' ? (
-                            <span className="text-emerald-600 font-bold font-mono text-[10px] block mt-0.5">
-                              {warrantyQueryResult.daysLeft} dias restantes
-                            </span>
-                          ) : (
-                            <span className="text-rose-600 font-bold block text-[10px] mt-0.5">Expirada</span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {damagedError && <p className="p-4 text-xs text-rose-700">{damagedError}</p>}
+          <table className="w-full text-xs">
+            <thead className="bg-slate-50 text-slate-500 uppercase text-[10px]">
+              <tr><th className="p-3 text-left">Produto</th><th className="p-3 text-left">Loja</th><th className="p-3 text-right">Quantidade</th><th className="p-3 text-left">Seriais</th></tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {damaged === null && <tr><td colSpan={4} className="p-4 text-slate-400">Carregando...</td></tr>}
+              {damaged !== null && damaged.length === 0 && <tr><td colSpan={4} className="p-4 text-slate-400">Nenhum produto avariado.</td></tr>}
+              {(damaged || []).map(row => {
+                const product = products.find(item => item.id === row.productId);
+                const store = storeConfigs.find(item => item.unitId === row.unitId);
+                return (
+                  <tr key={`${row.unitId}-${row.productId}`}>
+                    <td className="p-3 font-bold text-slate-800">{product?.name ?? row.productId}<span className="block font-normal text-slate-400">{product?.sku}</span></td>
+                    <td className="p-3 text-slate-600">{store?.tradeName || row.unitId}</td>
+                    <td className="p-3 text-right font-mono">{row.quantity}</td>
+                    <td className="p-3 text-slate-500">{row.serials.join(', ') || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
 
       {/* Add Product Modal (Simple custom overlay) */}
       {showAddProductModal && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-lg w-full overflow-hidden flex flex-col">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-2xl w-full max-h-[92vh] overflow-y-auto flex flex-col">
             <div className="bg-slate-900 text-white p-4 flex justify-between items-center">
               <h3 className="font-bold text-sm uppercase tracking-wider flex items-center">
                 <Layers className="w-4.5 h-4.5 mr-2 text-amber-500" />
-                Cadastrar Novo Produto no Catálogo
+                {editingProductId ? 'Editar Produto' : 'Cadastrar Novo Produto no Catálogo'}
               </h3>
               <button
                 id="btn-close-product-modal"
-                onClick={() => setShowAddProductModal(false)}
+                onClick={() => { setShowAddProductModal(false); resetProductForm(); }}
                 className="text-slate-400 hover:text-white font-bold text-lg"
               >
                 ✕
@@ -1543,10 +1652,10 @@ export default function EstoqueView({
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="font-bold text-slate-700">NCM (Fins Fiscais)</label>
+                  <label className="font-bold text-slate-700">NCM (Fins Fiscais) *</label>
                   <input
                     type="text"
-                    placeholder="Ex: 8471.60.52"
+                    placeholder="8 números, ex.: 8471.60.52"
                     value={newProdNcm}
                     onChange={(e) => setNewProdNcm(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
@@ -1594,9 +1703,67 @@ export default function EstoqueView({
                 <p className="text-[10px] text-slate-400">Desconto máximo que o vendedor pode dar no PDV sem a senha administrativa.</p>
               </div>
 
-              <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mt-2 text-[11px] text-slate-500">
-                O estoque será lançado depois, na sub-aba de Entrada de Estoque.
+              <div className="space-y-1 max-w-[200px]">
+                <label className="font-bold text-slate-700">Garantia (meses)</label>
+                <ValueInput
+                  decimals={0}
+                  value={newProdWarranty || null}
+                  placeholder="0 = sem garantia"
+                  onValueChange={(value) => setNewProdWarranty(value ?? 0)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
+                />
               </div>
+
+              <fieldset className="border border-slate-200 rounded-lg p-3 space-y-3">
+                <legend className="px-1 font-bold text-slate-800 uppercase tracking-wider text-[10px]">Informações fiscais (obrigatórias; CEST só com substituição tributária)</legend>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">ICMS (%)</label>
+                    <ValueInput value={newProdIcmsRate} placeholder="0,00" onValueChange={(value) => setNewProdIcmsRate(value == null ? null : Math.min(100, value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">Redução do ICMS (%)</label>
+                    <ValueInput value={newProdIcmsReduction} placeholder="0,00" onValueChange={(value) => setNewProdIcmsReduction(value == null ? null : Math.min(100, value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700" title="Valor aproximado de impostos informado ao consumidor (Lei da Transparência)">Total de tributos (%)</label>
+                    <ValueInput value={newProdTaxBurden} placeholder="0,00" onValueChange={(value) => setNewProdTaxBurden(value == null ? null : Math.min(100, value))} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="font-bold text-slate-700">Origem da Situação Tributária</label>
+                  <select value={newProdOrigin} onChange={(e) => setNewProdOrigin(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none">
+                    <option value="">Selecione uma origem</option>
+                    {ICMS_ORIGINS.map(origin => <option key={origin.code} value={origin.code}>{origin.label}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">Situação Tributária (CST)</label>
+                    <select value={newProdCst} onChange={(e) => setNewProdCst(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none">
+                      <option value="">Selecione</option>
+                      {ICMS_CSTS.map(code => <option key={code} value={code}>{code}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">CSOSN</label>
+                    <select value={newProdCsosn} onChange={(e) => setNewProdCsosn(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none">
+                      <option value="">Vazio</option>
+                      {CSOSNS.map(code => <option key={code} value={code}>{code}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="font-bold text-slate-700">CEST</label>
+                    <input type="text" inputMode="numeric" maxLength={9} value={newProdCest} onChange={(e) => setNewProdCest(e.target.value.replace(/[^0-9.]/g, ''))} className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono" />
+                  </div>
+                </div>
+              </fieldset>
+
+              {!editingProductId && (
+                <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 mt-2 text-[11px] text-slate-500">
+                  O estoque será lançado depois, na sub-aba de Entrada de Estoque.
+                </div>
+              )}
 
               <div className="flex items-center space-x-2 bg-slate-50 p-3 rounded-lg border border-slate-100 mt-2">
                 <input
@@ -1617,7 +1784,7 @@ export default function EstoqueView({
               <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setShowAddProductModal(false)}
+                  onClick={() => { setShowAddProductModal(false); resetProductForm(); }}
                   className="px-4 py-2 border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 transition"
                 >
                   Cancelar
@@ -1627,7 +1794,7 @@ export default function EstoqueView({
                   disabled={newProdSaving}
                   className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-lg transition disabled:opacity-60"
                 >
-                  {newProdSaving ? 'Salvando...' : 'Confirmar Cadastro'}
+                  {newProdSaving ? 'Salvando...' : editingProductId ? 'Salvar alterações' : 'Confirmar Cadastro'}
                 </button>
               </div>
             </form>

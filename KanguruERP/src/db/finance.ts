@@ -138,16 +138,21 @@ export interface FinancialSummary {
 
 export const completedSales = (sales: Sale[]) => sales.filter(sale => sale.status === 'CONCLUIDA');
 
+// Trocas/devolucoes (2.9): descontam o valor devolvido e o custo que voltou ao estoque.
+// Simplificacao: contam no periodo da venda (nao na data da devolucao).
+export const saleReturnedAmount = (sale: Sale) => (sale.returns || []).reduce((sum, item) => sum + item.totalAmount, 0);
+const saleReturnedCost = (sale: Sale) => (sale.returns || []).reduce((sum, item) => sum + item.costBack, 0);
+
 export function summarize(sales: Sale[], expenses: Expense[]): FinancialSummary {
   let revenue = 0;
   let cost = 0;
   let fees = 0;
   let salesMissingCost = 0;
   sales.forEach(sale => {
-    revenue += sale.grossAmount;
+    revenue += sale.grossAmount - saleReturnedAmount(sale);
     fees += sale.feeAmount;
     const info = saleCost(sale);
-    cost += info.cost;
+    cost += info.cost - saleReturnedCost(sale);
     if (info.missing) salesMissingCost += 1;
   });
   const expenseTotal = expenses.reduce((sum, expense) => sum + expense.amount, 0);

@@ -3,22 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { 
   User, 
   UserRole, 
   Product, 
   StockInventory, 
   TradeIn,
+  TradeInApproval,
   StoreConfig
 } from '../types';
-import { 
-  Plus, 
-  CheckCircle, 
-  Coins,
-  ArrowRight
-} from 'lucide-react';
+import { Coins } from 'lucide-react';
 import ValueInput from './ValueInput';
+import { sanitizeItemCode } from '../db/itemCode';
+import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fiscal';
+
+// Dados fiscais padrao da Troca Gamer (so videogames), informados pelo usuario em 2026-10-28.
+// CFOP 5102 sai sozinho na NFC-e (CSOSN 102). O franqueado pode alterar na aprovacao.
+const TRADE_FISCAL_DEFAULTS = { ncm: '9504.50.00', origin: '0', csosn: '102', cst: '', cest: '', icmsRate: 0, icmsReduction: 0, taxBurden: 26.87 };
 
 interface VendasViewProps {
   currentUser: User;
@@ -26,11 +28,7 @@ interface VendasViewProps {
   inventory: StockInventory[];
   tradeIns: TradeIn[];
   storeConfigs: StoreConfig[];
-  registerTradeIn: (trade: Omit<TradeIn, 'id' | 'operatorId' | 'operatorName' | 'timestamp' | 'status'>) => TradeIn;
-  approveTradeIn: (
-    tradeId: string,
-    productDetails: { sku: string; name: string; category: string; brand: string; sellPrice: number; warrantyMonths: number; isSerialized: boolean }
-  ) => void;
+  approveTradeIn: (tradeId: string, details: TradeInApproval) => Promise<void>;
   cancelTradeIn: (tradeId: string) => void;
 }
 
@@ -40,7 +38,6 @@ export default function VendasView({
   inventory,
   tradeIns,
   storeConfigs,
-  registerTradeIn,
   approveTradeIn,
   cancelTradeIn
 }: VendasViewProps) {
@@ -51,82 +48,94 @@ export default function VendasView({
   // Filter state for Store (Consolidated or specific store)
   const [selectedStoreFilter, setSelectedStoreFilter] = useState<string>('consolidado');
 
-  // New trade registration target physical store state
-  const [tradeUnitId, setTradeUnitId] = useState<string>('');
-
-  // Trade-In form states
-  const [tradeSellerName, setTradeSellerName] = useState('');
-  const [tradeSellerCpf, setTradeSellerCpf] = useState('');
-  const [tradeDesc, setTradeDesc] = useState('');
-  const [tradeCategory, setTradeCategory] = useState('Videogames');
-  const [tradeCondition, setTradeCondition] = useState('Excelente');
-  const [tradeValuation, setTradeValuation] = useState<number>(0);
-  const [tradeSuccess, setTradeSuccess] = useState(false);
-  const [tradeError, setTradeError] = useState('');
-
   // Trade-In approval modal states
   const [tradeToApprove, setTradeToApprove] = useState<TradeIn | null>(null);
   const [approveSku, setApproveSku] = useState('');
   const [approveSellPrice, setApproveSellPrice] = useState(0);
   const [approveWarranty, setApproveWarranty] = useState(3);
-  const [approveSerialized, setApproveSerialized] = useState(true);
-
-  useEffect(() => {
-    if (!stores.length) return;
-    setTradeUnitId(previous => stores.some(store => store.unitId === previous) ? previous : defaultStoreId);
-  }, [storeConfigs]);
-
-  // Register Trade-In buyback appraisal
-  const handleTradeInSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setTradeSuccess(false);
-    setTradeError('');
-
-    if (!tradeUnitId || !tradeSellerName || !tradeSellerCpf || !tradeDesc || tradeValuation <= 0) {
-      setTradeError('Preencha todos os campos obrigatórios da avaliação de usado.');
-      return;
-    }
-
-    registerTradeIn({
-      sellerName: tradeSellerName,
-      sellerCpf: tradeSellerCpf,
-      itemDescription: tradeDesc,
-      category: tradeCategory,
-      condition: tradeCondition,
-      valuationAmount: tradeValuation,
-      unitId: tradeUnitId
-    });
-
-    setTradeSuccess(true);
-    setTradeSellerName('');
-    setTradeSellerCpf('');
-    setTradeDesc('');
-    setTradeValuation(0);
-  };
+  const [approveName, setApproveName] = useState('');
+  const [approveSerial, setApproveSerial] = useState('');
+  const [approveImei, setApproveImei] = useState('');
+  const [approveNcm, setApproveNcm] = useState(TRADE_FISCAL_DEFAULTS.ncm);
+  const [approveOrigin, setApproveOrigin] = useState(TRADE_FISCAL_DEFAULTS.origin);
+  const [approveCsosn, setApproveCsosn] = useState(TRADE_FISCAL_DEFAULTS.csosn);
+  const [approveCst, setApproveCst] = useState(TRADE_FISCAL_DEFAULTS.cst);
+  const [approveCest, setApproveCest] = useState(TRADE_FISCAL_DEFAULTS.cest);
+  const [approveIcmsRate, setApproveIcmsRate] = useState<number | null>(TRADE_FISCAL_DEFAULTS.icmsRate);
+  const [approveIcmsReduction, setApproveIcmsReduction] = useState<number | null>(TRADE_FISCAL_DEFAULTS.icmsReduction);
+  const [approveTaxBurden, setApproveTaxBurden] = useState<number | null>(TRADE_FISCAL_DEFAULTS.taxBurden);
+  const [approveError, setApproveError] = useState('');
+  const [approveSaving, setApproveSaving] = useState(false);
 
   // Open Approval details
   const handleOpenApproval = (trade: TradeIn) => {
     setTradeToApprove(trade);
-    setApproveSku(`USED-${trade.category.normalize('NFD').replace(/[^A-Za-z0-9]/g, '').slice(0, 3).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
-    setApproveSellPrice(trade.valuationAmount * 1.5); // auto mark up suggested
+    setApproveSku('');
+    setApproveName(`${trade.itemDescription} (Usado)`);
+    setApproveSellPrice(Math.round(trade.valuationAmount * 150) / 100); // sugestao: compra + 50%
+    setApproveWarranty(3);
+    setApproveSerial(trade.serialNumber || '');
+    setApproveImei(trade.imei || '');
+    setApproveNcm(TRADE_FISCAL_DEFAULTS.ncm);
+    setApproveOrigin(TRADE_FISCAL_DEFAULTS.origin);
+    setApproveCsosn(TRADE_FISCAL_DEFAULTS.csosn);
+    setApproveCst(TRADE_FISCAL_DEFAULTS.cst);
+    setApproveCest(TRADE_FISCAL_DEFAULTS.cest);
+    setApproveIcmsRate(TRADE_FISCAL_DEFAULTS.icmsRate);
+    setApproveIcmsReduction(TRADE_FISCAL_DEFAULTS.icmsReduction);
+    setApproveTaxBurden(TRADE_FISCAL_DEFAULTS.taxBurden);
+    setApproveError('');
   };
 
-  // Finish Trade-In confirmation and register into catalog
-  const handleConfirmApproval = (e: React.FormEvent) => {
+  // Aprovar: cadastra o produto e da entrada da unidade com o serial real. Erro aparece na tela.
+  const handleConfirmApproval = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!tradeToApprove) return;
+    if (!tradeToApprove || approveSaving) return;
+    setApproveError('');
 
-    approveTradeIn(tradeToApprove.id, {
-      sku: approveSku,
-      name: tradeToApprove.itemDescription,
-      category: tradeToApprove.category,
-      brand: 'Trade-In Usado',
-      sellPrice: approveSellPrice,
-      warrantyMonths: approveWarranty,
-      isSerialized: approveSerialized
+    const name = approveName.trim();
+    const serial = approveSerial.trim().toUpperCase();
+    const imei = approveImei.replace(/\s/g, '');
+    if (!name) return setApproveError('Informe o nome do produto.');
+    if (approveSellPrice <= 0) return setApproveError('Informe o preço de venda.');
+    if (!serial) return setApproveError('Informe o número de série do videogame.');
+    if (imei && !/^\d{15}$/.test(imei)) return setApproveError('IMEI inválido: são 15 números.');
+    const fiscalError = productFiscalError({
+      ncm: approveNcm.trim(),
+      origin: approveOrigin,
+      cst: approveCst,
+      csosn: approveCsosn,
+      cest: approveCest,
+      icmsRate: approveIcmsRate,
+      icmsReduction: approveIcmsReduction,
+      taxBurden: approveTaxBurden
     });
+    if (fiscalError) return setApproveError(fiscalError);
 
-    setTradeToApprove(null);
+    setApproveSaving(true);
+    try {
+      await approveTradeIn(tradeToApprove.id, {
+        sku: sanitizeItemCode(approveSku.trim()),
+        name,
+        sellPrice: approveSellPrice,
+        warrantyMonths: approveWarranty,
+        serialNumber: serial,
+        imei,
+        ncm: approveNcm.trim(),
+        cest: approveCest.trim() || null,
+        icmsOrigin: approveOrigin || null,
+        icmsCst: approveCst || null,
+        csosn: approveCsosn || null,
+        icmsRate: approveIcmsRate,
+        icmsReduction: approveIcmsReduction,
+        taxBurdenPercent: approveTaxBurden
+      });
+      setTradeToApprove(null);
+    } catch (err) {
+      setApproveError((err as { message?: string })?.message || 'Não foi possível estocar o videogame.');
+    } finally {
+      setApproveSaving(false);
+    }
   };
 
   const activeUnitId = currentUser.unitId === 'central' ? selectedStoreFilter : currentUser.unitId;
@@ -143,9 +152,9 @@ export default function VendasView({
         <div className="space-y-1">
           <h2 className="text-base font-black text-slate-800 uppercase tracking-wider flex items-center">
             <Coins className="w-5 h-5 text-blue-600 mr-2" />
-            Trade-In (Compra de Usados)
+            Troca Gamer (Compra de Videogames Usados)
           </h2>
-          <p className="text-xs text-slate-400">Avaliação física de mercadorias usadas trazidas por clientes e reintegração automática ao estoque.</p>
+          <p className="text-xs text-slate-400">Os vendedores registram a troca no PDV (com o termo impresso). Aqui você confere os dados e estoca o videogame.</p>
         </div>
         {isAdmin && (
           <div className="flex items-center space-x-2 shrink-0">
@@ -164,145 +173,12 @@ export default function VendasView({
       </div>
 
       {/* Main Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 font-sans">
-        {/* Trade-in valuation Form */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-1 space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center">
-              <Plus className="w-4 h-4 text-blue-600 mr-1.5" />
-              Nova Avaliação
-            </h3>
-            <p className="text-xs text-slate-400">Insira a descrição do item e os dados do vendedor para formalização do termo.</p>
-          </div>
-
-          <form onSubmit={handleTradeInSubmit} className="space-y-4 text-xs">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Nome do Vendedor</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Arthur Pendragon"
-                  value={tradeSellerName}
-                  onChange={(e) => {
-                    setTradeSellerName(e.target.value);
-                    setTradeSuccess(false);
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold text-slate-700"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">CPF do Vendedor</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: 000.000.000-00"
-                  value={tradeSellerCpf}
-                  onChange={(e) => {
-                    setTradeSellerCpf(e.target.value);
-                    setTradeSuccess(false);
-                  }}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono font-semibold text-slate-700"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Loja Avaliadora</label>
-                <select
-                  value={tradeUnitId}
-                  onChange={(e) => setTradeUnitId(e.target.value)}
-                  required
-                  disabled={stores.length === 0}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold text-slate-700"
-                >
-                  {stores.length === 0 && <option value="">Nenhuma loja cadastrada</option>}
-                  {stores.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.unitId}</option>)}
-                </select>
-              </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-slate-700">Descrição do Equipamento / Jogo / Card</label>
-              <input
-                type="text"
-                required
-                placeholder="Ex: PlayStation 5 Slim 1TB c/ 1 Controle"
-                value={tradeDesc}
-                onChange={(e) => {
-                  setTradeDesc(e.target.value);
-                  setTradeSuccess(false);
-                }}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold text-slate-700"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Categoria Geral</label>
-                <select
-                  value={tradeCategory}
-                  onChange={(e) => setTradeCategory(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold text-slate-700"
-                >
-                  <option value="Videogames">Videogames / Consoles</option>
-                  <option value="Acessórios">Acessórios / Controles</option>
-                  <option value="Jogos">Mídia Física (Jogos)</option>
-                  <option value="Cards">Cards / Colecionáveis</option>
-                  <option value="Smartphones">Smartphones</option>
-                </select>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Condição Física Geral</label>
-                <select
-                  value={tradeCondition}
-                  onChange={(e) => setTradeCondition(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-semibold text-slate-700"
-                >
-                  <option value="Lacrado">Novo / Lacrado (Preço Cheio)</option>
-                  <option value="Excelente">Excelente (Sem marcas, c/ caixa)</option>
-                  <option value="Bom">Bom (Sinais leves de uso)</option>
-                  <option value="Avariado">Avariado / Desgastado</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="font-bold text-slate-700">Valor Proposto da Compra (R$)</label>
-              <ValueInput
-                required
-                value={tradeValuation || null}
-                onValueChange={(value) => setTradeValuation(value ?? 0)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
-              />
-            </div>
-
-            {tradeSuccess && (
-              <div className="p-3 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-lg text-[10px] text-center font-medium">
-                Avaliação registrada no banco! Itens prontos para estocagem.
-              </div>
-            )}
-
-            {tradeError && (
-              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-[10px] text-center font-medium">
-                {tradeError}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition font-bold"
-            >
-              Registrar Avaliação
-            </button>
-          </form>
-        </div>
-
+      <div className="font-sans">
         {/* Evaluations active and queue */}
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2 space-y-4">
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <div>
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Histórico de Compra de Usados</h3>
-            <p className="text-xs text-slate-400">Veja avaliações pendentes de cadastro ou as já aprovadas e cadastradas em estoque.</p>
+            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Trocas registradas</h3>
+            <p className="text-xs text-slate-400">"Aguardando" = já paga ao cliente no PDV, falta conferir e estocar.</p>
           </div>
 
           <div className="overflow-x-auto">
@@ -320,9 +196,16 @@ export default function VendasView({
                 {filteredTradeIns.map(trade => (
                   <tr key={trade.id} className="hover:bg-slate-50/50">
                     <td className="px-3 py-2.5">
-                      <span className="font-bold text-slate-900 block">{trade.itemDescription}</span>
+                      <span className="font-bold text-slate-900 block">
+                        {trade.tradeNumber ? `Nº ${trade.tradeNumber} · ` : ''}{trade.itemDescription}
+                      </span>
+                      {trade.serialNumber && (
+                        <span className="text-[10px] text-slate-500 font-mono block">S/N: {trade.serialNumber}{trade.imei ? ` · IMEI: ${trade.imei}` : ''}</span>
+                      )}
+                      {trade.accessories && <span className="text-[10px] text-slate-500 block">Itens: {trade.accessories}</span>}
                       <span className="text-[10px] text-slate-400 font-medium block">
-                        Categoria: {trade.category} | Estado: {trade.condition}
+                        {new Date(trade.timestamp).toLocaleString('pt-BR')} · Estado: {trade.condition}
+                        {trade.staffName && ` · Vendedor: ${trade.staffCode ? `${trade.staffCode} - ` : ''}${trade.staffName}`}
                         {currentUser.unitId === 'central' && ` | Loja: ${
                           trade.unitId === 'loja_1' ? 'CG' : trade.unitId === 'loja_2' ? 'Barra' : trade.unitId === 'loja_3' ? 'Jacarepaguá' : 'Geral'
                         }`}
@@ -331,9 +214,16 @@ export default function VendasView({
                     <td className="px-3 py-2.5 font-medium text-slate-700">
                       {trade.sellerName}
                       <span className="block font-mono text-[10px] text-slate-400">CPF: {trade.sellerCpf}</span>
+                      {trade.sellerPhone && <span className="block text-[10px] text-slate-400">Tel.: {trade.sellerPhone}</span>}
+                      {trade.sellerDocument && <span className="block text-[10px] text-slate-400">RG/CNH: {trade.sellerDocument}</span>}
                     </td>
                     <td className="px-3 py-2.5 text-right font-bold text-slate-900 font-mono">
-                      R$ {trade.valuationAmount.toLocaleString('pt-BR')}
+                      R$ {trade.valuationAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      {trade.paymentMethod && (
+                        <span className="block text-[10px] font-semibold text-slate-400">
+                          {trade.paymentMethod === 'VALE' ? 'Vale-troca' : trade.paymentMethod === 'DINHEIRO' ? 'Dinheiro' : 'Pix'}
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-center">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -354,11 +244,14 @@ export default function VendasView({
                             onClick={() => handleOpenApproval(trade)}
                             className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded font-bold text-[10px] transition"
                           >
-                            Estocar Usado
+                            Conferir e Estocar
                           </button>
                           <button
                             id={`btn-cancel-trade-${trade.id}`}
-                            onClick={() => cancelTradeIn(trade.id)}
+                            onClick={() => {
+                              const paid = trade.paymentMethod ? ' O valor já foi pago ao cliente no PDV; dispensar só tira a troca da lista e NÃO devolve o dinheiro nem cancela o vale.' : '';
+                              if (window.confirm(`Dispensar esta troca?${paid}`)) cancelTradeIn(trade.id);
+                            }}
                             className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[10px] transition border border-slate-200"
                           >
                             Dispensar
@@ -380,7 +273,7 @@ export default function VendasView({
       {/* Used Item Approval and estocagem definition modal */}
       {tradeToApprove && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-sm w-full overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-lg w-full max-h-[92vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-150">
             <div className="bg-slate-900 text-white p-4 flex justify-between items-center">
               <h3 className="font-bold text-xs uppercase tracking-wider">Confirmar Estocagem de Usado</h3>
               <button
@@ -392,57 +285,98 @@ export default function VendasView({
               </button>
             </div>
 
-            <form onSubmit={handleConfirmApproval} className="p-4 space-y-4 text-xs font-sans">
+            <form onSubmit={handleConfirmApproval} className="p-4 space-y-4 text-xs font-sans overflow-y-auto">
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-100">
                 <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Item Avaliado</span>
                 <span className="font-bold text-slate-800 text-sm block">{tradeToApprove.itemDescription}</span>
-                <span className="text-slate-500 block mt-0.5">Custo: R$ {tradeToApprove.valuationAmount}</span>
+                <span className="text-slate-500 block mt-0.5">Custo (valor pago): R$ {tradeToApprove.valuationAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
               </div>
 
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Código Sugerido (Gerado)</label>
-                <input
-                  type="text"
-                  required
-                  value={approveSku}
-                  onChange={(e) => setApproveSku(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="font-bold text-slate-700">Defina Preço de Venda (R$)</label>
-                <ValueInput
-                  required
-                  value={approveSellPrice || null}
-                  onValueChange={(value) => setApproveSellPrice(value ?? 0)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono"
-                />
+                <label className="font-bold text-slate-700">Nome do produto</label>
+                <input type="text" required value={approveName} onChange={(e) => setApproveName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-semibold" />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1.5">
-                  <label className="font-bold text-slate-700">Garantia (Meses)</label>
-                  <ValueInput
-                    decimals={0}
-                    required
-                    value={approveWarranty}
-                    onValueChange={(value) => setApproveWarranty(value ?? 0)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono"
-                  />
+                  <label className="font-bold text-slate-700">Código</label>
+                  <input type="text" placeholder="Automático" value={approveSku} onChange={(e) => setApproveSku(sanitizeItemCode(e.target.value))} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono" />
                 </div>
                 <div className="space-y-1.5">
-                  <label className="font-bold text-slate-700">Serializar item?</label>
-                  <select
-                    value={approveSerialized ? 'true' : 'false'}
-                    onChange={(e) => setApproveSerialized(e.target.value === 'true')}
-                    className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none"
-                  >
-                    <option value="true">Sim (Gerar S/N)</option>
-                    <option value="false">Não (Lote comum)</option>
-                  </select>
+                  <label className="font-bold text-slate-700">Preço de venda (R$)</label>
+                  <ValueInput required value={approveSellPrice || null} onValueChange={(value) => setApproveSellPrice(value ?? 0)} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono" />
                 </div>
               </div>
+
+              <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700">Nº de série</label>
+                  <input type="text" required value={approveSerial} onChange={(e) => setApproveSerial(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700">IMEI (opcional)</label>
+                  <input type="text" inputMode="numeric" value={approveImei} onChange={(e) => setApproveImei(e.target.value.replace(/\D/g, '').slice(0, 15))} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono" />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700">Garantia (meses)</label>
+                  <ValueInput decimals={0} required value={approveWarranty} onValueChange={(value) => setApproveWarranty(value ?? 0)} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono" />
+                </div>
+              </div>
+
+              <div className="space-y-2 border-t border-slate-100 pt-3">
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Dados fiscais (já preenchidos para videogame; altere se precisar)</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-700">NCM</label>
+                    <input type="text" value={approveNcm} onChange={(e) => setApproveNcm(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-700">CEST</label>
+                    <input type="text" placeholder="Só com ST" value={approveCest} onChange={(e) => setApproveCest(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-700">Origem</label>
+                  <select value={approveOrigin} onChange={(e) => setApproveOrigin(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none">
+                    {ICMS_ORIGINS.map(origin => <option key={origin.code} value={origin.code}>{origin.label}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-700">CSOSN</label>
+                    <select value={approveCsosn} onChange={(e) => setApproveCsosn(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none">
+                      <option value="">—</option>
+                      {CSOSNS.map(code => <option key={code} value={code}>{code}</option>)}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-700">CST</label>
+                    <select value={approveCst} onChange={(e) => setApproveCst(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none">
+                      <option value="">—</option>
+                      {ICMS_CSTS.map(code => <option key={code} value={code}>{code}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-700">ICMS %</label>
+                    <ValueInput value={approveIcmsRate} onValueChange={setApproveIcmsRate} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-700">Redução %</label>
+                    <ValueInput value={approveIcmsReduction} onValueChange={setApproveIcmsReduction} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="font-bold text-slate-700">Total tributos %</label>
+                    <ValueInput value={approveTaxBurden} onValueChange={setApproveTaxBurden} className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono" />
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400">CFOP 5.102 é aplicado automaticamente na NFC-e.</p>
+              </div>
+
+              {approveError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-[11px] font-medium">{approveError}</div>
+              )}
 
               <div className="flex justify-end space-x-2 pt-2 border-t border-slate-100">
                 <button
@@ -454,9 +388,10 @@ export default function VendasView({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded transition"
+                  disabled={approveSaving}
+                  className="px-4 py-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white font-bold rounded transition"
                 >
-                  Efetivar Entrada
+                  {approveSaving ? 'Salvando...' : 'Efetivar Entrada'}
                 </button>
               </div>
             </form>

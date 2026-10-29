@@ -5,10 +5,13 @@ import {
   StockInventory, 
   StockMovement, 
   Sale,
+  SaleReturnInfo,
+  StoreNfceStatus,
   SalePaymentLine,
   Expense, 
   TradeIn, 
   WorkOrder, 
+  WorkOrderStatus,
   StoreConfig, 
   Supplier,
   SupplierInvoiceReminder,
@@ -815,6 +818,32 @@ export const supabaseService = {
     return (data || []).map(mapPdvOperator);
   },
 
+  // Chave da Focus por loja (UCP). A chave nunca volta do banco: so "configurada" e o ambiente.
+  async getPlatformStoreFiscal(tenantId: string): Promise<StoreNfceStatus[]> {
+    const { data, error } = await supabase.rpc('platform_list_store_fiscal', { p_tenant_id: tenantId });
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      unitId: row.unit_id,
+      configured: Boolean(row.configured),
+      environment: row.environment ?? null
+    }));
+  },
+
+  async setPlatformStoreFocus(input: { tenantId: string; unitId: string; token: string; environment: 'homologacao' | 'producao' }): Promise<void> {
+    const { error } = await supabase.rpc('platform_set_store_focus', {
+      p_tenant_id: input.tenantId,
+      p_unit_id: input.unitId,
+      p_token: input.token,
+      p_environment: input.environment
+    });
+    if (error) throw error;
+  },
+
+  async clearPlatformStoreFocus(tenantId: string, unitId: string): Promise<void> {
+    const { error } = await supabase.rpc('platform_clear_store_focus', { p_tenant_id: tenantId, p_unit_id: unitId });
+    if (error) throw error;
+  },
+
   async createPlatformTenant(input: {
     legalName: string;
     cnpj: string;
@@ -996,7 +1025,14 @@ export const supabaseService = {
       isKit: p.is_kit,
       kitItems: p.kit_items || undefined,
       minStock: p.min_stock ?? null,
-      maxDiscountPercent: p.max_discount_percent == null ? null : Number(p.max_discount_percent)
+      maxDiscountPercent: p.max_discount_percent == null ? null : Number(p.max_discount_percent),
+      cest: p.cest ?? null,
+      icmsOrigin: p.icms_origin ?? null,
+      icmsCst: p.icms_cst ?? null,
+      csosn: p.csosn ?? null,
+      icmsRate: p.icms_rate == null ? null : Number(p.icms_rate),
+      icmsReduction: p.icms_reduction == null ? null : Number(p.icms_reduction),
+      taxBurdenPercent: p.tax_burden_percent == null ? null : Number(p.tax_burden_percent)
     }));
   },
 
@@ -1018,7 +1054,14 @@ export const supabaseService = {
       is_kit: p.isKit || false,
       kit_items: p.kitItems || null,
       min_stock: p.minStock ?? null,
-      max_discount_percent: p.maxDiscountPercent ?? null
+      max_discount_percent: p.maxDiscountPercent ?? null,
+      cest: p.cest?.trim() || null,
+      icms_origin: p.icmsOrigin || null,
+      icms_cst: p.icmsCst || null,
+      csosn: p.csosn || null,
+      icms_rate: p.icmsRate ?? null,
+      icms_reduction: p.icmsReduction ?? null,
+      tax_burden_percent: p.taxBurdenPercent ?? null
     };
 
     const { data, error } = await supabase
@@ -1273,8 +1316,48 @@ export const supabaseService = {
       });
     }
 
+    // Trocas/devolucoes (2.9). Tolerante a falha antes da migration 20261030.
+    const returnsBySale = new Map<string, SaleReturnInfo[]>();
+    const { data: returnRows, error: returnsError } = await supabase
+      .from('sale_returns')
+      .select('id, sale_id, return_number, created_at, refund_method, total_amount, reason, fiscal_status, nfe_number, nfe_xml_url, nfe_danfe_url')
+      .order('created_at', { ascending: true });
+    if (!returnsError) {
+      const costBack = new Map<string, number>();
+      const { data: itemRows } = await supabase
+        .from('sale_return_items')
+        .select('return_id, quantity, unit_cost, destination');
+      (itemRows || []).forEach(item => {
+        if (item.destination !== 'ESTOQUE') return;
+        costBack.set(item.return_id, (costBack.get(item.return_id) ?? 0) + Number(item.unit_cost ?? 0) * Number(item.quantity));
+      });
+      (returnRows || []).forEach(r => {
+        const list = returnsBySale.get(r.sale_id) ?? [];
+        list.push({
+          id: r.id,
+          returnNumber: r.return_number,
+          createdAt: r.created_at,
+          refundMethod: r.refund_method,
+          totalAmount: Number(r.total_amount),
+          costBack: Math.round((costBack.get(r.id) ?? 0) * 100) / 100,
+          reason: r.reason,
+          fiscalStatus: r.fiscal_status ?? undefined,
+          nfeNumber: r.nfe_number ?? undefined,
+          nfeXmlUrl: r.nfe_xml_url ?? undefined,
+          nfeDanfeUrl: r.nfe_danfe_url ?? undefined
+        });
+        returnsBySale.set(r.sale_id, list);
+      });
+    }
+
+    // Caixas do PDV ja fechados (estorno bloqueado). Tolerante a falha antes da migration 20261105.
+    const closedSessions = new Set<string>();
+    const { data: closedRows, error: closedError } = await supabase.rpc('list_closed_cash_session_ids');
+    if (!closedError) ((closedRows || []) as unknown[]).forEach(row => closedSessions.add(String(typeof row === 'object' && row !== null ? Object.values(row)[0] : row)));
+
     return (data || []).map(s => ({
       id: s.id,
+      cashClosed: Boolean(s.cash_session_id && closedSessions.has(s.cash_session_id)),
       invoiceNumber: s.invoice_number,
       unitId: s.unit_id,
       items: s.items,
@@ -1293,8 +1376,86 @@ export const supabaseService = {
       approvedBy: s.approved_by || undefined,
       sellerCode: s.seller_code || undefined,
       sellerName: s.seller_name || undefined,
-      finalizedByName: s.finalized_by_name || undefined
+      finalizedByName: s.finalized_by_name || undefined,
+      receiptNumber: s.receipt_number ?? undefined,
+      receiptPeriod: s.receipt_period ?? undefined,
+      fiscalType: s.fiscal_type ?? undefined,
+      fiscalStatus: s.fiscal_status ?? undefined,
+      nfceNumber: s.nfce_number ?? undefined,
+      nfceSeries: s.nfce_series ?? undefined,
+      nfceKey: s.nfce_key ?? undefined,
+      nfceEnvironment: s.nfce_environment ?? undefined,
+      nfceXmlUrl: s.nfce_xml_url ?? undefined,
+      nfceDanfeUrl: s.nfce_danfe_url ?? undefined,
+      nfceMessage: s.nfce_message ?? undefined,
+      nfceAuthorizedAt: s.nfce_authorized_at ?? undefined,
+      nfceContingencyPending: s.nfce_contingency === true && s.nfce_contingency_done !== true,
+      returns: returnsBySale.get(s.id)
     }));
+  },
+
+  // === Modo offline do PDV: divergencias das vendas feitas sem internet ===
+  async getOfflineConflicts(): Promise<{ id: string; unitId: string; saleId: string; kind: string; detail: string; createdAt: string }[]> {
+    const { data, error } = await supabase
+      .from("pos_offline_conflicts")
+      .select("id, unit_id, sale_id, kind, detail, created_at")
+      .eq("resolved", false)
+      .order("created_at", { ascending: false });
+    if (error) throw error;
+    return (data || []).map(row => ({ id: row.id, unitId: row.unit_id, saleId: row.sale_id, kind: row.kind, detail: row.detail, createdAt: row.created_at }));
+  },
+
+  async resolveOfflineConflict(conflictId: string, resolvedBy: string): Promise<void> {
+    const { error } = await supabase.rpc("resolve_pos_offline_conflict", { p_conflict_id: conflictId, p_resolved_by: resolvedBy });
+    if (error) throw error;
+  },
+
+  // === Avariados (2.9): saldo por loja (sem serial) e unidades serializadas avariadas ===
+  async getDamagedStock(): Promise<{ unitId: string; productId: string; quantity: number; serials: string[] }[]> {
+    const rows = new Map<string, { unitId: string; productId: string; quantity: number; serials: string[] }>();
+    const { data: stock, error: stockError } = await supabase
+      .from('product_damaged_stock')
+      .select('unit_id, product_id, quantity')
+      .gt('quantity', 0);
+    if (stockError) throw stockError;
+    (stock || []).forEach(row => rows.set(`${row.unit_id}|${row.product_id}`, { unitId: row.unit_id, productId: row.product_id, quantity: Number(row.quantity), serials: [] }));
+    const { data: units, error: unitsError } = await supabase
+      .from('product_serial_units')
+      .select('unit_id, product_id, serial_number')
+      .eq('status', 'AVARIADO');
+    if (unitsError) throw unitsError;
+    (units || []).forEach(unit => {
+      const key = `${unit.unit_id}|${unit.product_id}`;
+      const row = rows.get(key) ?? { unitId: unit.unit_id, productId: unit.product_id, quantity: 0, serials: [] };
+      row.quantity += 1;
+      row.serials.push(unit.serial_number);
+      rows.set(key, row);
+    });
+    return Array.from(rows.values());
+  },
+
+  // === NFC-e (2.8b) ===
+  async getStoreNfceStatus(): Promise<StoreNfceStatus[]> {
+    const { data, error } = await supabase.rpc('list_store_nfce_status');
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      unitId: row.unit_id,
+      configured: Boolean(row.configured),
+      environment: row.environment ?? null
+    }));
+  },
+
+  // Cancela a NFC-e na Sefaz (ate 30 min depois da autorizacao). Lanca o motivo se recusado.
+  async cancelSaleNfce(saleId: string, justification: string): Promise<void> {
+    const { data, error } = await supabase.functions.invoke('nfce-cancel', {
+      body: { saleId, justification }
+    });
+    if (error) {
+      const context = (error as { context?: Response }).context;
+      const body = context && typeof context.json === 'function' ? await context.json().catch(() => null) : null;
+      throw new Error(body?.error || 'Não foi possível cancelar a NFC-e.');
+    }
+    if (data?.status !== 'CANCELADA') throw new Error(data?.error || 'Não foi possível cancelar a NFC-e.');
   },
 
   // Muda so o status: nunca regrava os itens (o custo congelado vem do servidor).
@@ -1384,7 +1545,17 @@ export const supabaseService = {
       unitId: t.unit_id,
       timestamp: t.timestamp,
       status: t.status,
-      createdProductId: t.created_product_id || undefined
+      createdProductId: t.created_product_id || undefined,
+      tradeNumber: t.trade_number == null ? undefined : Number(t.trade_number),
+      sellerPhone: t.seller_phone || undefined,
+      sellerAddress: t.seller_address || undefined,
+      sellerDocument: t.seller_document || undefined,
+      serialNumber: t.serial_number || undefined,
+      imei: t.imei || undefined,
+      accessories: t.accessories || undefined,
+      paymentMethod: t.payment_method || undefined,
+      staffCode: t.staff_code || undefined,
+      staffName: t.staff_name || undefined
     }));
   },
 
@@ -1432,8 +1603,34 @@ export const supabaseService = {
       unitId: w.unit_id,
       operatorId: w.operator_id,
       operatorName: w.operator_name,
-      timestamp: w.timestamp
+      timestamp: w.timestamp,
+      orderNumber: w.order_number ?? undefined,
+      clientCpf: w.client_cpf || undefined,
+      equipmentType: w.equipment_type || undefined,
+      accessories: w.accessories || undefined,
+      entryCondition: w.entry_condition || undefined,
+      notes: w.notes || undefined,
+      items: Array.isArray(w.items)
+        ? w.items.map((item: any) => ({ serviceId: String(item.serviceId), sku: String(item.sku ?? ''), name: String(item.name ?? ''), price: Number(item.price ?? 0) }))
+        : [],
+      expectedDate: w.expected_date || undefined,
+      staffCode: w.staff_code || undefined,
+      staffName: w.staff_name || undefined,
+      saleId: w.sale_id || undefined,
+      paidAt: w.paid_at || undefined,
+      deliveredAt: w.delivered_at || undefined,
+      deliveredByName: w.delivered_by_name || undefined,
+      warrantyUntil: w.warranty_until || undefined
     }));
+  },
+
+  // So a situacao (a OS e aberta, cobrada e entregue pelo PDV).
+  async updateWorkOrderStatus(id: string, status: WorkOrderStatus): Promise<void> {
+    const { error } = await supabase
+      .from('work_orders')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
   },
 
   async upsertWorkOrder(w: WorkOrder): Promise<void> {
@@ -1476,7 +1673,12 @@ export const supabaseService = {
       address: c.address || undefined,
       phone: c.phone || undefined,
       contactEmail: c.contact_email || undefined,
-      reservationVoucherTerms: c.reservation_voucher_terms || undefined
+      reservationVoucherTerms: c.reservation_voucher_terms || undefined,
+      tradeInTerms: c.trade_in_terms || undefined,
+      workOrderTerms: c.work_order_terms || undefined,
+      workOrderDeliveryTerms: c.work_order_delivery_terms || undefined,
+      instagram: c.instagram || undefined,
+      exchangeDays: c.exchange_days == null ? undefined : Number(c.exchange_days)
     }));
   },
 
@@ -1493,7 +1695,12 @@ export const supabaseService = {
       address: c.address || null,
       phone: c.phone || null,
       contact_email: c.contactEmail || null,
-      reservation_voucher_terms: c.reservationVoucherTerms?.trim() || null
+      reservation_voucher_terms: c.reservationVoucherTerms?.trim() || null,
+      trade_in_terms: c.tradeInTerms?.trim() || null,
+      work_order_terms: c.workOrderTerms?.trim() || null,
+      work_order_delivery_terms: c.workOrderDeliveryTerms?.trim() || null,
+      instagram: c.instagram?.trim() || null,
+      ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {})
     };
 
     const { error } = await supabase.from('store_configs').upsert(payload);

@@ -1,17 +1,15 @@
 ﻿import { FormEvent, useEffect, useRef, useState } from 'react';
 import {
-  BanknoteArrowDown,
-  BanknoteArrowUp,
-  CheckCircle2,
+  ArrowLeft,
   CircleAlert,
   ClipboardList,
   CreditCard,
+  LayoutGrid,
   LockKeyhole,
   Minus,
   Plus,
   ScanBarcode,
   Search,
-  ShieldCheck,
   Trash2,
   UserRound,
   WalletCards,
@@ -31,7 +29,63 @@ import {
   type PosCatalogItem,
   type PosSerialUnit,
 } from '../services/supabase/products';
-import { saleRpc, type PaymentLine, type PaymentMethodKey } from '../services/supabase/sales';
+import {
+  emitPosNfce,
+  getPosNfceStatus,
+  getPosSaleReceipt,
+  saleRpc,
+  syncNfceContingency,
+  type NfceStatus,
+  type PaymentLine,
+  type PaymentMethodKey,
+  type PosNfceStatus,
+} from '../services/supabase/sales';
+import { ReceiptsPanel } from './ReceiptsPanel';
+import { ReturnModal, type ReturnDone } from './ReturnModal';
+import { TradeInPanel, type TradeInDone } from './TradeInPanel';
+import { WorkOrdersPanel, type WorkOrderCharge } from './WorkOrdersPanel';
+import { deliverWorkOrder, getWorkOrder } from '../services/supabase/workOrders';
+import { printWorkOrder } from './workOrderPrint';
+import { getCustomerCreditBalance } from '../services/supabase/returns';
+import { searchPosCustomers } from '../services/supabase/customers';
+import { setUpdateAllowed } from './UpdateNotice';
+import { getVersion } from '@tauri-apps/api/app';
+import { TopBar } from './TopBar';
+import { HomeMenu, type MenuAction } from './HomeMenu';
+import { ProductLookupModal } from './ProductLookupModal';
+import { PrinterSettingsModal } from './PrinterSettingsModal';
+import { getDirectPrinter, openCashDrawer } from '../printing/directPrint';
+import {
+  cacheTerminal,
+  enqueueOfflineMovement,
+  enqueueOfflineSale,
+  findOfflineSeller,
+  findOfflineSerial,
+  getCachedTerminal,
+  getLastOfflineReceipt,
+  getSnapshot,
+  isNetworkError,
+  isOffline,
+  offlineSerialUnits,
+  oldestPendingAt,
+  probeOnline,
+  refreshCounts,
+  refreshSnapshot,
+  rememberAdminPassword,
+  saveLastOfflineReceipt,
+  searchOffline,
+  setOffline,
+  syncOutbox,
+  useOfflineState,
+  verifyAdminPasswordOffline,
+  type OfflineSaleItem,
+  type OfflineSalePayload,
+} from '../offline/offline';
+import { emitLocalNfce, getComunicadorPort, setComunicadorPort } from '../offline/comunicador';
+import { OfflineCustomerModal } from './OfflineCustomerModal';
+import type { PosSaleReceipt } from '../services/supabase/sales';
+import { printClosingReport, printManagerialReport, type ManagerialReport } from './cashReportPrint';
+import { printSaleReceipt } from './receiptPrint';
 import {
   cancelPosReservation,
   createPosReservation,
@@ -52,6 +106,8 @@ import {
 import {
   closeCashSession,
   getCashClosureSummary,
+  getCashSessionReport,
+  type CashSessionReport,
   getOpenCashSession,
   openCashSession,
   recordCashMovement,
@@ -62,25 +118,31 @@ import {
 
 type Screen =
   | 'loading'
+  | 'menu'
   | 'activation'
   | 'set-password'
   | 'unlock'
   | 'cash-open'
   | 'sale'
   | 'reservations'
+  | 'new-reservation'
+  | 'receipts'
   | 'warranty'
+  | 'trade-in'
+  | 'work-orders'
   | 'cash-movement'
   | 'cash-close';
 type PaymentMethod = PaymentMethodKey;
 type MovementType = 'SANGRIA' | 'SUPRIMENTO';
+type FiscalChoice = 'NAO_FISCAL' | 'NFCE';
 
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   DINHEIRO: 'Dinheiro',
   PIX: 'Pix',
-  CREDITO: 'Credito',
-  DEBITO: 'Debito',
-  VOUCHER: 'Voucher',
-  CREDIARIO: 'Crediario',
+  CREDITO: 'Crédito',
+  DEBITO: 'Débito',
+  VOUCHER: 'Vale-troca',
+  CREDIARIO: 'Crediário',
 };
 
 interface CartItem extends PosCatalogItem {
@@ -89,6 +151,9 @@ interface CartItem extends PosCatalogItem {
   serialUnit?: PosSerialUnit;
   // Encomenda: sem estoque agora; so pode ser reservado.
   backorder?: boolean;
+  // Servico de uma Ordem de Servico sendo cobrada (o banco liga a venda a OS).
+  workOrderId?: string;
+  workOrderNumber?: number;
 }
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -120,6 +185,9 @@ function errorMessage(error: unknown): string {
   const passwordLockedError = message.match(/Administrative password locked until (.+)$/i);
   if (passwordLockedError) {
     return passwordLockedMessage(passwordLockedError[1]);
+  }
+  if (message.includes('Counted amounts cannot be negative')) {
+    return 'A contagem não pode ser negativa. Digite o valor que realmente está no caixa (pode ser 0).';
   }
   if (message.includes('Invalid administrative password')) {
     return 'Senha administrativa incorreta.';
@@ -278,6 +346,7 @@ export function App() {
   const [movementAmount, setMovementAmount] = useState('');
   const [movementReason, setMovementReason] = useState('');
   const [closure, setClosure] = useState<CashClosureSummary | null>(null);
+  const [closingReport, setClosingReport] = useState<CashSessionReport | null>(null);
   const [counts, setCounts] = useState<CashCounts>(emptyCounts);
   const [closureNotes, setClosureNotes] = useState('');
   const [query, setQuery] = useState('');
@@ -287,8 +356,8 @@ export function App() {
   const [reservationsLoading, setReservationsLoading] = useState(false);
   const [conversionReservation, setConversionReservation] = useState<PosReservation | null>(null);
   const [conversionPaymentLines, setConversionPaymentLines] = useState<PaymentLine[]>([]);
-  const [refundPaymentMethod, setRefundPaymentMethod] = useState<PaymentMethod>('DINHEIRO');
-  const [reservationDialogOpen, setReservationDialogOpen] = useState(false);
+  // Cancelamento de reserva com sinal: pergunta como o sinal foi devolvido ao cliente.
+  const [cancelTarget, setCancelTarget] = useState<PosReservation | null>(null);
   const [reservationCustomerName, setReservationCustomerName] = useState('');
   const [reservationCustomerPhone, setReservationCustomerPhone] = useState('');
   const [reservationCustomerCpf, setReservationCustomerCpf] = useState('');
@@ -318,6 +387,15 @@ export function App() {
   const [adminApprovalError, setAdminApprovalError] = useState<string | null>(null);
   // Codigo do vendedor (obrigatorio): venda, nova reserva e conversao de reserva.
   const [saleSellerCode, setSaleSellerCode] = useState('');
+  const [tradeSellerCode, setTradeSellerCode] = useState('');
+  const [tradeSeller, setTradeSeller] = useState<PosSeller | null>(null);
+  const [tradeInKey, setTradeInKey] = useState(0);
+  // Ordem de Servico: vendedor da tela, OS a reabrir e cobranca em andamento na venda.
+  const [workOrderSellerCode, setWorkOrderSellerCode] = useState('');
+  const [workOrderSeller, setWorkOrderSeller] = useState<PosSeller | null>(null);
+  const [workOrdersKey, setWorkOrdersKey] = useState(0);
+  const [workOrderFocus, setWorkOrderFocus] = useState<string | null>(null);
+  const [workOrderCharge, setWorkOrderCharge] = useState<WorkOrderCharge | null>(null);
   const [saleSeller, setSaleSeller] = useState<PosSeller | null>(null);
   const [reservationSellerCode, setReservationSellerCode] = useState('');
   const [reservationSeller, setReservationSeller] = useState<PosSeller | null>(null);
@@ -326,11 +404,33 @@ export function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Venda em andamento guardada enquanto o vendedor monta uma reserva na tela de Reservas.
+  const saleDraftRef = useRef<{ cart: CartItem[]; customer: PosCustomer | null; lines: PaymentLine[] } | null>(null);
+  const reservationMode = screen === 'new-reservation';
+  // NFC-e (2.8b): loja configurada no UCP? Escolha do vendedor (NFC-e / Nao Fiscal) da venda em curso.
+  const [nfceConfig, setNfceConfig] = useState<PosNfceStatus | null>(null);
+  const [nfceEmitting, setNfceEmitting] = useState(false);
+  const [nfceProblem, setNfceProblem] = useState<{ saleId: string; change: number; status: NfceStatus; message: string | null } | null>(null);
+  const fiscalChoiceRef = useRef<FiscalChoice>('NAO_FISCAL');
+  // Troca/devolucao (2.9): venda aberta no modal e saldo de vale-troca do cliente da venda.
+  const [returnSaleId, setReturnSaleId] = useState<string | null>(null);
+  const [customerCredit, setCustomerCredit] = useState(0);
+  // Modo offline: cliente digitado sem internet (CPF + nome).
+  const [offlineCustomerOpen, setOfflineCustomerOpen] = useState(false);
+  // Menu inicial (2.10): consulta de produto, versao do app e numero da abertura na barra.
+  const [lookupOpen, setLookupOpen] = useState(false);
+  // Impressao direta (2.8c): impressora termica escolhida neste PC.
+  const [printerOpen, setPrinterOpen] = useState(false);
+  const [directPrinter, setDirectPrinterState] = useState<string | null>(() => getDirectPrinter());
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  const [sessionNumber, setSessionNumber] = useState<number | null>(null);
+  const offlineInfo = useOfflineState();
+  const offlineNow = offlineInfo.offline;
 
   async function routeAfterUnlock() {
     const openCash = await getOpenCashSession();
     setCashSession(openCash);
-    setScreen(openCash ? 'sale' : 'cash-open');
+    setScreen(openCash ? 'menu' : 'cash-open');
   }
 
   useEffect(() => {
@@ -345,10 +445,21 @@ export function App() {
         }
         setTerminal(context);
         setCashNumber(context.displayName);
+        void cacheTerminal(context);
         setScreen(context.needsAdminPassword ? 'set-password' : 'unlock');
       } catch (error) {
-        setMessage(errorMessage(error));
-        setScreen('activation');
+        // Sem internet: nunca voltar para a ativacao; usa o terminal guardado e o modo offline.
+        const cached = isNetworkError(error) ? await getCachedTerminal() : null;
+        if (cached) {
+          setOffline(true);
+          setTerminal(cached);
+          setCashNumber(cached.displayName);
+          setMessage('Sem internet: desbloqueie com a senha administrativa para vender no modo offline.');
+          setScreen('unlock');
+          return;
+        }
+        setMessage(isNetworkError(error) ? 'Sem internet. Conecte o computador à internet para ativar o PDV.' : errorMessage(error));
+        setScreen(isNetworkError(error) ? 'loading' : 'activation');
       }
     })();
     return () => listener.subscription.unsubscribe();
@@ -403,15 +514,45 @@ export function App() {
     setBusy(true);
     setMessage(null);
     try {
+      if (isOffline()) {
+        await unlockOffline();
+        return;
+      }
       const context = await requireAdminPassword(password);
       setTerminal(context);
+      void cacheTerminal(context);
+      void rememberAdminPassword(password);
       setPassword('');
       await routeAfterUnlock();
+      void refreshSnapshot();
     } catch (error) {
+      if (isNetworkError(error)) {
+        setOffline(true);
+        await unlockOffline();
+        return;
+      }
       setMessage(errorMessage(error));
     } finally {
       setBusy(false);
     }
+  }
+
+  // Desbloqueio sem internet: confere a senha com o hash guardado no ultimo desbloqueio online.
+  async function unlockOffline() {
+    if (!(await verifyAdminPasswordOffline(password))) {
+      setMessage('Senha incorreta (sem internet, vale a senha do último desbloqueio feito com internet).');
+      return;
+    }
+    setPassword('');
+    const snapshot = await getSnapshot();
+    if (!snapshot?.cash) {
+      setMessage('Sem internet e sem caixa aberto guardado: abra o caixa quando a internet voltar.');
+      setScreen('unlock');
+      return;
+    }
+    setCashSession(snapshot.cash);
+    setScreen('menu');
+    setMessage('MODO OFFLINE: vendas ficam guardadas neste computador e são enviadas quando a internet voltar.');
   }
 
   async function handleCashOpen(event: FormEvent<HTMLFormElement>) {
@@ -421,7 +562,14 @@ export function App() {
     try {
       const opened = await openCashSession(cashNumber, responsibleName, valueAsNumber(openingFloat));
       setCashSession(opened);
-      setScreen('sale');
+      setScreen('menu');
+      void printCashReport({
+        subtitle: 'Abertura de PDV',
+        date: new Date(opened.openedAt),
+        cashNumber: opened.cashNumber,
+        operator: opened.openedByName,
+        cashAmount: opened.openingFloatAmount,
+      });
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -434,15 +582,28 @@ export function App() {
     setBusy(true);
     setMessage(null);
     try {
-      await recordCashMovement(
-        movementType,
-        valueAsNumber(movementAmount),
-        movementReason,
-        responsibleName
-      );
+      const operator = responsibleName.trim() || cashSession?.openedByName || '';
+      if (isOffline()) {
+        await enqueueOfflineMovement({ type: movementType, amount: valueAsNumber(movementAmount), reason: movementReason, operatorName: operator });
+      } else {
+        await recordCashMovement(
+          movementType,
+          valueAsNumber(movementAmount),
+          movementReason,
+          operator
+        );
+      }
+      void printCashReport({
+        subtitle: movementType === 'SANGRIA' ? 'Sangria' : 'Suprimento',
+        date: new Date(),
+        cashNumber: cashSession?.cashNumber ?? '',
+        operator,
+        cashAmount: valueAsNumber(movementAmount),
+        reason: movementReason.trim() || null,
+      });
       setMovementAmount('');
       setMovementReason('');
-      setScreen('sale');
+      setScreen('menu');
       setMessage(`${movementType === 'SANGRIA' ? 'Sangria' : 'Suprimento'} registrado com sucesso.`);
     } catch (error) {
       setMessage(errorMessage(error));
@@ -457,13 +618,16 @@ export function App() {
     try {
       const summary = await getCashClosureSummary();
       setClosure(summary);
+      // Dados extras do relatorio de fechamento; se a consulta falhar, o relatorio sai sem eles.
+      setClosingReport(await getCashSessionReport().catch(() => null));
+      // Contagem comeca no valor esperado, nunca negativa (o banco recusa contagem negativa).
       setCounts({
-        cash: summary.expectedCashAmount,
-        pix: summary.expectedPixAmount,
-        credit: summary.expectedCreditAmount,
-        debit: summary.expectedDebitAmount,
-        voucher: summary.expectedVoucherAmount,
-        creditAccount: summary.expectedCreditAccountAmount,
+        cash: Math.max(0, summary.expectedCashAmount),
+        pix: Math.max(0, summary.expectedPixAmount),
+        credit: Math.max(0, summary.expectedCreditAmount),
+        debit: Math.max(0, summary.expectedDebitAmount),
+        voucher: Math.max(0, summary.expectedVoucherAmount),
+        creditAccount: Math.max(0, summary.expectedCreditAccountAmount),
       });
       setPassword('');
       setScreen('cash-close');
@@ -481,6 +645,13 @@ export function App() {
     try {
       await requireAdminPassword(password);
       await closeCashSession(responsibleName, counts, closureNotes);
+      if (closure) {
+        const closingData = { summary: closure, report: closingReport, counts, closedBy: responsibleName.trim(), closedAt: new Date() };
+        void loadStoreProfile()
+          .then((store) => printClosingReport(closingData, store))
+          .catch((error) => setMessage(`Caixa fechado, mas o relatório não pôde ser impresso: ${errorMessage(error)}`));
+      }
+      setClosingReport(null);
       setCashSession(null);
       setClosure(null);
       setPassword('');
@@ -505,7 +676,18 @@ export function App() {
     setBusy(true);
     setMessage(null);
     try {
-      const found = await searchPosItems(trimmedQuery);
+      let found: PosCatalogItem[];
+      if (isOffline()) {
+        found = await searchOffline(trimmedQuery);
+      } else {
+        try {
+          found = await searchPosItems(trimmedQuery);
+        } catch (searchError) {
+          if (!isNetworkError(searchError)) throw searchError;
+          setOffline(true);
+          found = await searchOffline(trimmedQuery);
+        }
+      }
       const normalizedQuery = normalizeSku(trimmedQuery);
       const exactSkuMatches = found.filter((item) => normalizeSku(item.sku) === normalizedQuery);
 
@@ -525,7 +707,14 @@ export function App() {
       // Nao e codigo de produto: pode ser o serial (ou IMEI) de uma unidade bipada.
       if (exactSkuMatches.length === 0 && !/\s/.test(trimmedQuery)) {
         // Falha nesta consulta extra nao pode impedir a busca normal por nome.
-        const scanned = await findPosSerialUnit(trimmedQuery).catch(() => null);
+        if (isOffline()) {
+          const local = await findOfflineSerial(trimmedQuery);
+          if (local) {
+            addSerialUnitToCart(local.product, local.unit);
+            return;
+          }
+        }
+        const scanned = isOffline() ? null : await findPosSerialUnit(trimmedQuery).catch(() => null);
         if (scanned) {
           if (scanned.serialUnit) {
             addSerialUnitToCart(scanned.product, scanned.serialUnit);
@@ -546,12 +735,20 @@ export function App() {
   }
 
   async function selectProduct(product: PosCatalogItem) {
-    // Sem estoque nesta loja: entra como encomenda (so pode ser reservado).
+    if (reservationMode && product.itemType === 'SERVICE') {
+      setMessage('Serviços não podem ser reservados: adicione o serviço na hora da venda.');
+      return;
+    }
+    // Sem estoque nesta loja: na reserva entra como encomenda; na venda, orienta a reservar.
     if (product.itemType === 'PRODUCT' && product.availableQuantity <= 0) {
+      if (!reservationMode) {
+        setMessage(`"${product.name}" está sem estoque nesta loja. Para encomendar, use Reservas > Nova reserva.`);
+        return;
+      }
       addBackorder(product);
       setCatalogItems([]);
       setQuery('');
-      setMessage(`"${product.name}" está sem estoque nesta loja: entrou como encomenda e só pode ser reservado.`);
+      setMessage(`"${product.name}" está sem estoque nesta loja: entrou como encomenda.`);
       return;
     }
     if (product.itemType === 'PRODUCT' && product.requiresUnitSelection) {
@@ -565,7 +762,9 @@ export function App() {
       setSerialUnitsError(null);
       setSerialUnitsLoading(true);
       try {
-        const availableUnits = await getPosAvailableSerialUnits(product.id, terminal.unitId);
+        const availableUnits = isOffline()
+          ? await offlineSerialUnits(product.id)
+          : await getPosAvailableSerialUnits(product.id, terminal.unitId);
         setSerialUnits(availableUnits);
       } catch (error) {
         setSerialUnitsError(errorMessage(error));
@@ -578,12 +777,12 @@ export function App() {
     addProduct(product);
     setCatalogItems([]);
     setQuery('');
-    setMessage(`${product.itemType === 'SERVICE' ? 'Serviço' : 'Produto'} "${product.name}" adicionado ao carrinho.`);
+    setMessage(`${product.itemType === 'SERVICE' ? 'Serviço' : 'Produto'} "${product.name}" adicionado ${reservationMode ? 'à reserva' : 'ao carrinho'}.`);
   }
 
   function addProduct(product: PosCatalogItem) {
     setCart((current) => {
-      const existing = current.find((item) => item.id === product.id && item.itemType === product.itemType && !item.serialUnit && !item.backorder);
+      const existing = current.find((item) => item.id === product.id && item.itemType === product.itemType && !item.serialUnit && !item.backorder && !item.workOrderId);
       if (!existing) return [...current, { ...product, quantity: 1, discountPercent: 0 }];
 
       if (product.itemType === 'PRODUCT' && existing.quantity >= product.availableQuantity) {
@@ -608,7 +807,7 @@ export function App() {
   function changeQuantity(productId: string, itemType: PosCatalogItem['itemType'], change: number) {
     setCart((current) =>
       current.flatMap((item) => {
-        if (item.id !== productId || item.itemType !== itemType) return [item];
+        if (item.id !== productId || item.itemType !== itemType || item.workOrderId) return [item];
         const quantity = item.quantity + change;
         if (quantity <= 0) return [];
         return item.itemType === 'PRODUCT' && !item.backorder && quantity > item.availableQuantity ? [item] : [{ ...item, quantity }];
@@ -661,7 +860,8 @@ export function App() {
     return cart.some((item) => item.discountPercent > item.maxItemDiscountPercent);
   }
 
-  async function finalizeSale() {
+  async function finalizeSale(fiscal?: FiscalChoice) {
+    if (fiscal) fiscalChoiceRef.current = fiscal;
     if (!cashSession || cart.length === 0) return;
     if (cart.some((item) => item.backorder)) {
       setMessage('Itens de encomenda (sem estoque) só podem ser reservados.');
@@ -671,12 +871,20 @@ export function App() {
       setMessage('Informe o código do vendedor para finalizar a venda.');
       return;
     }
+    if (isOffline() && cart.some((item) => item.workOrderId)) {
+      setMessage('Sem internet não dá para cobrar a ordem de serviço. Aguarde a conexão voltar.');
+      return;
+    }
     const resolution = resolvePayments(paymentLines, grossAmount);
     if (resolution.error) {
       setMessage(resolution.error);
       return;
     }
     const needsApproval = cartHasOverLimitDiscount();
+    if (needsApproval && isOffline()) {
+      setMessage('Sem internet não dá para liberar desconto acima do limite (a senha é conferida no servidor). Ajuste o desconto.');
+      return;
+    }
     if (needsApproval && !adminApprovalOpen) {
       setAdminApprovalPassword('');
       setAdminApprovalError(null);
@@ -686,9 +894,18 @@ export function App() {
     setBusy(true);
     setMessage(null);
     setAdminApprovalError(null);
+    const saleId = crypto.randomUUID();
+    if (isOffline()) {
+      try {
+        await finalizeOffline(saleId, resolution.applied, resolution.changeCents / 100);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const result = await saleRpc.processTransaction({
-        saleId: crypto.randomUUID(),
+        saleId,
         invoiceNumber: `PDV-${Date.now()}`,
         items: cart.map((item) => ({
           itemType: item.itemType,
@@ -704,6 +921,7 @@ export function App() {
                 serials: [item.serialUnit.serialNumber],
               }
             : {}),
+          ...(item.workOrderId ? { workOrderId: item.workOrderId } : {}),
         })),
         paymentMethod: legacyPaymentMethod(resolution.applied),
         payments: resolution.applied,
@@ -739,6 +957,8 @@ export function App() {
         setAdminApprovalError(passwordLockedMessage(result.lockedUntil));
         return;
       }
+      const charge = cart.some((item) => item.workOrderId) ? workOrderCharge : null;
+      const sellerCode = saleSeller.code;
       setCart([]);
       setCatalogItems([]);
       setQuery('');
@@ -748,18 +968,239 @@ export function App() {
       setSaleCustomer(null);
       setAdminApprovalPassword('');
       setAdminApprovalOpen(false);
+      setWorkOrderCharge(null);
       setMessage(
         resolution.changeCents > 0
           ? `Venda registrada com sucesso. Troco: ${currency.format(resolution.changeCents / 100)}.`
           : 'Venda registrada com sucesso.'
       );
+      void deliverReceipt(saleId, resolution.changeCents / 100);
+      if (charge) void finishWorkOrderSale(charge, sellerCode, resolution.changeCents / 100);
+      // Venda com dinheiro: abre a gaveta (impressao direta configurada).
+      if (resolution.applied.some((line) => line.paymentMethod === 'DINHEIRO')) void openCashDrawer();
     } catch (error) {
+      // Caiu a internet no meio: registra offline com o mesmo id (o envio e idempotente).
+      if (isNetworkError(error)) {
+        setOffline(true);
+        await finalizeOffline(saleId, resolution.applied, resolution.changeCents / 100);
+        return;
+      }
       const text = errorMessage(error);
       setMessage(text);
       if (adminApprovalOpen) setAdminApprovalError(text);
     } finally {
       setBusy(false);
     }
+  }
+
+  // Venda sem internet: guarda na fila, desconta da copia local e imprime o cupom.
+  // NFC-e pelo Comunicador Offline (contingencia); se nao der, sai como Nao Fiscal.
+  async function finalizeOffline(saleId: string, applied: PaymentLine[], changeAmount: number) {
+    const snapshot = await getSnapshot();
+    if (!snapshot?.cash || !saleSeller) {
+      setMessage('Sem internet e sem os dados do caixa guardados: não é possível vender offline.');
+      return;
+    }
+    if (applied.some((line) => line.paymentMethod === 'VOUCHER')) {
+      setMessage('Vale-troca não pode ser usado sem internet (o saldo é conferido no servidor).');
+      return;
+    }
+    const items: OfflineSaleItem[] = cart.map((item) => ({
+      itemType: item.itemType,
+      ...(item.itemType === 'SERVICE' ? { serviceId: item.id } : { productId: item.id }),
+      itemSku: item.sku,
+      itemName: item.name,
+      quantity: item.quantity,
+      discountPercent: item.discountPercent,
+      unitPrice: item.sellPrice,
+      lineTotal: discountedLineTotal(item),
+      ...(item.serialUnit ? { serials: [item.serialUnit.serialNumber] } : {}),
+    }));
+    const timestamp = new Date().toISOString();
+    const payload: OfflineSalePayload = {
+      saleId,
+      invoiceNumber: `PDV-${Date.now()}`,
+      timestamp,
+      cashSessionId: snapshot.cash.id,
+      sellerCode: saleSeller.code,
+      sellerName: saleSeller.name,
+      clientCpf: saleCustomer?.cpf ?? null,
+      clientName: saleCustomer?.name ?? null,
+      items,
+      payments: applied.map((line) => ({ paymentMethod: line.paymentMethod, amount: Number(line.amount.toFixed(2)) })),
+      nfce: null,
+    };
+    let fiscalNote = '';
+    if (fiscalChoiceRef.current === 'NFCE') {
+      const oldest = await oldestPendingAt();
+      if (oldest && Date.now() - oldest.getTime() > 24 * 60 * 60 * 1000) {
+        fiscalNote = ' NFC-e não emitida: há vendas sem internet há mais de 24 horas (prazo da contingência). Saiu como Não Fiscal.';
+      } else if (!snapshot.nfce?.configured) {
+        fiscalNote = ' NFC-e não configurada para esta loja: saiu como Não Fiscal.';
+      } else {
+        const local = await emitLocalNfce(payload, snapshot);
+        if (local.ok) payload.nfce = local.nfce;
+        else fiscalNote = ` NFC-e não emitida (${local.message}). Saiu como Não Fiscal.`;
+      }
+    }
+    await enqueueOfflineSale(payload);
+    const receipt: PosSaleReceipt = {
+      saleId,
+      receiptNumber: null,
+      timestamp,
+      items: items.map((item) => ({
+        itemType: item.itemType, itemSku: item.itemSku, itemName: item.itemName, quantity: item.quantity,
+        unitPrice: item.unitPrice, discountPercent: item.discountPercent, lineTotal: item.lineTotal, serials: item.serials ?? [],
+      })),
+      grossAmount,
+      depositApplied: 0,
+      paymentMethod: applied.length === 1 ? applied[0].paymentMethod : 'DIVIDIDO',
+      payments: payload.payments,
+      sellerName: saleSeller.name,
+      clientName: payload.clientName,
+      clientCpf: payload.clientCpf,
+      fiscalStatus: payload.nfce ? 'AUTORIZADA' : null,
+      nfce: payload.nfce
+        ? {
+            environment: (payload.nfce.environment as 'homologacao' | 'producao') ?? null,
+            number: (payload.nfce.number as string | null) ?? null,
+            series: (payload.nfce.series as string | null) ?? null,
+            key: (payload.nfce.key as string | null) ?? null,
+            protocol: (payload.nfce.protocol as string | null) ?? null,
+            qrcodeUrl: (payload.nfce.qrcodeUrl as string | null) ?? null,
+            consultUrl: (payload.nfce.consultUrl as string | null) ?? null,
+            authorizedAt: timestamp,
+            taxTotal: Number(payload.nfce.taxTotal ?? 0),
+            message: null,
+            contingency: true,
+            contingencyDone: false,
+          }
+        : null,
+    };
+    await saveLastOfflineReceipt({ receipt, changeAmount });
+    void printSaleReceipt(receipt, snapshot.store, changeAmount);
+    if (applied.some((line) => line.paymentMethod === 'DINHEIRO')) void openCashDrawer();
+    setCart([]);
+    setCatalogItems([]);
+    setQuery('');
+    setPaymentLines([]);
+    setSaleSellerCode('');
+    setSaleSeller(null);
+    setSaleCustomer(null);
+    setMessage(`Venda registrada SEM INTERNET${changeAmount > 0 ? ` (troco: ${currency.format(changeAmount)})` : ''}. Ela será enviada automaticamente quando a conexão voltar.${fiscalNote}`);
+  }
+
+  function configureComunicador() {
+    const port = window.prompt('Porta do Comunicador Offline da Focus neste computador (em branco = desligado):', getComunicadorPort() ?? '');
+    if (port === null) return;
+    const clean = port.replace(/\D/g, '');
+    setComunicadorPort(clean || null);
+    setMessage(clean ? `Comunicador Offline configurado na porta ${clean}.` : 'Comunicador Offline desligado neste computador.');
+  }
+
+  // Caixa parcial: relatorio do caixa ainda aberto, sem contagem.
+  async function printPartialReport() {
+    setBusy(true);
+    try {
+      const summary = await getCashClosureSummary();
+      const report = await getCashSessionReport().catch(() => null);
+      await printClosingReport({
+        summary,
+        report,
+        counts: {
+          cash: summary.expectedCashAmount,
+          pix: summary.expectedPixAmount,
+          credit: summary.expectedCreditAmount,
+          debit: summary.expectedDebitAmount,
+          voucher: summary.expectedVoucherAmount,
+          creditAccount: summary.expectedCreditAccountAmount,
+        },
+        closedBy: summary.openedByName,
+        closedAt: new Date(),
+        partial: true,
+      }, await loadStoreProfile());
+    } catch (error) {
+      setMessage(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleMenuAction(action: MenuAction) {
+    setMessage(null);
+    switch (action) {
+      case 'sale': setScreen('sale'); break;
+      case 'reservations': void openReservations(); break;
+      case 'returns':
+        setScreen('receipts');
+        setMessage('Busque a venda (data, número ou CPF) e use "Trocar / Devolver".');
+        break;
+      case 'warranty': setScreen('warranty'); break;
+      case 'trade-in':
+        setTradeInKey((key) => key + 1);
+        setTradeSellerCode('');
+        setTradeSeller(null);
+        setScreen('trade-in');
+        break;
+      case 'work-orders':
+        openWorkOrders(null);
+        break;
+      case 'receipts':
+        if (offlineNow) void reprintLastOfflineReceipt();
+        else setScreen('receipts');
+        break;
+      case 'today-sales': setScreen('receipts'); break;
+      case 'new-reservation': startNewReservation(); break;
+      case 'sangria':
+      case 'suprimento':
+        setMovementType(action === 'sangria' ? 'SANGRIA' : 'SUPRIMENTO');
+        setScreen('cash-movement');
+        break;
+      case 'partial': void printPartialReport(); break;
+      case 'open-cash': setScreen('cash-open'); break;
+      case 'close-cash':
+        if (offlineNow || offlineInfo.pending > 0 || offlineInfo.errors > 0) {
+          setMessage('Para fechar o caixa é preciso internet e todas as vendas feitas sem internet enviadas.');
+          return;
+        }
+        void openClosing();
+        break;
+      case 'reprint-opening':
+        if (cashSession) {
+          void printCashReport({
+            subtitle: 'Abertura de PDV',
+            date: new Date(cashSession.openedAt),
+            cashNumber: cashSession.cashNumber,
+            operator: cashSession.openedByName,
+            cashAmount: cashSession.openingFloatAmount,
+          });
+        }
+        break;
+      case 'lock':
+        setPassword('');
+        setScreen('unlock');
+        break;
+      case 'product-lookup': setLookupOpen(true); break;
+      case 'comunicador': configureComunicador(); break;
+      case 'version':
+        setMessage(`Kanguru PDV versão ${appVersion ?? '-'}. O PDV procura atualizações sozinho ao abrir e a cada 4 horas.`);
+        break;
+      case 'printer': setPrinterOpen(true); break;
+      case 'drawer':
+        void openCashDrawer().then((ok) => setMessage(ok ? 'Gaveta aberta.' : 'Não foi possível abrir a gaveta. Confira a impressora em Configurações › Impressora.'));
+        break;
+      default:
+        break;
+    }
+  }
+
+  async function reprintLastOfflineReceipt() {
+    const last = await getLastOfflineReceipt<{ receipt: PosSaleReceipt; changeAmount: number }>();
+    if (!last) {
+      setMessage('Nenhuma venda feita sem internet para reimprimir.');
+      return;
+    }
+    void printSaleReceipt(last.receipt, (await getSnapshot())?.store ?? null, last.changeAmount);
   }
 
   async function confirmDiscountApproval() {
@@ -779,6 +1220,155 @@ export function App() {
     } catch {
       return null;
     }
+  }
+
+  // Cupom da venda. Sem saleId: ultima venda deste terminal (reimpressao).
+  async function printReceipt(saleId: string | null, changeAmount = 0) {
+    try {
+      const receipt = await getPosSaleReceipt(saleId);
+      if (!receipt) {
+        setMessage('Nenhuma venda deste terminal para reimprimir.');
+        return;
+      }
+      await printSaleReceipt(receipt, await loadStoreProfile(), changeAmount);
+    } catch (error) {
+      setMessage(`Venda registrada, mas o cupom não pôde ser impresso: ${errorMessage(error)}`);
+    }
+  }
+
+  // Depois da venda: Nao Fiscal imprime o cupom; NFC-e emite a nota e imprime o DANFE.
+  async function deliverReceipt(saleId: string, changeAmount: number) {
+    if (fiscalChoiceRef.current === 'NFCE') await emitNfce(saleId, changeAmount);
+    else await printReceipt(saleId, changeAmount);
+  }
+
+  async function emitNfce(saleId: string, changeAmount: number) {
+    setNfceEmitting(true);
+    setNfceProblem(null);
+    try {
+      const result = await emitPosNfce(saleId);
+      if (result.status === 'AUTORIZADA') {
+        const label = result.contingency
+          ? 'NFC-e emitida em CONTINGÊNCIA (Sefaz fora do ar): entregue a via do consumidor e guarde a via do estabelecimento. A nota é enviada à Sefaz automaticamente.'
+          : 'NFC-e autorizada.';
+        setMessage(changeAmount > 0 ? `${label} Troco: ${currency.format(changeAmount)}.` : label);
+        await printReceipt(saleId, changeAmount);
+      } else {
+        setNfceProblem({ saleId, change: changeAmount, status: result.status, message: result.message });
+      }
+    } finally {
+      setNfceEmitting(false);
+    }
+  }
+
+  // Relatorio Gerencial (abertura, sangria, suprimento): falha na impressao nao desfaz a operacao.
+  async function printCashReport(report: ManagerialReport) {
+    try {
+      await printManagerialReport(report, await loadStoreProfile());
+    } catch (error) {
+      setMessage(`Operação registrada, mas o relatório não pôde ser impresso: ${errorMessage(error)}`);
+    }
+  }
+
+  // Troca Gamer concluida: dinheiro abre a gaveta; "usar o vale agora" vai para a venda com o cliente.
+  async function finishTradeIn(result: TradeInDone) {
+    const { record } = result;
+    const text = `Troca Gamer nº ${record.tradeNumber} registrada: ${currency.format(record.amount)}.`;
+    if (!result.useVoucherNow) {
+      setMessage(text);
+      setScreen('menu');
+      return;
+    }
+    const found = await searchPosCustomers(record.customerCpf).catch(() => []);
+    const customer = found.find((item) => item.cpf === record.customerCpf);
+    if (customer) setSaleCustomer(customer);
+    setScreen('sale');
+    setMessage(`${text} Escolha os produtos e clique em "Usar vale-troca" (${currency.format(record.amount)}).`);
+  }
+
+  function openWorkOrders(focusId: string | null) {
+    setWorkOrdersKey((key) => key + 1);
+    setWorkOrderSellerCode('');
+    setWorkOrderSeller(null);
+    setWorkOrderFocus(focusId);
+    setScreen('work-orders');
+  }
+
+  // Cobrar a OS: venda normal com os servicos da OS no carrinho e o cliente preenchido.
+  // Preco e limite de desconto atuais do cadastro (o servidor recalcula na venda).
+  async function chargeWorkOrder(charge: WorkOrderCharge): Promise<string | null> {
+    if (!cashSession) return 'Abra o caixa para cobrar a ordem de serviço.';
+    if (cart.length > 0) return 'Há uma venda em andamento: finalize ou limpe o carrinho antes de cobrar a OS.';
+    const { order } = charge;
+    const items: CartItem[] = [];
+    for (const service of order.items) {
+      const found = (await searchPosItems(service.sku)).find((item) => item.itemType === 'SERVICE' && item.id === service.serviceId);
+      if (!found) return `O serviço "${service.name}" está inativo ou foi excluído no ERP. Troque o serviço na OS.`;
+      items.push({ ...found, quantity: 1, discountPercent: 0, workOrderId: order.workOrderId, workOrderNumber: order.orderNumber });
+    }
+    if (order.customerCpf) {
+      const customers = await searchPosCustomers(order.customerCpf).catch(() => []);
+      setSaleCustomer(customers.find((item) => item.cpf === order.customerCpf) ?? null);
+    }
+    setCart(items);
+    setPaymentLines([]);
+    setWorkOrderCharge(charge);
+    setScreen('sale');
+    setMessage(`Cobrança da OS nº ${order.orderNumber}${charge.deliver ? ' (entrega)' : ''}: escolha a forma de pagamento e finalize em "Não Fiscal".`);
+    return null;
+  }
+
+  function cancelWorkOrderCharge() {
+    const number = workOrderCharge?.order.orderNumber;
+    setCart((current) => current.filter((item) => !item.workOrderId));
+    setWorkOrderCharge(null);
+    setMessage(number ? `Cobrança da OS nº ${number} cancelada. A OS continua a pagar.` : null);
+  }
+
+  // Depois da venda da OS: entrega registra e imprime o comprovante de entrega;
+  // pagamento na abertura imprime o comprovante de entrada ja como "pago".
+  async function finishWorkOrderSale(charge: WorkOrderCharge, sellerCode: string, changeAmount: number) {
+    const { order } = charge;
+    const change = changeAmount > 0 ? ` Troco: ${currency.format(changeAmount)}.` : '';
+    try {
+      if (charge.deliver) {
+        const result = await deliverWorkOrder(order.workOrderId, sellerCode, { withoutRepair: false, tested: true });
+        if (result.status !== 'OK') throw new Error(result.status === 'INVALID_SELLER' ? 'código do vendedor inválido' : 'OS não ficou paga');
+        const record = result.order;
+        setMessage(`OS nº ${order.orderNumber} paga e entregue.${change} Colha a assinatura do cliente no comprovante de entrega.`);
+        await printWorkOrder(record, await loadStoreProfile(), 'delivery');
+      } else {
+        const record = await getWorkOrder(order.workOrderId);
+        setMessage(`OS nº ${order.orderNumber} paga.${change} Colha a assinatura do cliente no comprovante de abertura.`);
+        await printWorkOrder(record, await loadStoreProfile(), 'entry');
+      }
+    } catch (error) {
+      setMessage(`Venda registrada, mas a OS nº ${order.orderNumber} não foi atualizada: ${errorMessage(error)}. Abra a OS em "Ordens de serviço" e conclua por lá.`);
+    }
+  }
+
+  // Troca: volta para a venda com o cliente selecionado; o vale ja esta no CPF dele.
+  async function finishReturn(result: ReturnDone) {
+    setReturnSaleId(null);
+    setMessage(result.message);
+    if (!result.exchange) return;
+    const found = await searchPosCustomers(result.exchange.cpf).catch(() => []);
+    const customer = found.find((item) => item.cpf === result.exchange?.cpf);
+    if (customer) setSaleCustomer(customer);
+    setScreen('sale');
+    setMessage(`${result.message} Escolha os produtos da troca e clique em "Usar vale-troca" (${currency.format(result.exchange.amount)}).`);
+  }
+
+  // Vale-troca como forma de pagamento (VOUCHER): cobre o que falta, ate o saldo do CPF.
+  function applyCustomerCredit() {
+    const others = paymentLines.filter((line) => line.paymentMethod !== 'VOUCHER');
+    const othersTotal = others.reduce((sum, line) => sum + line.amount, 0);
+    const amount = Math.round(Math.min(customerCredit, Math.max(0, grossAmount - othersTotal)) * 100) / 100;
+    if (amount <= 0) {
+      setMessage('As formas de pagamento já cobrem o total da venda.');
+      return;
+    }
+    setPaymentLines([{ paymentMethod: 'VOUCHER', amount }, ...others]);
   }
 
   async function printVoucher(data: ReservationVoucherData) {
@@ -819,6 +1409,51 @@ export function App() {
       setReservationsLoading(false);
       setBusy(false);
     }
+  }
+
+  function defaultReservationDate(): string {
+    const date = new Date();
+    date.setDate(date.getDate() + 7);
+    return localDateInputValue(date);
+  }
+
+  function startNewReservation() {
+    saleDraftRef.current = { cart, customer: saleCustomer, lines: paymentLines };
+    setCart([]);
+    setSaleCustomer(null);
+    setPaymentLines([]);
+    setCatalogItems([]);
+    setQuery('');
+    setMessage(null);
+    setReservationCustomerName('');
+    setReservationCustomerPhone('');
+    setReservationCustomerCpf('');
+    setReservationExpiresOn(defaultReservationDate());
+    setReservationDeposit('');
+    setReservationSellerCode('');
+    setReservationSeller(null);
+    setScreen('new-reservation');
+  }
+
+  function restoreSaleDraft() {
+    const draft = saleDraftRef.current;
+    saleDraftRef.current = null;
+    setCart(draft?.cart ?? []);
+    setSaleCustomer(draft?.customer ?? null);
+    setPaymentLines(draft?.lines ?? []);
+    setCatalogItems([]);
+    setQuery('');
+  }
+
+  function leaveNewReservation() {
+    restoreSaleDraft();
+    void openReservations();
+  }
+
+  function fillReservationCustomer(customer: PosCustomer) {
+    setReservationCustomerName(customer.name);
+    setReservationCustomerCpf(maskCpf(customer.cpf));
+    setReservationCustomerPhone(customer.phone);
   }
 
   async function submitReservation(event: FormEvent<HTMLFormElement>) {
@@ -879,20 +1514,17 @@ export function App() {
         expiresAt,
         sellerName: reservationSeller.name,
       };
-      setCart([]);
-      setCatalogItems([]);
-      setQuery('');
-      setPaymentLines([]);
-      setReservationDialogOpen(false);
       setReservationCustomerName('');
       setReservationCustomerPhone('');
       setReservationCustomerCpf('');
-      setSaleCustomer(null);
       setReservationDeposit('');
       setReservationSellerCode('');
       setReservationSeller(null);
-      setMessage(`Reserva registrada para ${reservationSeller.name}. Imprima o voucher: a via de cima fica na loja e o canhoto vai para o cliente.`);
       void printVoucher(voucher);
+      restoreSaleDraft();
+      setReservations(await getPosReservations().catch(() => reservations));
+      setScreen('reservations');
+      setMessage(`Reserva registrada para ${reservationSeller.name}. Imprima o voucher: a via de cima fica na loja e o canhoto vai para o cliente.`);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -900,7 +1532,8 @@ export function App() {
     }
   }
 
-  async function convertReservationToSale(reservation: PosReservation, lines: PaymentLine[]) {
+  async function convertReservationToSale(reservation: PosReservation, lines: PaymentLine[], fiscal: FiscalChoice) {
+    fiscalChoiceRef.current = fiscal;
     if (!cashSession) return;
     const { total, remaining } = reservationAmounts(reservation);
     // Sinal cobrindo tudo: sem linhas de pagamento (cai no caminho legado, saldo zero).
@@ -925,9 +1558,10 @@ export function App() {
     }
     setBusy(true);
     setMessage(null);
+    const saleId = crypto.randomUUID();
     try {
       const result = await saleRpc.processTransaction({
-        saleId: crypto.randomUUID(),
+        saleId,
         invoiceNumber: `PDV-${Date.now()}`,
         reservationId: reservation.id,
         items: reservation.items.map((item) => {
@@ -984,6 +1618,8 @@ export function App() {
         `Reserva de ${reservation.customerName} convertida em venda${reservation.sellerName ? ` (venda de ${reservation.sellerName})` : ''}. Saldo pago: ${currency.format(remaining)}.`
           + (resolution && resolution.changeCents > 0 ? ` Troco: ${currency.format(resolution.changeCents / 100)}.` : '')
       );
+      void deliverReceipt(saleId, resolution ? resolution.changeCents / 100 : 0);
+      if (resolution?.applied.some((line) => line.paymentMethod === 'DINHEIRO')) void openCashDrawer();
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -991,13 +1627,18 @@ export function App() {
     }
   }
 
-  async function cancelReservation(reservation: PosReservation) {
-    const refundMethod = reservation.depositAmount > 0 ? refundPaymentMethod : null;
-    const confirmation = reservation.depositAmount > 0
-      ? `Cancelar a reserva e registrar a devolução manual de ${currency.format(reservation.depositAmount)} por ${refundMethod}? O estorno no adquirente deve ser feito separadamente.`
-      : `Cancelar a reserva de ${reservation.customerName}?`;
-    if (!window.confirm(confirmation)) return;
+  // Com sinal abre a janela da forma de devolucao; sem sinal so confirma.
+  function cancelReservation(reservation: PosReservation) {
+    if (reservation.depositAmount > 0) {
+      setCancelTarget(reservation);
+      return;
+    }
+    if (!window.confirm(`Cancelar a reserva de ${reservation.customerName}?`)) return;
+    void confirmCancelReservation(reservation, null);
+  }
 
+  async function confirmCancelReservation(reservation: PosReservation, refundMethod: PaymentMethod | null) {
+    setCancelTarget(null);
     setBusy(true);
     setMessage(null);
     try {
@@ -1011,8 +1652,125 @@ export function App() {
     }
   }
 
+  // Carrinho limpo (cancelar venda, F6...): a cobranca da OS deixa de valer.
+  useEffect(() => {
+    if (workOrderCharge && !cart.some((item) => item.workOrderId)) setWorkOrderCharge(null);
+  }, [cart, workOrderCharge]);
+
+  useEffect(() => {
+    if (screen !== 'sale' && screen !== 'receipts') return;
+    // Sem internet vale a configuracao guardada (NFC-e pelo Comunicador Offline).
+    getPosNfceStatus().then(setNfceConfig).catch(async () => setNfceConfig((await getSnapshot())?.nfce ?? null));
+  }, [screen]);
+
+  useEffect(() => {
+    if (!saleCustomer) {
+      setCustomerCredit(0);
+      return;
+    }
+    getCustomerCreditBalance(saleCustomer.cpf).then(setCustomerCredit).catch(() => setCustomerCredit(0));
+  }, [saleCustomer, screen]);
+
+  // Contingencia: acompanha as NFC-e emitidas com a Sefaz fora do ar (ao abrir e a cada 10 min).
+  useEffect(() => {
+    if (!nfceConfig?.configured || (screen !== 'sale' && screen !== 'receipts')) return;
+    let cancelled = false;
+    async function check() {
+      const result = await syncNfceContingency();
+      if (!cancelled && result && result.errors > 0) {
+        setMessage(`Atenção: ${result.errors} NFC-e emitida(s) em contingência foram recusadas pela Sefaz. Veja em Cupons e notas e corrija em até 24 horas.`);
+      }
+    }
+    void check();
+    const timer = window.setInterval(() => void check(), 10 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [nfceConfig?.configured, screen]);
+
+  useEffect(() => {
+    if (!terminal) return;
+    let cancelled = false;
+    let lastSnapshot = 0;
+    async function tick() {
+      const online = await probeOnline();
+      if (cancelled) return;
+      const wasOffline = isOffline();
+      setOffline(!online);
+      if (!online) return;
+      const result = await syncOutbox();
+      if (result.sent > 0 || result.failed > 0) {
+        setMessage(`Vendas sem internet enviadas: ${result.sent}${result.failed > 0 ? `; ${result.failed} com erro (veja na faixa no topo)` : ''}${result.conflicts > 0 ? `; ${result.conflicts} divergência(s) para o gerente conferir no ERP` : ''}.`);
+      }
+      if (cashSession && Date.now() - lastSnapshot > 5 * 60 * 1000) {
+        lastSnapshot = Date.now();
+        void refreshSnapshot();
+      }
+    }
+    void refreshCounts();
+    void tick();
+    const timer = window.setInterval(() => void tick(), 20 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [terminal, cashSession]);
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion(null));
+  }, []);
+
+  useEffect(() => {
+    if (!cashSession || offlineNow) return;
+    getCashSessionReport().then((report) => setSessionNumber(report?.sessionNumber ?? null)).catch(() => undefined);
+  }, [cashSession, offlineNow]);
+
+  useEffect(() => {
+    if (screen !== 'sale') return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      if (serialProduct || adminApprovalOpen || customerPickerOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
+      if (catalogItems.length > 0 || query) {
+        setCatalogItems([]);
+        setQuery('');
+        return;
+      }
+      setScreen('menu');
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  // Aviso de atualizacao so fora de uma venda/reserva em andamento.
+  useEffect(() => {
+    const sellingNow = (screen === 'sale' || screen === 'new-reservation') && cart.length > 0;
+    setUpdateAllowed(!sellingNow && !busy && !nfceEmitting && !conversionReservation && !nfceProblem);
+  }, [screen, cart.length, busy, nfceEmitting, conversionReservation, nfceProblem]);
+
+  const nfceModal = nfceProblem && (
+    <NfceProblemModal
+      problem={nfceProblem}
+      busy={nfceEmitting}
+      onRetry={() => void emitNfce(nfceProblem.saleId, nfceProblem.change)}
+      onPrintNonFiscal={() => {
+        const { saleId, change } = nfceProblem;
+        setNfceProblem(null);
+        setMessage('Cupom Não Fiscal impresso. A NFC-e desta venda ficou pendente: emita depois pela tela de cupons (impressora no topo).');
+        void printReceipt(saleId, change);
+      }}
+      onClose={() => {
+        setNfceProblem(null);
+        setMessage('A NFC-e desta venda ficou pendente. Emita depois pela tela de cupons (impressora no topo).');
+      }}
+    />
+  );
+
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
   const cartHasBackorder = cart.some((item) => item.backorder);
+  // Servicos ficam fora da NFC-e: venda so com servicos sai como Nao Fiscal.
+  const cartHasProduct = cart.some((item) => item.itemType === 'PRODUCT');
+  const reservationDepositAmount = valueAsNumber(reservationDeposit);
 
   useEffect(() => {
     if (!conversionReservation || !terminal) return;
@@ -1214,8 +1972,8 @@ export function App() {
             {busy ? 'Registrando...' : 'Confirmar'}
           </button>
         </form>
-        <button className="text-action" type="button" onClick={() => setScreen('sale')}>
-          Voltar para venda
+        <button className="text-action" type="button" onClick={() => setScreen('menu')}>
+          Voltar ao menu
         </button>
         <Notice message={message} />
       </AuthFrame>
@@ -1298,6 +2056,82 @@ export function App() {
     );
   }
 
+  if (screen === 'trade-in') {
+    return (
+      <main className="sale-shell">
+        <header className="sale-header">
+          <div>
+            <Brand compact />
+            <div>
+              <strong>Troca Gamer</strong>
+              <span>{terminal?.tradeName ?? terminal?.unitId}</span>
+            </div>
+          </div>
+          <div className="header-actions">
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('menu')}>
+              Voltar ao menu
+            </button>
+          </div>
+        </header>
+        <TradeInPanel
+          key={tradeInKey}
+          seller={tradeSeller}
+          sellerSlot={(
+            <SellerCodeField
+              label="Código do vendedor"
+              value={tradeSellerCode}
+              seller={tradeSeller}
+              disabled={false}
+              onValue={setTradeSellerCode}
+              onSeller={setTradeSeller}
+            />
+          )}
+          loadStore={loadStoreProfile}
+          onPaidCash={() => void openCashDrawer()}
+          onDone={(result) => void finishTradeIn(result)}
+        />
+      </main>
+    );
+  }
+
+  if (screen === 'work-orders') {
+    return (
+      <main className="sale-shell">
+        <header className="sale-header">
+          <div>
+            <Brand compact />
+            <div>
+              <strong>Ordens de serviço</strong>
+              <span>{terminal?.tradeName ?? terminal?.unitId}</span>
+            </div>
+          </div>
+          <div className="header-actions">
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('menu')}>
+              Voltar ao menu
+            </button>
+          </div>
+        </header>
+        <WorkOrdersPanel
+          key={workOrdersKey}
+          seller={workOrderSeller}
+          sellerSlot={(
+            <SellerCodeField
+              label="Código do vendedor"
+              value={workOrderSellerCode}
+              seller={workOrderSeller}
+              disabled={false}
+              onValue={setWorkOrderSellerCode}
+              onSeller={setWorkOrderSeller}
+            />
+          )}
+          initialOrderId={workOrderFocus}
+          loadStore={loadStoreProfile}
+          onCharge={chargeWorkOrder}
+        />
+      </main>
+    );
+  }
+
   if (screen === 'warranty') {
     return (
       <main className="sale-shell">
@@ -1310,12 +2144,64 @@ export function App() {
             </div>
           </div>
           <div className="header-actions">
-            <button className="text-action reservation-back" type="button" onClick={() => setScreen('sale')}>
-              Voltar para venda
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('menu')}>
+              Voltar ao menu
             </button>
           </div>
         </header>
         <WarrantyPanel />
+      </main>
+    );
+  }
+
+  if (screen === 'receipts') {
+    return (
+      <main className="sale-shell">
+        <header className="sale-header">
+          <div>
+            <Brand compact />
+            <div>
+              <strong>Cupons e notas</strong>
+              <span>{terminal?.tradeName ?? terminal?.unitId}</span>
+            </div>
+          </div>
+          <div className="header-actions">
+            <button
+              className="text-action"
+              type="button"
+              title="Porta do Comunicador Offline da Focus neste computador (NFC-e sem internet)"
+              onClick={() => {
+                const port = window.prompt('Porta do Comunicador Offline da Focus neste computador (em branco = desligado):', getComunicadorPort() ?? '');
+                if (port === null) return;
+                const clean = port.replace(/D/g, '');
+                setComunicadorPort(clean || null);
+                setMessage(clean ? `Comunicador Offline configurado na porta ${clean}.` : 'Comunicador Offline desligado neste computador.');
+              }}
+            >
+              Comunicador Offline{getComunicadorPort() ? ` (porta ${getComunicadorPort()})` : ''}
+            </button>
+            <button className="text-action reservation-back" type="button" onClick={() => { setMessage(null); setScreen('menu'); }}>
+              Voltar ao menu
+            </button>
+          </div>
+        </header>
+        <div className="receipts-notice"><Notice message={message} /></div>
+        <ReceiptsPanel
+          nfceConfigured={nfceConfig?.configured === true}
+          busy={busy || nfceEmitting}
+          onReprint={(saleId) => printReceipt(saleId)}
+          onEmitNfce={(saleId) => emitNfce(saleId, 0)}
+          onReturn={(saleId) => { setMessage(null); setReturnSaleId(saleId); }}
+        />
+        {returnSaleId && (
+          <ReturnModal
+            saleId={returnSaleId}
+            loadStore={loadStoreProfile}
+            onClose={() => setReturnSaleId(null)}
+            onDone={(result) => void finishReturn(result)}
+          />
+        )}
+        {nfceModal}
       </main>
     );
   }
@@ -1332,17 +2218,11 @@ export function App() {
             </div>
           </div>
           <div className="header-actions reservation-header-actions">
-            <label className="reservation-method-label">
-              Método da devolução manual
-              <select value={refundPaymentMethod} onChange={(event) => setRefundPaymentMethod(event.target.value as PaymentMethod)}>
-                <option value="DINHEIRO">Dinheiro</option>
-                <option value="PIX">Pix</option>
-                <option value="CREDITO">Crédito</option>
-                <option value="DEBITO">Débito</option>
-              </select>
-            </label>
-            <button className="text-action reservation-back" type="button" onClick={() => setScreen('sale')}>
-              Voltar para venda
+            <button className="primary-action new-reservation-button" type="button" onClick={startNewReservation} disabled={busy}>
+              <Plus size={18} /> Nova reserva
+            </button>
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('menu')}>
+              Voltar ao menu
             </button>
           </div>
         </header>
@@ -1408,7 +2288,7 @@ export function App() {
                       <button className="text-action reservation-reprint" type="button" disabled={busy} onClick={() => void printVoucher(voucherFromReservation(reservation))}>
                         Reimprimir voucher
                       </button>
-                      <button className="reservation-cancel" type="button" disabled={busy} onClick={() => void cancelReservation(reservation)}>
+                      <button className="reservation-cancel" type="button" disabled={busy} onClick={() => cancelReservation(reservation)}>
                         Cancelar reserva
                       </button>
                     </div>
@@ -1439,67 +2319,90 @@ export function App() {
               setConversionSellerCode('');
               setConversionSeller(null);
             }}
-            onConfirm={() => void convertReservationToSale(conversionReservation, conversionPaymentLines)}
+            nfceConfig={nfceConfig}
+            onConfirm={(fiscal) => void convertReservationToSale(conversionReservation, conversionPaymentLines, fiscal)}
           />
         )}
+        {cancelTarget && (
+          <div className="modal-backdrop" role="presentation">
+            <section className="serial-unit-modal" role="dialog" aria-modal="true" aria-labelledby="cancel-reservation-title">
+              <div className="modal-heading">
+                <div>
+                  <p className="eyebrow">Cancelar reserva de {cancelTarget.customerName}</p>
+                  <h2 id="cancel-reservation-title">Como o sinal de {currency.format(cancelTarget.depositAmount)} foi devolvido?</h2>
+                </div>
+                <button className="icon-button" type="button" title="Voltar" onClick={() => setCancelTarget(null)}><X size={20} /></button>
+              </div>
+              <p className="modal-copy">
+                A devolução fica registrada no caixa e entra no fechamento. Estorno no cartão ou Pix deve ser feito na maquininha/banco.
+              </p>
+              <div className="cancel-refund-options">
+                {(['DINHEIRO', 'PIX', 'CREDITO', 'DEBITO'] as PaymentMethod[]).map((method) => (
+                  <button key={method} className="reservation-nav" type="button" disabled={busy} onClick={() => void confirmCancelReservation(cancelTarget, method)}>
+                    {PAYMENT_METHOD_LABELS[method]}
+                  </button>
+                ))}
+              </div>
+              <div className="modal-actions">
+                <button className="text-action" type="button" onClick={() => setCancelTarget(null)}>Não cancelar</button>
+              </div>
+            </section>
+          </div>
+        )}
+        {nfceModal}
+      </main>
+    );
+  }
+
+  const topBarProps = {
+    storeName: terminal?.tradeName ?? terminal?.unitId ?? '',
+    cashNumber: cashSession?.cashNumber ?? null,
+    cashDate: cashSession ? new Date(cashSession.openedAt).toLocaleDateString('pt-BR') : null,
+    sessionNumber,
+    operator: cashSession?.openedByName ?? null,
+  };
+
+  if (screen === 'menu') {
+    return (
+      <main className="sale-shell menu-shell">
+        <TopBar {...topBarProps} subtitle="Kanguru PDV" />
+        {message && <div className="menu-notice"><Notice message={message} /></div>}
+        <HomeMenu offline={offlineNow} drawerAvailable={Boolean(directPrinter)} cashOpen={Boolean(cashSession)} version={appVersion} onAction={handleMenuAction} />
+        {printerOpen && (
+          <PrinterSettingsModal
+            onClose={() => setPrinterOpen(false)}
+            onSaved={(text) => {
+              setPrinterOpen(false);
+              setDirectPrinterState(getDirectPrinter());
+              setMessage(text);
+            }}
+          />
+        )}
+        {lookupOpen && <ProductLookupModal onClose={() => setLookupOpen(false)} />}
+        {nfceModal}
       </main>
     );
   }
 
   return (
-    <main className="sale-shell">
-      <header className="sale-header">
-        <div>
-          <Brand compact />
-          <div>
-            <strong>{cashSession?.cashNumber}</strong>
-            <span>
-              {terminal?.tradeName ?? terminal?.unitId} | Aberto por {cashSession?.openedByName}
-            </span>
-          </div>
-        </div>
-        <div className="header-actions">
-          <button className="reservation-nav" type="button" onClick={() => void openReservations()} disabled={busy}>
-            <ClipboardList size={18} /> Reservas
+    <main className="sale-shell sale-shell-fit">
+      <TopBar
+        {...topBarProps}
+        subtitle={reservationMode ? 'Nova reserva' : 'Nova venda'}
+        leading={reservationMode ? (
+          <button className="top-bar-menu" type="button" onClick={leaveNewReservation} disabled={busy}>
+            <ArrowLeft size={18} /> Reservas
           </button>
-          <button className="reservation-nav" type="button" onClick={() => setScreen('warranty')} disabled={busy}>
-            <ShieldCheck size={18} /> Garantia
+        ) : (
+          <button className="top-bar-menu" type="button" onClick={() => setScreen('menu')} disabled={busy}>
+            <LayoutGrid size={18} /> Menu <small>(Esc)</small>
           </button>
-          <button
-            className="icon-button"
-            type="button"
-            title="Registrar sangria"
-            onClick={() => {
-              setMovementType('SANGRIA');
-              setScreen('cash-movement');
-            }}
-          >
-            <BanknoteArrowDown size={20} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            title="Registrar suprimento"
-            onClick={() => {
-              setMovementType('SUPRIMENTO');
-              setScreen('cash-movement');
-            }}
-          >
-            <BanknoteArrowUp size={20} />
-          </button>
-          <button className="icon-button" type="button" title="Fechar caixa" onClick={() => void openClosing()}>
-            <LockKeyhole size={20} />
-          </button>
-          <span className="operator-badge">
-            <CheckCircle2 size={18} />
-            Caixa aberto
-          </span>
-        </div>
-      </header>
+        )}
+      />
 
       <section className="sale-layout">
         <section className="catalog-panel">
-          <h1>Nova venda</h1>
+          <h1>{reservationMode ? 'Nova reserva' : 'Nova venda'}</h1>
           <form className="search-form" onSubmit={handleSearch}>
             <input
               ref={searchInputRef}
@@ -1558,22 +2461,29 @@ export function App() {
 
         <aside className="cart-panel">
           <div className="cart-heading">
-            <h2>Carrinho</h2>
+            <h2>{reservationMode ? 'Itens da reserva' : 'Carrinho'}</h2>
             {cartHasOverLimitDiscount() && (
               <small className="discount-warning">
                 Itens acima do limite exigem a senha administrativa na finalização.
               </small>
             )}
           </div>
+          {workOrderCharge && (
+            <div className="work-order-charge">
+              <span>Cobrando a <strong>OS nº {workOrderCharge.order.orderNumber}</strong>{workOrderCharge.deliver ? ' (entrega)' : ''} · {workOrderCharge.order.customerName}</span>
+              <button className="text-action" type="button" onClick={cancelWorkOrderCharge} disabled={busy}>Cancelar cobrança</button>
+            </div>
+          )}
           <div className="cart-list">
             {cart.length === 0 ? (
               <p className="empty-state">Adicione um produto para iniciar.</p>
             ) : (
               cart.map((item) => (
-                <div className="cart-item" key={item.serialUnit?.serialUnitId ?? `${item.itemType}-${item.id}${item.backorder ? '-encomenda' : ''}`}>
+                <div className="cart-item" key={item.serialUnit?.serialUnitId ?? `${item.itemType}-${item.id}${item.backorder ? '-encomenda' : ''}${item.workOrderId ? `-${item.workOrderId}` : ''}`}>
                   <div>
                     <strong>{item.name}</strong>
                     {item.backorder && <span className="backorder-tag">Encomenda · sem estoque</span>}
+                    {item.workOrderNumber && <span className="backorder-tag work-order-tag">OS nº {item.workOrderNumber}</span>}
                     <small>{item.itemType === 'SERVICE' ? 'Serviço' : 'Produto'} | {currency.format(item.sellPrice)} cada</small>
                     {item.serialUnit ? (
                       <>
@@ -1591,7 +2501,7 @@ export function App() {
                       />
                     </label>
                   </div>
-                  {item.serialUnit ? (
+                  {item.workOrderId ? null : item.serialUnit ? (
                     <button
                       className="remove-serial-unit"
                       type="button"
@@ -1625,81 +2535,146 @@ export function App() {
             )}
           </div>
 
-          <div className="sale-customer">
-            <span className="sale-customer-label"><UserRound size={16} /> Cliente (opcional)</span>
-            {saleCustomer ? (
-              <div className="sale-customer-selected">
-                <div>
-                  <strong>{saleCustomer.name}</strong>
-                  <small>CPF {formatCpf(saleCustomer.cpf)} | {saleCustomer.phone}</small>
+          {reservationMode ? (
+            <>
+              <form id="new-reservation-form" className="reservation-inline" onSubmit={(event) => void submitReservation(event)}>
+                <ReservationFields
+                  customerName={reservationCustomerName}
+                  customerPhone={reservationCustomerPhone}
+                  customerCpf={reservationCustomerCpf}
+                  onCustomerCpf={(value) => setReservationCustomerCpf(maskCpf(value))}
+                  hasBackorder={cartHasBackorder}
+                  expiresOn={reservationExpiresOn}
+                  deposit={reservationDeposit}
+                  paymentMethod={paymentMethod}
+                  busy={busy}
+                  onPickCustomer={() => setCustomerPickerOpen(true)}
+                  onCustomerName={setReservationCustomerName}
+                  onCustomerPhone={setReservationCustomerPhone}
+                  onExpiresOn={setReservationExpiresOn}
+                  onDeposit={setReservationDeposit}
+                  onPaymentMethod={(value) => setPaymentMethod(value)}
+                />
+              </form>
+              <div className="cart-footer">
+                <div className="reservation-modal-summary">
+                  <span>Total reservado</span><strong>{currency.format(grossAmount)}</strong>
+                  <span>Sinal</span><strong>{currency.format(reservationDepositAmount)}</strong>
+                  <span>Saldo na conversão</span><strong>{currency.format(Math.max(0, grossAmount - reservationDepositAmount))}</strong>
                 </div>
-                <div className="sale-customer-actions">
-                  <button className="text-action" type="button" onClick={() => setCustomerForm({ customer: saleCustomer, cpf: '' })}>Editar</button>
-                  <button className="text-action" type="button" onClick={() => setCustomerPickerOpen(true)}>Trocar</button>
-                  <button className="text-action" type="button" onClick={() => setSaleCustomer(null)}>Remover</button>
+                <SellerCodeField
+                  label="Código do vendedor (fica com a venda)"
+                  value={reservationSellerCode}
+                  seller={reservationSeller}
+                  disabled={busy}
+                  onValue={setReservationSellerCode}
+                  onSeller={setReservationSeller}
+                />
+                <button
+                  className="primary-action finish-button"
+                  type="submit"
+                  form="new-reservation-form"
+                  disabled={busy || cart.length === 0 || reservationDepositAmount > grossAmount || !reservationSeller || !isValidCpf(reservationCustomerCpf)}
+                >
+                  <ClipboardList size={20} />
+                  {busy ? 'Registrando...' : 'Confirmar reserva'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="sale-customer">
+                <span className="sale-customer-label"><UserRound size={16} /> Cliente (opcional)</span>
+                {saleCustomer ? (
+                  <div className="sale-customer-selected">
+                    <div>
+                      <strong>{saleCustomer.name}</strong>
+                      <small>CPF {formatCpf(saleCustomer.cpf)} | {saleCustomer.phone}</small>
+                    </div>
+                    <div className="sale-customer-actions">
+                      <button className="text-action" type="button" onClick={() => setCustomerForm({ customer: saleCustomer, cpf: '' })}>Editar</button>
+                      <button className="text-action" type="button" onClick={() => (offlineNow ? setOfflineCustomerOpen(true) : setCustomerPickerOpen(true))}>Trocar</button>
+                      <button className="text-action" type="button" onClick={() => setSaleCustomer(null)}>Remover</button>
+                    </div>
+                    {customerCredit > 0 && (
+                      <div className="sale-customer-credit">
+                        <small>Vale-troca disponível: {currency.format(customerCredit)}</small>
+                        <button className="text-action" type="button" disabled={busy || grossAmount <= 0} onClick={applyCustomerCredit}>Usar vale-troca</button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button className="customer-pick" type="button" disabled={busy} onClick={() => (offlineNow ? setOfflineCustomerOpen(true) : setCustomerPickerOpen(true))}>
+                    <Search size={16} /> Selecionar ou cadastrar cliente
+                  </button>
+                )}
+              </div>
+
+              <PaymentLinesEditor
+                lines={paymentLines}
+                total={grossAmount}
+                totalLabel="Total da venda"
+                busy={busy}
+                onChange={setPaymentLines}
+              />
+
+              <div className="cart-footer">
+                <div className="cart-footer-row">
+                  <SellerCodeField
+                    label="Código do vendedor"
+                    value={saleSellerCode}
+                    seller={saleSeller}
+                    disabled={busy}
+                    onValue={setSaleSellerCode}
+                    onSeller={setSaleSeller}
+                  />
+                  <div className="total-row">
+                    <span>Total</span>
+                    <strong>{currency.format(grossAmount)}</strong>
+                  </div>
+                </div>
+
+                <div className="finish-choice">
+                  <button
+                    className="primary-action finish-button finish-nfce"
+                    type="button"
+                    disabled={!nfceConfig?.configured || busy || nfceEmitting || cart.length === 0 || !saleSeller || cartHasBackorder || !cartHasProduct}
+                    title={!nfceConfig?.configured ? 'NFC-e não configurada para esta loja.' : !cartHasProduct && cart.length > 0 ? 'Venda só com serviços não gera NFC-e: use Não Fiscal.' : 'Finalizar com NFC-e'}
+                    onClick={() => void finalizeSale('NFCE')}
+                  >
+                    <CreditCard size={20} />
+                    {nfceEmitting ? 'Emitindo...' : 'NFC-e'}
+                    {!nfceConfig?.configured
+                      ? <small>não configurada</small>
+                      : !cartHasProduct && cart.length > 0
+                        ? <small>só serviços</small>
+                        : nfceConfig.environment === 'homologacao' && <small>teste</small>}
+                  </button>
+                  <button
+                    className="primary-action finish-button"
+                    type="button"
+                    disabled={busy || nfceEmitting || cart.length === 0 || !saleSeller || cartHasBackorder}
+                    onClick={() => void finalizeSale('NAO_FISCAL')}
+                  >
+                    <CreditCard size={20} />
+                    {busy ? 'Processando...' : 'Não Fiscal'}
+                  </button>
                 </div>
               </div>
-            ) : (
-              <button className="customer-pick" type="button" disabled={busy} onClick={() => setCustomerPickerOpen(true)}>
-                <Search size={16} /> Selecionar ou cadastrar cliente
-              </button>
-            )}
-          </div>
-
-          <PaymentLinesEditor
-            lines={paymentLines}
-            total={grossAmount}
-            totalLabel="Total da venda"
-            busy={busy}
-            onChange={setPaymentLines}
-          />
-
-          <div className="total-row">
-            <span>Total</span>
-            <strong>{currency.format(grossAmount)}</strong>
-          </div>
-
-          <SellerCodeField
-            label="Código do vendedor"
-            value={saleSellerCode}
-            seller={saleSeller}
-            disabled={busy}
-            onValue={setSaleSellerCode}
-            onSeller={setSaleSeller}
-          />
-
-          <button
-            className="reserve-action"
-            type="button"
-            disabled={busy || cart.length === 0 || cart.some((item) => item.itemType !== 'PRODUCT')}
-            onClick={() => {
-              if (saleCustomer) {
-                setReservationCustomerName(saleCustomer.name);
-                setReservationCustomerCpf(maskCpf(saleCustomer.cpf));
-                setReservationCustomerPhone(saleCustomer.phone);
-              }
-              setReservationDialogOpen(true);
-            }}
-          >
-            Reservar
-          </button>
-          {cart.some((item) => item.itemType !== 'PRODUCT') && (
-            <small className="reserve-hint">Remova os serviços para reservar os produtos do carrinho.</small>
+            </>
           )}
-          {cartHasBackorder && (
-            <small className="reserve-hint">Itens de encomenda (sem estoque) só podem ser reservados.</small>
-          )}
-          <button
-            className="primary-action finish-button"
-            type="button"
-            disabled={busy || cart.length === 0 || !saleSeller || cartHasBackorder}
-            onClick={() => void finalizeSale()}
-          >
-            <CreditCard size={20} />
-            {busy ? 'Processando...' : 'Finalizar venda'}
-          </button>
         </aside>
       </section>
+      {nfceModal}
+      {offlineCustomerOpen && (
+        <OfflineCustomerModal
+          onConfirm={(customer) => {
+            setSaleCustomer(customer);
+            setOfflineCustomerOpen(false);
+          }}
+          onClose={() => setOfflineCustomerOpen(false)}
+        />
+      )}
       {serialProduct && (
         <SerialUnitModal
           product={serialProduct}
@@ -1732,7 +2707,8 @@ export function App() {
       {customerPickerOpen && (
         <CustomerPickerModal
           onSelect={(customer) => {
-            setSaleCustomer(customer);
+            if (reservationMode) fillReservationCustomer(customer);
+            else setSaleCustomer(customer);
             setCustomerPickerOpen(false);
           }}
           onNew={(cpf) => {
@@ -1747,43 +2723,19 @@ export function App() {
           customer={customerForm.customer}
           initialCpf={customerForm.cpf}
           onSaved={(customer) => {
-            setSaleCustomer(customer);
+            if (reservationMode) fillReservationCustomer(customer);
+            else setSaleCustomer(customer);
             setCustomerForm(null);
-            setMessage(`Cliente ${customer.name} vinculado à venda.`);
+            setMessage(`Cliente ${customer.name} vinculado ${reservationMode ? 'à reserva' : 'à venda'}.`);
           }}
           onClose={() => setCustomerForm(null)}
-        />
-      )}
-      {reservationDialogOpen && (
-        <ReservationModal
-          customerName={reservationCustomerName}
-          customerPhone={reservationCustomerPhone}
-          customerCpf={reservationCustomerCpf}
-          onCustomerCpf={(value) => setReservationCustomerCpf(maskCpf(value))}
-          hasBackorder={cartHasBackorder}
-          expiresOn={reservationExpiresOn}
-          deposit={reservationDeposit}
-          paymentMethod={paymentMethod}
-          total={grossAmount}
-          busy={busy}
-          onCustomerName={setReservationCustomerName}
-          onCustomerPhone={setReservationCustomerPhone}
-          onExpiresOn={setReservationExpiresOn}
-          onDeposit={setReservationDeposit}
-          onPaymentMethod={(value) => setPaymentMethod(value as PaymentMethod)}
-          sellerCode={reservationSellerCode}
-          seller={reservationSeller}
-          onSellerCode={setReservationSellerCode}
-          onSeller={setReservationSeller}
-          onClose={() => setReservationDialogOpen(false)}
-          onSubmit={(event) => void submitReservation(event)}
         />
       )}
     </main>
   );
 }
 
-interface ReservationModalProps {
+interface ReservationFieldsProps {
   customerName: string;
   customerPhone: string;
   customerCpf: string;
@@ -1792,22 +2744,17 @@ interface ReservationModalProps {
   expiresOn: string;
   deposit: string;
   paymentMethod: PaymentMethod;
-  total: number;
   busy: boolean;
+  onPickCustomer: () => void;
   onCustomerName: (value: string) => void;
   onCustomerPhone: (value: string) => void;
   onExpiresOn: (value: string) => void;
   onDeposit: (value: string) => void;
   onPaymentMethod: (value: PaymentMethod) => void;
-  sellerCode: string;
-  seller: PosSeller | null;
-  onSellerCode: (value: string) => void;
-  onSeller: (seller: PosSeller | null) => void;
-  onClose: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }
 
-function ReservationModal({
+// Dados da reserva no painel da direita da tela "Nova reserva" (o vendedor e o botao ficam no rodape).
+function ReservationFields({
   customerName,
   customerPhone,
   customerCpf,
@@ -1816,92 +2763,98 @@ function ReservationModal({
   expiresOn,
   deposit,
   paymentMethod,
-  total,
   busy,
+  onPickCustomer,
   onCustomerName,
   onCustomerPhone,
   onExpiresOn,
   onDeposit,
   onPaymentMethod,
-  sellerCode,
-  seller,
-  onSellerCode,
-  onSeller,
-  onClose,
-  onSubmit,
-}: ReservationModalProps) {
+}: ReservationFieldsProps) {
   const depositAmount = valueAsNumber(deposit);
   const cpfComplete = customerCpf.replace(/\D/g, '').length === 11;
   const cpfValid = isValidCpf(customerCpf);
   return (
+    <>
+      <p className="modal-copy">
+        {hasBackorder
+          ? 'Há itens de encomenda (sem estoque): ficam reservados para este cliente assim que chegarem.'
+          : 'Os produtos ficam indisponíveis para outras vendas até a conversão ou o cancelamento.'}
+        {' '}Ao confirmar, o voucher é impresso.
+      </p>
+      <button className="customer-pick" type="button" disabled={busy} onClick={onPickCustomer}>
+        <Search size={16} /> Buscar cliente cadastrado
+      </button>
+      <label>
+        Nome do cliente
+        <input required maxLength={160} value={customerName} onChange={(event) => onCustomerName(event.target.value)} />
+      </label>
+      <label>
+        CPF do cliente
+        <input required inputMode="numeric" placeholder="000.000.000-00" value={customerCpf} onChange={(event) => onCustomerCpf(event.target.value)} />
+        {cpfComplete && !cpfValid && <small className="field-error">CPF inválido. Confira os números.</small>}
+      </label>
+      <label>
+        Telefone (opcional)
+        <input type="tel" maxLength={40} value={customerPhone} onChange={(event) => onCustomerPhone(event.target.value)} />
+      </label>
+      <label>
+        Data de retirada prevista
+        <input type="date" required min={localDateInputValue()} value={expiresOn} onChange={(event) => onExpiresOn(event.target.value)} />
+      </label>
+      <label>
+        Sinal / depósito (opcional)
+        <ValueInput value={parseValueText(deposit)} onValueChange={(value) => onDeposit(formatValueText(value, 2))} />
+      </label>
+      {depositAmount > 0 && (
+        <label>
+          Forma de recebimento do sinal
+          <select value={paymentMethod} onChange={(event) => onPaymentMethod(event.target.value as PaymentMethod)}>
+            <option value="DINHEIRO">Dinheiro</option>
+            <option value="PIX">Pix</option>
+            <option value="CREDITO">Crédito</option>
+            <option value="DEBITO">Débito</option>
+          </select>
+        </label>
+      )}
+    </>
+  );
+}
+
+interface NfceProblemModalProps {
+  problem: { status: NfceStatus; message: string | null };
+  busy: boolean;
+  onRetry: () => void;
+  onPrintNonFiscal: () => void;
+  onClose: () => void;
+}
+
+// NFC-e recusada ou sem resposta: a venda ja esta registrada; o vendedor tenta de novo,
+// imprime o cupom Nao Fiscal ou deixa a nota pendente para emitir depois.
+function NfceProblemModal({ problem, busy, onRetry, onPrintNonFiscal, onClose }: NfceProblemModalProps) {
+  return (
     <div className="modal-backdrop" role="presentation">
-      <section className="serial-unit-modal reservation-modal" role="dialog" aria-modal="true" aria-labelledby="reservation-title">
+      <section className="serial-unit-modal" role="dialog" aria-modal="true" aria-labelledby="nfce-problem-title">
         <div className="modal-heading">
           <div>
-            <p className="eyebrow">Separar produto</p>
-            <h2 id="reservation-title">Nova reserva</h2>
+            <p className="eyebrow">Venda registrada</p>
+            <h2 id="nfce-problem-title">{problem.status === 'PENDENTE' ? 'NFC-e pendente' : 'NFC-e não autorizada'}</h2>
           </div>
-          <button className="icon-button" type="button" title="Fechar" onClick={onClose} disabled={busy}><X size={20} /></button>
         </div>
         <p className="modal-copy">
-          {hasBackorder
-            ? 'Há itens de encomenda (sem estoque): ficam reservados para este cliente assim que chegarem.'
-            : 'O produto ficará indisponível para outras vendas até conversão ou cancelamento.'}
-          {' '}Ao confirmar, o voucher é impresso.
+          {problem.message ?? 'A Sefaz não autorizou a NFC-e.'}
         </p>
-        <form onSubmit={onSubmit}>
-          <label>
-            Nome do cliente
-            <input autoFocus required maxLength={160} value={customerName} onChange={(event) => onCustomerName(event.target.value)} />
-          </label>
-          <label>
-            CPF do cliente
-            <input required inputMode="numeric" placeholder="000.000.000-00" value={customerCpf} onChange={(event) => onCustomerCpf(event.target.value)} />
-            {cpfComplete && !cpfValid && <small className="field-error">CPF inválido. Confira os números.</small>}
-          </label>
-          <label>
-            Telefone (opcional)
-            <input type="tel" maxLength={40} value={customerPhone} onChange={(event) => onCustomerPhone(event.target.value)} />
-          </label>
-          <label>
-            Data de retirada prevista
-            <input type="date" required min={localDateInputValue()} value={expiresOn} onChange={(event) => onExpiresOn(event.target.value)} />
-          </label>
-          <label>
-            Sinal / depósito (opcional)
-            <ValueInput value={parseValueText(deposit)} onValueChange={(value) => onDeposit(formatValueText(value, 2))} />
-          </label>
-          {depositAmount > 0 && (
-            <label>
-              Forma de recebimento do sinal
-              <select value={paymentMethod} onChange={(event) => onPaymentMethod(event.target.value as PaymentMethod)}>
-                <option value="DINHEIRO">Dinheiro</option>
-                <option value="PIX">Pix</option>
-                <option value="CREDITO">Crédito</option>
-                <option value="DEBITO">Débito</option>
-              </select>
-            </label>
-          )}
-          <SellerCodeField
-            label="Código do vendedor (fica com a venda)"
-            value={sellerCode}
-            seller={seller}
-            disabled={busy}
-            onValue={onSellerCode}
-            onSeller={onSeller}
-          />
-          <div className="reservation-modal-summary">
-            <span>Total reservado</span><strong>{currency.format(total)}</strong>
-            <span>Sinal</span><strong>{currency.format(depositAmount)}</strong>
-            <span>Saldo na conversão</span><strong>{currency.format(Math.max(0, total - depositAmount))}</strong>
-          </div>
-          <div className="modal-actions">
-            <button className="text-action" type="button" onClick={onClose} disabled={busy}>Voltar</button>
-            <button className="primary-action modal-confirm" type="submit" disabled={busy || depositAmount > total || !seller || !cpfValid}>
-              {busy ? 'Registrando...' : 'Confirmar reserva'}
-            </button>
-          </div>
-        </form>
+        <p className="modal-copy">
+          A venda já foi registrada. Você pode tentar emitir de novo agora, imprimir o cupom Não Fiscal
+          ou deixar a nota pendente e emitir depois pela tela de cupons.
+        </p>
+        <div className="modal-actions">
+          <button className="text-action" type="button" onClick={onClose} disabled={busy}>Deixar pendente</button>
+          <button className="reservation-nav" type="button" onClick={onPrintNonFiscal} disabled={busy}>Imprimir Não Fiscal</button>
+          <button className="primary-action modal-confirm" type="button" onClick={onRetry} disabled={busy}>
+            {busy ? 'Emitindo...' : 'Tentar de novo'}
+          </button>
+        </div>
       </section>
     </div>
   );
@@ -2022,7 +2975,8 @@ interface ReservationPaymentModalProps {
   onSeller: (seller: PosSeller | null) => void;
   onPaymentLines: (lines: PaymentLine[]) => void;
   onClose: () => void;
-  onConfirm: () => void;
+  nfceConfig: PosNfceStatus | null;
+  onConfirm: (fiscal: FiscalChoice) => void;
 }
 
 function ReservationPaymentModal({
@@ -2039,6 +2993,7 @@ function ReservationPaymentModal({
   onSeller,
   onPaymentLines,
   onClose,
+  nfceConfig,
   onConfirm,
 }: ReservationPaymentModalProps) {
   const { total, remaining } = reservationAmounts(reservation);
@@ -2117,8 +3072,17 @@ function ReservationPaymentModal({
         <Notice message={message} />
         <div className="modal-actions">
           <button className="text-action" type="button" onClick={onClose} disabled={busy}>Voltar</button>
-          <button className="primary-action modal-confirm" type="button" onClick={onConfirm} disabled={busy || !seller || !unitsReady}>
-            {busy ? 'Processando...' : 'Confirmar venda'}
+          <button
+            className="primary-action modal-confirm"
+            type="button"
+            onClick={() => onConfirm('NFCE')}
+            disabled={busy || !seller || !unitsReady || !nfceConfig?.configured}
+            title={nfceConfig?.configured ? 'Finalizar com NFC-e' : 'NFC-e não configurada para esta loja.'}
+          >
+            {busy ? 'Processando...' : `NFC-e${nfceConfig?.environment === 'homologacao' ? ' (teste)' : ''}`}
+          </button>
+          <button className="primary-action modal-confirm" type="button" onClick={() => onConfirm('NAO_FISCAL')} disabled={busy || !seller || !unitsReady}>
+            {busy ? 'Processando...' : 'Não Fiscal'}
           </button>
         </div>
       </section>
@@ -2150,7 +3114,12 @@ function SellerCodeField({ label, value, seller, disabled, onValue, onSeller }: 
     let cancelled = false;
     setStatus('loading');
     const timer = window.setTimeout(() => {
-      findPosSeller(normalized)
+      // Sem internet: confere o codigo na copia local dos vendedores da loja.
+      (isOffline() ? findOfflineSeller(normalized) : findPosSeller(normalized).catch((error) => {
+        if (!isNetworkError(error)) throw error;
+        setOffline(true);
+        return findOfflineSeller(normalized);
+      }))
         .then((found) => {
           if (cancelled) return;
           onSeller(found);

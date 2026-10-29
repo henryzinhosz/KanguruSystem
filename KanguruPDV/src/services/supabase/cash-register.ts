@@ -98,3 +98,72 @@ export async function closeCashSession(closedByName: string, counts: CashCounts,
   });
   if (error) throw error;
 }
+
+// Relatorio de fechamento (caixa aberto do terminal): cupons, faturamento, estornos e sinais.
+export interface CashSessionReport {
+  sessionNumber: number;
+  terminalName: string;
+  saleCount: number;
+  listTotal: number;
+  grossTotal: number;
+  directTotal: number;
+  reservationTotal: number;
+  nfceCount: number;
+  nonFiscalCount: number;
+  cancelledCount: number;
+  cancelledTotal: number;
+  depositsReceived: number;
+  depositsRefunded: number;
+  returnCount: number;
+  returnRefunds: number;
+  returnCredits: number;
+  // Cada sangria/suprimento do caixa (motivo, hora, valor); vazio se a consulta falhar.
+  movements: CashMovementLine[];
+}
+
+export interface CashMovementLine {
+  type: 'SANGRIA' | 'SUPRIMENTO';
+  amount: number;
+  reason: string;
+  operatorName: string;
+  createdAt: string;
+}
+
+async function getCashMovements(): Promise<CashMovementLine[]> {
+  const { data, error } = await supabase.rpc('get_pos_cash_movements');
+  if (error) throw error;
+  return ((Array.isArray(data) ? data : []) as Array<Record<string, unknown>>).map((row) => ({
+    type: String(row.type) as CashMovementLine['type'],
+    amount: numberValue(row.amount),
+    reason: String(row.reason ?? ''),
+    operatorName: String(row.operatorName ?? ''),
+    createdAt: String(row.createdAt),
+  }));
+}
+
+export async function getCashSessionReport(): Promise<CashSessionReport | null> {
+  const { data, error } = await supabase.rpc('get_pos_cash_session_report');
+  if (error) throw error;
+  if (!data) return null;
+  const row = data as Record<string, unknown>;
+  const movements = await getCashMovements().catch(() => []);
+  return {
+    movements,
+    sessionNumber: numberValue(row.sessionNumber),
+    terminalName: String(row.terminalName ?? ''),
+    saleCount: numberValue(row.saleCount),
+    listTotal: numberValue(row.listTotal),
+    grossTotal: numberValue(row.grossTotal),
+    directTotal: numberValue(row.directTotal),
+    reservationTotal: numberValue(row.reservationTotal),
+    nfceCount: numberValue(row.nfceCount),
+    nonFiscalCount: numberValue(row.nonFiscalCount),
+    cancelledCount: numberValue(row.cancelledCount),
+    cancelledTotal: numberValue(row.cancelledTotal),
+    depositsReceived: numberValue(row.depositsReceived),
+    depositsRefunded: numberValue(row.depositsRefunded),
+    returnCount: numberValue(row.returnCount),
+    returnRefunds: numberValue(row.returnRefunds),
+    returnCredits: numberValue(row.returnCredits),
+  };
+}

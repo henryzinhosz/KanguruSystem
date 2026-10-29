@@ -132,6 +132,14 @@ export interface Product {
   kitItems?: KitItem[];
   minStock?: number | null; // estoque minimo para alertas; null = nao definido (usa o padrao)
   maxDiscountPercent?: number | null; // limite de desconto do produto no PDV; null = usa o padrao da loja
+  // Dados fiscais (2.8a), preenchidos produto a produto. Listas fixas: ver db/fiscal.ts.
+  cest?: string | null;
+  icmsOrigin?: string | null;
+  icmsCst?: string | null;
+  csosn?: string | null;
+  icmsRate?: number | null;
+  icmsReduction?: number | null;
+  taxBurdenPercent?: number | null;
 }
 
 // Custo medio de um produto em uma loja (sem serial: media ponderada;
@@ -261,6 +269,7 @@ export type SaleStatus = 'CONCLUIDA' | 'PENDENTE_APROVACAO' | 'CANCELADA' | 'REJ
 
 export interface Sale {
   id: string;
+  cashClosed?: boolean; // venda de caixa do PDV ja fechado: estorno bloqueado (usar Trocar/Devolver no PDV)
   invoiceNumber: string;
   unitId: string;
   items: SaleItem[];
@@ -282,6 +291,47 @@ export interface Sale {
   sellerName?: string;
   // Quem finalizou no PDV (difere do vendedor so em reserva convertida).
   finalizedByName?: string;
+  // Cupom (2.8a): numero 00001.. por loja, recomeca todo mes; tipo Nao Fiscal / NFC-e.
+  receiptNumber?: number;
+  receiptPeriod?: string;
+  fiscalType?: 'NAO_FISCAL' | 'NFCE';
+  // NFC-e (2.8b): situacao e dados devolvidos pela Sefaz via Focus.
+  fiscalStatus?: NfceStatus;
+  nfceNumber?: string;
+  nfceSeries?: string;
+  nfceKey?: string;
+  nfceEnvironment?: 'homologacao' | 'producao';
+  nfceXmlUrl?: string;
+  nfceDanfeUrl?: string;
+  nfceMessage?: string;
+  nfceAuthorizedAt?: string;
+  // Emitida em contingencia (Sefaz fora do ar) e ainda nao efetivada pela Sefaz.
+  nfceContingencyPending?: boolean;
+  // Trocas/devolucoes (2.9) desta venda.
+  returns?: SaleReturnInfo[];
+}
+
+export interface SaleReturnInfo {
+  id: string;
+  returnNumber: number;
+  createdAt: string;
+  refundMethod: 'TROCA' | 'VALE' | 'DINHEIRO' | 'PIX' | 'CREDITO' | 'DEBITO';
+  totalAmount: number;
+  // Custo das unidades que voltaram ao estoque (avariado continua como custo).
+  costBack: number;
+  reason: string;
+  fiscalStatus?: 'PENDENTE' | 'AUTORIZADA' | 'ERRO';
+  nfeNumber?: string;
+  nfeXmlUrl?: string;
+  nfeDanfeUrl?: string;
+}
+
+export type NfceStatus = 'PENDENTE' | 'AUTORIZADA' | 'ERRO' | 'CANCELADA';
+
+export interface StoreNfceStatus {
+  unitId: string;
+  configured: boolean;
+  environment: 'homologacao' | 'producao' | null;
 }
 
 export interface Expense {
@@ -309,9 +359,46 @@ export interface TradeIn {
   timestamp: string;
   status: 'AVALIADO' | 'APROVADO' | 'CANCELADO';
   createdProductId?: string; // product ID entered into stock after confirmation
+  // Troca Gamer registrada no PDV (migration 20261103)
+  tradeNumber?: number;
+  sellerPhone?: string;
+  sellerAddress?: string;
+  sellerDocument?: string;
+  serialNumber?: string;
+  imei?: string;
+  accessories?: string;
+  paymentMethod?: 'VALE' | 'DINHEIRO' | 'PIX';
+  staffCode?: string;
+  staffName?: string;
 }
 
-export type WorkOrderStatus = 'AGUARDANDO_PECA' | 'EM_ANALISE' | 'PRONTO' | 'ENTREGUE';
+// Dados para estocar o videogame da Troca Gamer (produto serializado + unidade com serial real).
+export interface TradeInApproval {
+  sku: string; // vazio = codigo automatico
+  name: string;
+  sellPrice: number;
+  warrantyMonths: number;
+  serialNumber: string;
+  imei: string;
+  ncm: string;
+  cest: string | null;
+  icmsOrigin: string | null;
+  icmsCst: string | null;
+  csosn: string | null;
+  icmsRate: number | null;
+  icmsReduction: number | null;
+  taxBurdenPercent: number | null;
+}
+
+// DEVOLVIDO = devolvido ao cliente sem conserto.
+export type WorkOrderStatus = 'AGUARDANDO_PECA' | 'EM_ANALISE' | 'PRONTO' | 'ENTREGUE' | 'DEVOLVIDO';
+
+export interface WorkOrderItem {
+  serviceId: string;
+  sku: string;
+  name: string;
+  price: number;
+}
 
 export interface WorkOrder {
   id: string;
@@ -329,6 +416,22 @@ export interface WorkOrder {
   operatorId: string;
   operatorName: string;
   timestamp: string;
+  // OS aberta pelo PDV (numeracao por loja, servicos do cadastro, venda ligada).
+  orderNumber?: number;
+  clientCpf?: string;
+  equipmentType?: string;
+  accessories?: string;
+  entryCondition?: string;
+  notes?: string;
+  items?: WorkOrderItem[];
+  expectedDate?: string;
+  staffCode?: string;
+  staffName?: string;
+  saleId?: string;
+  paidAt?: string;
+  deliveredAt?: string;
+  deliveredByName?: string;
+  warrantyUntil?: string;
 }
 
 export interface StoreConfig {
@@ -344,6 +447,13 @@ export interface StoreConfig {
   contactEmail?: string;
   // Texto das regras impresso no voucher de reserva do PDV (vazio = texto padrao).
   reservationVoucherTerms?: string;
+  // Texto das declaracoes do termo da Troca Gamer (vazio = texto padrao).
+  tradeInTerms?: string;
+  // Condicoes dos comprovantes da Ordem de Servico (vazio = texto padrao).
+  workOrderTerms?: string;
+  workOrderDeliveryTerms?: string;
+  instagram?: string; // perfil da loja (QR code do cupom)
+  exchangeDays?: number; // prazo de troca em dias (2.9; padrao 7)
   paymentFees: {
     DINHEIRO: number; // percentage (e.g. 0)
     PIX: number; // percentage (e.g. 0.005 = 0.5%)

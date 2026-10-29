@@ -11,7 +11,9 @@ import {
   Sale, 
   Expense, 
   TradeIn, 
+  TradeInApproval,
   WorkOrder, 
+  WorkOrderStatus,
   StoreConfig, 
   Supplier, 
   PdvOperator,
@@ -322,6 +324,20 @@ export function useErpStore() {
     return newProduct;
   };
 
+  // Edicao completa (formulario do produto): aguarda o banco e devolve o erro para a tela.
+  const saveProduct = async (updatedProduct: Product): Promise<void> => {
+    const sanitizedProduct: Product = {
+      ...updatedProduct,
+      sku: updatedProduct.sku.trim().toUpperCase(),
+      name: updatedProduct.name.trim(),
+      brand: updatedProduct.brand.trim(),
+      ncm: updatedProduct.ncm.trim()
+    };
+    const savedSku = useSupabase ? await supabaseService.upsertProduct(sanitizedProduct) : sanitizedProduct.sku;
+    const saved = { ...sanitizedProduct, sku: savedSku };
+    setProducts(prev => prev.map(p => p.id === saved.id ? saved : p));
+  };
+
   const editProduct = (updatedProduct: Product) => {
     const sanitizedProduct: Product = {
       ...updatedProduct,
@@ -484,6 +500,37 @@ export function useErpStore() {
     reason: string
   ) => {
     await supabaseService.registerSerializedStockEntry(productId, unitId, units, reason);
+    await loadAllFromSupabase();
+  };
+
+  // Transferencia entre lojas: aguarda o banco (erro sobe para a tela) e recarrega o estoque.
+  const registerTransfer = async (
+    productId: string,
+    fromUnitId: string,
+    toUnitId: string,
+    quantity: number,
+    serials: string[],
+    cardCondition: CardCondition | undefined,
+    reason: string
+  ) => {
+    if (!useSupabase) {
+      registerMovement(productId, fromUnitId, toUnitId, 'TRANSFERENCIA', quantity, serials, cardCondition, reason, false);
+      return;
+    }
+    await supabaseService.processInventoryMovement({
+      id: 'm_' + Math.random().toString(36).substring(2, 9),
+      productId,
+      fromUnitId,
+      toUnitId,
+      type: 'TRANSFERENCIA',
+      quantity,
+      serials,
+      cardCondition,
+      operatorId: currentUser.id,
+      operatorName: currentUser.name,
+      timestamp: new Date().toISOString(),
+      reason
+    });
     await loadAllFromSupabase();
   };
 
@@ -652,60 +699,53 @@ export function useErpStore() {
     return newTrade;
   };
 
-  // Approve a trade-in and automatically insert it as a USED item in the stock catalog!
-  const approveTradeIn = async (
-    tradeId: string, 
-    productDetails: { sku: string; name: string; category: string; brand: string; sellPrice: number; warrantyMonths: number; isSerialized: boolean }
-  ) => {
+  // Troca Gamer: cadastra o videogame usado e da entrada da unidade com o serial real.
+  // O custo da unidade e o valor pago ao cliente (entra no custo medio da loja).
+  // Se o produto ja foi criado numa tentativa anterior que falhou na entrada, reaproveita.
+  const approveTradeIn = async (tradeId: string, details: TradeInApproval): Promise<void> => {
     const trade = tradeIns.find(t => t.id === tradeId);
-    if (!trade) return;
+    if (!trade) throw new Error('Troca não encontrada.');
+    const unitId = trade.unitId || currentUser.unitId;
 
-    // Create product in catalog (aguarda o banco: o codigo pode ser recusado)
-    let newProduct: Product;
-    try {
-      newProduct = await addProduct({
-      sku: productDetails.sku,
-      name: `${productDetails.name} (Usado / Trade-In)`,
-      category: productDetails.category,
-      brand: productDetails.brand,
-      costPrice: trade.valuationAmount,
-      sellPrice: productDetails.sellPrice,
-      ncm: '9504.50.00',
-      warrantyMonths: productDetails.warrantyMonths,
-      isSerialized: productDetails.isSerialized,
-      isUsed: true
+    let productId = trade.createdProductId && products.some(p => p.id === trade.createdProductId)
+      ? trade.createdProductId
+      : null;
+    if (!productId) {
+      const newProduct = await addProduct({
+        sku: details.sku,
+        name: details.name,
+        category: 'Videogames',
+        brand: 'Troca Gamer',
+        costPrice: trade.valuationAmount,
+        sellPrice: details.sellPrice,
+        ncm: details.ncm,
+        warrantyMonths: details.warrantyMonths,
+        isSerialized: true,
+        isUsed: true,
+        cest: details.cest,
+        icmsOrigin: details.icmsOrigin,
+        icmsCst: details.icmsCst,
+        csosn: details.csosn,
+        icmsRate: details.icmsRate,
+        icmsReduction: details.icmsReduction,
+        taxBurdenPercent: details.taxBurdenPercent
       });
-    } catch (err) {
-      console.error('Erro ao cadastrar produto do trade-in no Supabase:', err);
-      return;
+      productId = newProduct.id;
+      const withProduct = { ...trade, createdProductId: productId };
+      if (useSupabase) await supabaseService.upsertTradeIn(withProduct);
+      setTradeIns(prev => prev.map(t => t.id === tradeId ? withProduct : t));
     }
 
-    // Automatically give an initial Entrada of 1 unit in the physical store where trade-in was registered
-    const unitIdToEnter = trade.unitId || (currentUser.unitId === 'central' ? 'loja_1' : currentUser.unitId);
-    const serialToAdd = productDetails.isSerialized ? [`USED-${Math.random().toString(36).substring(2, 7).toUpperCase()}`] : [];
-    
-    registerMovement(
-      newProduct.id,
-      'FORNECEDOR',
-      unitIdToEnter,
-      'ENTRADA',
-      1,
-      serialToAdd,
-      undefined,
-      `Entrada de Trade-In Usado de ${trade.sellerName} (CPF: ${trade.sellerCpf})`
+    await registerSerializedStockEntry(
+      productId,
+      unitId,
+      [{ serialNumber: details.serialNumber, imei: details.imei || undefined, unitCost: trade.valuationAmount }],
+      `Troca Gamer: compra de ${trade.sellerName} (CPF: ${trade.sellerCpf})`
     );
 
-    // Update tradeIn status
-    setTradeIns(prev => prev.map(t => {
-      if (t.id === tradeId) {
-        const updated = { ...t, status: 'APROVADO' as const, createdProductId: newProduct.id };
-        if (useSupabase) {
-          supabaseService.upsertTradeIn(updated).catch(err => console.error('Erro ao atualizar troca no Supabase:', err));
-        }
-        return updated;
-      }
-      return t;
-    }));
+    const approved = { ...trade, status: 'APROVADO' as const, createdProductId: productId };
+    if (useSupabase) await supabaseService.upsertTradeIn(approved);
+    setTradeIns(prev => prev.map(t => t.id === tradeId ? approved : t));
   };
 
   const cancelTradeIn = (tradeId: string) => {
@@ -721,35 +761,10 @@ export function useErpStore() {
     }));
   };
 
-  // Work Orders / OS
-  const addWorkOrder = (wo: Omit<WorkOrder, 'id' | 'osNumber' | 'operatorId' | 'operatorName' | 'timestamp'>) => {
-    const osNumber = `OS-2026-${String(workOrders.length + 1).padStart(3, '0')}`;
-    const newWo: WorkOrder = {
-      ...wo,
-      id: 'wo_' + Math.random().toString(36).substring(2, 9),
-      osNumber,
-      operatorId: currentUser.id,
-      operatorName: currentUser.name,
-      timestamp: new Date().toISOString()
-    };
-    setWorkOrders(prev => [newWo, ...prev]);
-    if (useSupabase) {
-      supabaseService.upsertWorkOrder(newWo).catch(err => console.error('Erro ao criar OS no Supabase:', err));
-    }
-    return newWo;
-  };
-
-  const updateWorkOrderStatus = (woId: string, status: 'AGUARDANDO_PECA' | 'EM_ANALISE' | 'PRONTO' | 'ENTREGUE') => {
-    setWorkOrders(prev => prev.map(wo => {
-      if (wo.id === woId) {
-        const updated = { ...wo, status };
-        if (useSupabase) {
-          supabaseService.upsertWorkOrder(updated).catch(err => console.error('Erro ao atualizar OS no Supabase:', err));
-        }
-        return updated;
-      }
-      return wo;
-    }));
+  // Ordens de servico: abertas, cobradas e entregues no PDV; o ERP acompanha e muda a situacao.
+  const updateWorkOrderStatus = async (woId: string, status: WorkOrderStatus): Promise<void> => {
+    if (useSupabase) await supabaseService.updateWorkOrderStatus(woId, status);
+    setWorkOrders(prev => prev.map(wo => (wo.id === woId ? { ...wo, status } : wo)));
   };
 
   // Configure fees and fixed costs per store
@@ -908,18 +923,19 @@ export function useErpStore() {
     resetDatabase,
     addProduct,
     editProduct,
+    saveProduct,
     saveService,
     deleteService,
     registerMovement,
     registerStockEntry,
     registerSerializedStockEntry,
+    registerTransfer,
     registerSale,
     cancelSale,
     addExpense,
     registerTradeIn,
     approveTradeIn,
     cancelTradeIn,
-    addWorkOrder,
     updateWorkOrderStatus,
     updateStoreConfig,
     deleteStoreConfig,

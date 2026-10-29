@@ -1,6 +1,7 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Building2, Check, Pencil, Plus, Save, Store, Trash2, UserRound, Users, X } from 'lucide-react';
-import { PdvOperator, PdvOperatorPermissions, StoreConfig, User, UserRole } from '../types';
+import { PdvOperator, PdvOperatorPermissions, StoreConfig, StoreNfceStatus, User, UserRole } from '../types';
+import { supabaseService } from '../db/supabaseService';
 import ValueInput from './ValueInput';
 
 interface ConfiguracoesViewProps {
@@ -15,6 +16,11 @@ interface ConfiguracoesViewProps {
 }
 
 // Mesmo texto padrao do PDV (KanguruPDV/src/app/reservationVoucher.ts).
+// Mesmo texto padrao do PDV (KanguruPDV/src/app/tradeInTermPrint.ts).
+const DEFAULT_TRADE_IN_TERMS = 'Declaro, para todos os fins de direito, que sou o legítimo proprietário do equipamento descrito acima, que ele tem origem lícita e não é produto de furto, roubo, receptação ou de qualquer outro crime, assumindo integral responsabilidade civil e criminal por esta declaração.\n\nDeclaro que o equipamento está livre de dívidas, alienação, penhora ou bloqueio, e transfiro à loja a sua propriedade pelo valor acima, dando plena e total quitação, sem nada mais a reclamar.\n\nEstou ciente de que a loja pode consultar a procedência do equipamento e comunicar às autoridades competentes qualquer suspeita de irregularidade.\n\nAutorizo o uso dos meus dados pessoais exclusivamente para o registro desta operação, nos termos da Lei Geral de Proteção de Dados (Lei nº 13.709/2018).';
+const DEFAULT_WORK_ORDER_TERMS = "O valor dos serviços é uma estimativa e pode mudar após a análise técnica. A loja avisa o cliente e só executa serviço com valor diferente depois da autorização dele.\n\nA loja não se responsabiliza por dados, jogos, contas ou arquivos salvos no aparelho. Recomendamos fazer cópia de segurança antes de deixar o aparelho.\n\nA abertura do aparelho pode romper o selo de garantia do fabricante.\n\nAparelho não retirado em até 90 (noventa) dias após o aviso de que está pronto poderá ser considerado abandonado, nos termos da lei.\n\nA retirada só é feita com este comprovante ou pelo próprio cliente com documento com foto.\n\nAutorizo o uso dos meus dados pessoais exclusivamente para o atendimento desta ordem de serviço, nos termos da Lei Geral de Proteção de Dados (Lei nº 13.709/2018).";
+const DEFAULT_WORK_ORDER_DELIVERY_TERMS = "Declaro que recebi o equipamento descrito acima, testado na minha presença, funcionando quanto aos serviços executados, nada mais tendo a reclamar.\n\nA garantia de 90 (noventa) dias cobre somente os serviços executados e as peças trocadas (Código de Defesa do Consumidor, art. 26). Não cobre mau uso, quedas, contato com líquidos, oxidação, descarga elétrica ou abertura do aparelho por terceiros.\n\nPara usar a garantia, apresente este comprovante.";
+
 const DEFAULT_VOUCHER_TERMS =
   'Reserva de compra garantida. Para retirada do produto, apresente este voucher juntamente com a nota emitida. ' +
   'Não será aceita desistência nem devolução de valores e itens negociados. ' +
@@ -29,6 +35,11 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   phone: '',
   contactEmail: '',
   reservationVoucherTerms: '',
+  tradeInTerms: '',
+  workOrderTerms: '',
+  workOrderDeliveryTerms: '',
+  instagram: '',
+  exchangeDays: 7,
   fixedCost: 0,
   maxItemDiscountPercent: 0,
   paymentFees: { DINHEIRO: 0, PIX: 0, CREDITO: 0, DEBITO: 0 }
@@ -77,6 +88,11 @@ export default function ConfiguracoesView({
   const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
   // Cadastro/edicao de loja em janela (modal) sobre o ERP.
   const [storeModalOpen, setStoreModalOpen] = useState(false);
+  // NFC-e: a chave da Focus e configurada no UCP; aqui so a situacao de cada loja.
+  const [nfceStatus, setNfceStatus] = useState<StoreNfceStatus[]>([]);
+  useEffect(() => {
+    supabaseService.getStoreNfceStatus().then(setNfceStatus).catch(() => setNfceStatus([]));
+  }, []);
   const [storeForm, setStoreForm] = useState<Omit<StoreConfig, 'unitId'>>(EMPTY_STORE);
   const [storeMessage, setStoreMessage] = useState('');
   const [storeError, setStoreError] = useState('');
@@ -162,6 +178,11 @@ export default function ConfiguracoesView({
       phone: store.phone || '',
       contactEmail: store.contactEmail || '',
       reservationVoucherTerms: store.reservationVoucherTerms || '',
+      tradeInTerms: store.tradeInTerms || '',
+      workOrderTerms: store.workOrderTerms || '',
+      workOrderDeliveryTerms: store.workOrderDeliveryTerms || '',
+      instagram: store.instagram || '',
+      exchangeDays: store.exchangeDays ?? 7,
       fixedCost: store.fixedCost,
       maxItemDiscountPercent: store.maxItemDiscountPercent,
       paymentFees: store.paymentFees
@@ -330,7 +351,17 @@ export default function ConfiguracoesView({
                       <span className="font-bold text-slate-900 block">{store.tradeName || store.unitId}</span>
                       <span className="text-slate-500">{store.legalName || 'Razão social não informada'}</span>
                     </td>
-                    <td className="p-3 text-slate-600">{store.cnpj || 'Não informado'}</td>
+                    <td className="p-3 text-slate-600">
+                      {store.cnpj || 'Não informado'}
+                      {(() => {
+                        const nfce = nfceStatus.find(item => item.unitId === store.unitId);
+                        return (
+                          <span className={`mt-1 block w-fit rounded border px-1.5 text-[10px] font-bold ${nfce?.configured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
+                            {nfce?.configured ? `NFC-e configurada${nfce.environment === 'homologacao' ? ' (teste)' : ''}` : 'NFC-e não configurada'}
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="p-3 text-slate-600">{store.contactEmail || store.phone || 'Não informado'}</td>
                     <td className="p-3">
                       <div className="flex justify-end items-center gap-1">
@@ -444,7 +475,8 @@ function StoreFields({ form, onChange }: {
     { field: 'stateRegistration', label: 'Inscrição estadual' },
     { field: 'address', label: 'Endereço completo' },
     { field: 'phone', label: 'Telefone' },
-    { field: 'contactEmail', label: 'E-mail de contato', type: 'email' }
+    { field: 'contactEmail', label: 'E-mail de contato', type: 'email' },
+    { field: 'instagram', label: 'Instagram da loja (ex.: @bebgamescg) — vira o QR code do cupom' }
   ];
 
   return (
@@ -469,12 +501,51 @@ function StoreFields({ form, onChange }: {
         />
       </label>
       <label className="block text-xs font-bold text-slate-700">
+        Prazo de troca (dias) <span className="font-normal text-slate-400">(depois dele, troca/devolução no PDV só com a senha administrativa)</span>
+        <ValueInput
+          decimals={0}
+          value={form.exchangeDays ?? 7}
+          onValueChange={value => onChange('exchangeDays', Math.min(365, Math.max(0, value ?? 0)))}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
         Regras do voucher de reserva desta loja <span className="font-normal text-slate-400">(impressas nos vouchers do PDV desta loja; cada loja tem o seu texto; em branco usa o texto padrão)</span>
         <textarea
           rows={4}
           value={form.reservationVoucherTerms || ''}
           placeholder={DEFAULT_VOUCHER_TERMS}
           onChange={event => onChange('reservationVoucherTerms', event.target.value)}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Declarações do termo da Troca Gamer desta loja <span className="font-normal text-slate-400">(impressas no termo de compra de videogame usado; uma linha em branco separa os parágrafos; em branco usa o texto padrão)</span>
+        <textarea
+          rows={6}
+          value={form.tradeInTerms || ''}
+          placeholder={DEFAULT_TRADE_IN_TERMS}
+          onChange={event => onChange('tradeInTerms', event.target.value)}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Condições do comprovante de entrada da OS desta loja <span className="font-normal text-slate-400">(impressas quando o cliente deixa o aparelho; uma linha em branco separa os parágrafos; em branco usa o texto padrão)</span>
+        <textarea
+          rows={6}
+          value={form.workOrderTerms || ''}
+          placeholder={DEFAULT_WORK_ORDER_TERMS}
+          onChange={event => onChange('workOrderTerms', event.target.value)}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Declaração do comprovante de entrega da OS desta loja <span className="font-normal text-slate-400">(impressa quando o cliente retira o aparelho consertado; em branco usa o texto padrão)</span>
+        <textarea
+          rows={5}
+          value={form.workOrderDeliveryTerms || ''}
+          placeholder={DEFAULT_WORK_ORDER_DELIVERY_TERMS}
+          onChange={event => onChange('workOrderDeliveryTerms', event.target.value)}
           className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
         />
       </label>
