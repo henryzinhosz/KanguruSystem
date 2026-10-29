@@ -1,5 +1,5 @@
 import type { PosStoreProfile } from '../services/supabase/terminal';
-import type { CashClosureSummary, CashCounts, CashSessionReport } from '../services/supabase/cash-register';
+import type { CashClosureSummary, CashCounts, CashMovementLine, CashSessionReport } from '../services/supabase/cash-register';
 import { printHtmlDocument } from './receiptPrint';
 
 // Relatorio Gerencial do caixa (abertura, sangria e suprimento) em bobina de 80 mm, no modelo
@@ -96,6 +96,16 @@ function closingRow(label: string, value: string, width = 18) {
   return `<div class="line"><span>${escapeHtml(pad(label, width))}:</span><span>${escapeHtml(value)}</span></div>`;
 }
 
+// Lista de sangrias/suprimentos: hora, motivo e valor (o dono sabe por que o dinheiro saiu/entrou).
+function movementList(title: string, lines: CashMovementLine[]) {
+  if (lines.length === 0) return '';
+  const rows = lines.map((line) => {
+    const time = new Date(line.createdAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    return `<div class="mv"><span>${time} ${escapeHtml(line.reason)}</span><span>${money(line.amount)}</span></div>`;
+  }).join('');
+  return `<div class="dash"></div><div class="mv-title">${title}</div>${rows}`;
+}
+
 export function buildClosingHtml(data: ClosingReport, store: PosStoreProfile | null): string {
   const e = escapeHtml;
   const { summary, report, counts } = data;
@@ -136,6 +146,10 @@ export function buildClosingHtml(data: ClosingReport, store: PosStoreProfile | n
   th, td { padding: 0; text-align: right; font-weight: bold; }
   th:first-child, td:first-child { text-align: left; }
   th { font-size: 11px; }
+  .mv-title { margin-top: 6px; text-decoration: underline; }
+  .mv { display: flex; justify-content: space-between; gap: 6px; }
+  .mv span:first-child { flex: 1; overflow-wrap: anywhere; }
+  .mv span:last-child { white-space: nowrap; }
   .signature { margin-top: 60px; border-top: 2px solid #000; padding-top: 3px; text-align: center; font-family: Arial, Helvetica, sans-serif; font-weight: normal; }
 </style>
 </head>
@@ -184,7 +198,9 @@ export function buildClosingHtml(data: ClosingReport, store: PosStoreProfile | n
   ${closingRow('  NFC-e', String(report.nfceCount), 20)}
   ${closingRow('  Nao Fiscal', String(report.nonFiscalCount), 20)}
   ${closingRow('TM-Ticket Medio', money(ticket), 20)}
-  ${closingRow('Estornadas', `${report.cancelledCount} (${money(report.cancelledTotal)})`, 20)}` : ''}
+  ${closingRow('Estornadas', `${report.cancelledCount} (${money(report.cancelledTotal)})`, 20)}
+  ${movementList('SANGRIAS', report.movements.filter((line) => line.type === 'SANGRIA'))}
+  ${movementList('SUPRIMENTOS', report.movements.filter((line) => line.type === 'SUPRIMENTO'))}` : ''}
   <div class="dash"></div>
   <div class="signature">ASSINATURA DO OPERADOR</div>
 </body>
