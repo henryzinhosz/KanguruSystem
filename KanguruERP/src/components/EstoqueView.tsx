@@ -91,6 +91,15 @@ interface EstoqueViewProps {
     units: SerializedStockEntryUnit[],
     reason: string
   ) => Promise<void>;
+  registerTransfer: (
+    productId: string,
+    fromUnitId: string,
+    toUnitId: string,
+    qty: number,
+    serials: string[],
+    cardCondition: CardCondition | undefined,
+    reason: string
+  ) => Promise<void>;
   registerStockEntry: (
     productId: string,
     entries: StockEntryLine[],
@@ -115,6 +124,7 @@ export default function EstoqueView({
   saveProduct,
   registerMovement,
   registerSerializedStockEntry,
+  registerTransfer,
   registerStockEntry,
   productStoreCosts
 }: EstoqueViewProps) {
@@ -129,7 +139,7 @@ export default function EstoqueView({
   const [categoryFilter, setCategoryFilter] = useState('Todas');
   
   // UI Tabs inside Estoque
-  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'garantias' | 'avariados'>('catalogo');
+  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'avariados'>('catalogo');
   // Avariados (2.9): produtos devolvidos com defeito, fora da venda.
   const [damaged, setDamaged] = useState<{ unitId: string; productId: string; quantity: number; serials: string[] }[] | null>(null);
   const [damagedError, setDamagedError] = useState('');
@@ -192,10 +202,9 @@ export default function EstoqueView({
   const [transferReason, setTransferReason] = useState('');
   const [transferError, setTransferError] = useState('');
   const [transferSuccess, setTransferSuccess] = useState(false);
+  const [transferSaving, setTransferSaving] = useState(false);
 
-  // Warranty Query States
-  const [warrantyQuerySerial, setWarrantyQuerySerial] = useState('');
-  const [warrantyQueryResult, setWarrantyQueryResult] = useState<any | null>(null);
+
 
   const selectedStockEntryProduct = products.find(product => product.id === stockEntryProductId) || null;
   const stockEntryResults = products.filter(product => {
@@ -575,8 +584,9 @@ export default function EstoqueView({
   };
 
   // Handle Transfer Submit (Atomic operation)
-  const handleTransferSubmit = (e: React.FormEvent) => {
+  const handleTransferSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (transferSaving) return;
     setTransferError('');
     setTransferSuccess(false);
 
@@ -625,86 +635,29 @@ export default function EstoqueView({
       serialsToTransfer = inputSerials;
     }
 
-    // Execute transfer
-    registerMovement(
-      transferProductId,
-      transferFrom,
-      transferTo,
-      'TRANSFERENCIA',
-      transferQty,
-      serialsToTransfer,
-      selectedProduct?.category === 'Cards' ? transferCardCondition : undefined,
-      transferReason || 'Transferência entre unidades'
-    );
+    // Executa no banco (custo da origem vai junto); so mostra sucesso se o banco confirmar
+    setTransferSaving(true);
+    try {
+      await registerTransfer(
+        transferProductId,
+        transferFrom,
+        transferTo,
+        transferQty,
+        serialsToTransfer,
+        selectedProduct?.category === 'Cards' ? transferCardCondition : undefined,
+        transferReason || 'Transferência entre unidades'
+      );
+    } catch (err) {
+      setTransferError((err as { message?: string })?.message || 'Não foi possível concluir a transferência.');
+      return;
+    } finally {
+      setTransferSaving(false);
+    }
 
     setTransferSuccess(true);
     setTransferQty(1);
     setTransferSerialInput('');
     setTransferReason('');
-  };
-
-  // Warranty Query execution
-  const executeWarrantyQuery = (e: React.FormEvent) => {
-    e.preventDefault();
-    setWarrantyQueryResult(null);
-
-    if (!warrantyQuerySerial) return;
-
-    // Search active inventory first
-    let foundInInventory: any = null;
-    inventory.forEach(inv => {
-      const prod = products.find(p => p.id === inv.productId);
-      Object.entries(inv.quantities).forEach(([unitId, data]) => {
-        if (data.serials?.includes(warrantyQuerySerial)) {
-          foundInInventory = {
-            product: prod,
-            location: stores.find(store => store.unitId === unitId)?.tradeName || unitId,
-            status: 'Em Estoque',
-            warrantyTerm: `${prod?.warrantyMonths} meses (Ativa na venda)`
-          };
-        }
-      });
-    });
-
-    if (foundInInventory) {
-      setWarrantyQueryResult(foundInInventory);
-      return;
-    }
-
-    // Search sales records
-    let foundInSales: any = null;
-    sales.forEach(s => {
-      s.items.forEach(item => {
-        if (item.serials?.includes(warrantyQuerySerial)) {
-          const prod = products.find(p => p.id === item.productId);
-          
-          // Calculate warranty expiration
-          const saleDate = new Date(s.timestamp);
-          const expDate = new Date(saleDate);
-          expDate.setMonth(saleDate.getMonth() + (prod?.warrantyMonths || 0));
-          const daysLeft = Math.ceil((expDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-          const isExpired = daysLeft < 0;
-
-          foundInSales = {
-            product: prod,
-            invoice: s.invoiceNumber,
-            saleDate: saleDate.toLocaleDateString('pt-BR'),
-            client: s.clientName || 'Consumidor Final',
-            clientCpf: s.clientCpf || 'Não Informado',
-            store: stores.find(store => store.unitId === s.unitId)?.tradeName || s.unitId,
-            status: isExpired ? 'Garantia Expirada' : 'Garantia Ativa',
-            expDate: expDate.toLocaleDateString('pt-BR'),
-            daysLeft: isExpired ? 0 : daysLeft
-          };
-        }
-      });
-    });
-
-    if (foundInSales) {
-      setWarrantyQueryResult(foundInSales);
-    } else {
-      setWarrantyQueryResult({ status: 'Não Encontrado' });
-    }
   };
 
   return (
@@ -735,6 +688,18 @@ export default function EstoqueView({
           >
             <Layers className="w-4 h-4 mr-1.5" />
             Entrada de Estoque
+          </button>
+          <button
+            id="tab-estoque-transferencias"
+            onClick={() => setActiveSubTab('transferencias')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeSubTab === 'transferencias'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <Shuffle className="w-4 h-4 mr-1.5" />
+            Transferências
           </button>
           <button
             id="tab-estoque-avariados"
@@ -1430,9 +1395,10 @@ export default function EstoqueView({
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition font-bold"
+                disabled={transferSaving}
+                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-60 text-white rounded-lg transition font-bold"
               >
-                Efetivar Movimentação
+                {transferSaving ? 'Transferindo...' : 'Efetivar Movimentação'}
               </button>
             </form>
           </div>
@@ -1500,7 +1466,7 @@ export default function EstoqueView({
         </div>
       )}
 
-      {/* 3. VIEW: Consulta Garantia */}
+      {/* 3. VIEW: Avariados */}
       {activeSubTab === 'avariados' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-4 border-b border-slate-100">
@@ -1529,111 +1495,6 @@ export default function EstoqueView({
               })}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {activeSubTab === 'garantias' && (
-        <div className="max-w-2xl mx-auto bg-white p-6 rounded-xl border border-slate-200 shadow-sm font-sans space-y-6">
-          <div className="text-center space-y-1">
-            <h3 className="text-lg font-bold text-slate-950">Consulta Rápida de Garantia e Série</h3>
-            <p className="text-xs text-slate-400">Localize consoles, placas e peças de hardware pelo número de série único ou CPF do cliente.</p>
-          </div>
-
-          <form onSubmit={executeWarrantyQuery} className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                id="query-serial-number"
-                type="text"
-                placeholder="Insira o número de série (Ex: PS5-L1-01, RTX-L1-01)..."
-                value={warrantyQuerySerial}
-                onChange={(e) => setWarrantyQuerySerial(e.target.value)}
-                className="w-full bg-slate-50 text-slate-800 text-xs rounded-lg pl-9 pr-4 py-2.5 border border-slate-200 outline-none focus:ring-1 focus:ring-amber-500 font-mono"
-              />
-            </div>
-            <button
-              type="submit"
-              className="px-4 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold transition"
-            >
-              Consultar
-            </button>
-          </form>
-
-          {/* Results Block */}
-          {warrantyQueryResult && (
-            <div className="border border-slate-150 rounded-xl overflow-hidden text-xs">
-              {warrantyQueryResult.status === 'Não Encontrado' ? (
-                <div className="p-6 bg-rose-50/50 text-center text-rose-700 font-medium space-y-2">
-                  <ShieldAlert className="w-8 h-8 text-rose-500 mx-auto" />
-                  <p>Número de série não cadastrado no sistema ou vendido sem vínculo.</p>
-                </div>
-              ) : (
-                <div>
-                  <div className={`p-4 text-white flex justify-between items-center ${
-                    warrantyQueryResult.status === 'Em Estoque' || warrantyQueryResult.status === 'Garantia Ativa'
-                      ? 'bg-emerald-600'
-                      : 'bg-rose-600'
-                  }`}>
-                    <div>
-                      <h4 className="font-bold text-sm">{warrantyQueryResult.product?.name}</h4>
-                      <p className="opacity-80 text-[10px] font-mono">Código: {warrantyQueryResult.product?.sku} | S/N: {warrantyQuerySerial}</p>
-                    </div>
-                    <span className="font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-white/20 text-[10px]">
-                      {warrantyQueryResult.status}
-                    </span>
-                  </div>
-
-                  <div className="p-4 space-y-3 font-sans bg-slate-50">
-                    {warrantyQueryResult.status === 'Em Estoque' ? (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Localização Ativa</span>
-                          <span className="font-medium text-slate-800">{warrantyQueryResult.location}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Garantia Futura</span>
-                          <span className="font-medium text-slate-800">{warrantyQueryResult.warrantyTerm}</span>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Cliente Comprador</span>
-                          <span className="font-semibold text-slate-800">{warrantyQueryResult.client}</span>
-                          <span className="block text-[10px] font-mono text-slate-400">CPF: {warrantyQueryResult.clientCpf}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Loja Física Vendedora</span>
-                          <span className="font-medium text-slate-800">{warrantyQueryResult.store}</span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Data da Compra</span>
-                          <span className="font-medium text-slate-800 flex items-center">
-                            <Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" />
-                            {warrantyQueryResult.saleDate}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Data de Expiração</span>
-                          <span className="font-semibold text-slate-800 flex items-center">
-                            <Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" />
-                            {warrantyQueryResult.expDate}
-                          </span>
-                          {warrantyQueryResult.status === 'Garantia Ativa' ? (
-                            <span className="text-emerald-600 font-bold font-mono text-[10px] block mt-0.5">
-                              {warrantyQueryResult.daysLeft} dias restantes
-                            </span>
-                          ) : (
-                            <span className="text-rose-600 font-bold block text-[10px] mt-0.5">Expirada</span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 

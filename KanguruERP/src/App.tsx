@@ -56,6 +56,7 @@ export default function App() {
     deleteService,
     registerMovement,
     registerSerializedStockEntry,
+    registerTransfer,
     registerStockEntry,
     productStoreCosts,
     registerSale,
@@ -117,7 +118,7 @@ export default function App() {
     { id: 'estoque', name: 'Catálogo & Estoque', icon: Package },
     { id: 'servicos', name: 'Serviços', icon: Wrench },
     { id: 'clientes', name: 'Clientes', icon: Users },
-    { id: 'vendas', name: 'Trade-In (Usados)', icon: Coins },
+    { id: 'vendas', name: 'Troca Gamer', icon: Coins },
     { id: 'assistencia', name: 'Assistência / OS', icon: Wrench },
     { id: 'financeiro', name: 'Livro Caixa & DRE', icon: DollarSign },
     { id: 'admin', name: 'Fornecedores', icon: FileSpreadsheet },
@@ -214,6 +215,7 @@ export default function App() {
               saveProduct={saveProduct}
               registerMovement={registerMovement}
               registerSerializedStockEntry={registerSerializedStockEntry}
+              registerTransfer={registerTransfer}
               registerStockEntry={registerStockEntry}
               productStoreCosts={productStoreCosts}
             />

@@ -360,6 +360,24 @@ export interface TradeIn {
   createdProductId?: string; // product ID entered into stock after confirmation
 }
 
+// Dados para estocar o videogame da Troca Gamer (produto serializado + unidade com serial real).
+export interface TradeInApproval {
+  sku: string; // vazio = codigo automatico
+  name: string;
+  sellPrice: number;
+  warrantyMonths: number;
+  serialNumber: string;
+  imei: string;
+  ncm: string;
+  cest: string | null;
+  icmsOrigin: string | null;
+  icmsCst: string | null;
+  csosn: string | null;
+  icmsRate: number | null;
+  icmsReduction: number | null;
+  taxBurdenPercent: number | null;
+}
+
 export type WorkOrderStatus = 'AGUARDANDO_PECA' | 'EM_ANALISE' | 'PRONTO' | 'ENTREGUE';
 
 export interface WorkOrder {
