@@ -179,6 +179,9 @@ function errorMessage(error: unknown): string {
   if (passwordLockedError) {
     return passwordLockedMessage(passwordLockedError[1]);
   }
+  if (message.includes('Counted amounts cannot be negative')) {
+    return 'A contagem não pode ser negativa. Digite o valor que realmente está no caixa (pode ser 0).';
+  }
   if (message.includes('Invalid administrative password')) {
     return 'Senha administrativa incorreta.';
   }
@@ -604,13 +607,14 @@ export function App() {
       setClosure(summary);
       // Dados extras do relatorio de fechamento; se a consulta falhar, o relatorio sai sem eles.
       setClosingReport(await getCashSessionReport().catch(() => null));
+      // Contagem comeca no valor esperado, nunca negativa (o banco recusa contagem negativa).
       setCounts({
-        cash: summary.expectedCashAmount,
-        pix: summary.expectedPixAmount,
-        credit: summary.expectedCreditAmount,
-        debit: summary.expectedDebitAmount,
-        voucher: summary.expectedVoucherAmount,
-        creditAccount: summary.expectedCreditAccountAmount,
+        cash: Math.max(0, summary.expectedCashAmount),
+        pix: Math.max(0, summary.expectedPixAmount),
+        credit: Math.max(0, summary.expectedCreditAmount),
+        debit: Math.max(0, summary.expectedDebitAmount),
+        voucher: Math.max(0, summary.expectedVoucherAmount),
+        creditAccount: Math.max(0, summary.expectedCreditAccountAmount),
       });
       setPassword('');
       setScreen('cash-close');
