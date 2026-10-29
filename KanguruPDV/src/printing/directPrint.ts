@@ -92,8 +92,15 @@ async function header(doc: EscPos, store: PosStoreProfile | null, legal: boolean
 }
 
 // Cupom Nao Fiscal (DAV), mesmo conteudo do cupom impresso pela janela do Windows.
+// Duas vias (loja e cliente), cada uma com corte.
 async function buildDav(receipt: PosSaleReceipt, store: PosStoreProfile | null, changeAmount: number): Promise<number[]> {
   const doc = new EscPos();
+  await davVia(doc, receipt, store, changeAmount, 'VIA DA LOJA');
+  await davVia(doc, receipt, store, changeAmount, 'VIA DO CLIENTE');
+  return doc.build();
+}
+
+async function davVia(doc: EscPos, receipt: PosSaleReceipt, store: PosStoreProfile | null, changeAmount: number, label: string) {
   await header(doc, store, false);
   doc.bold(true).line('DAV - DOCUMENTO AUXILIAR DE VENDA').bold(false).align('left').rule();
   doc.pair('Seq. Descrição Produto', 'Total').line('  Qtd.   Preço').rule();
@@ -124,7 +131,8 @@ async function buildDav(receipt: PosSaleReceipt, store: PosStoreProfile | null, 
   if (link) doc.align('center').line().qr(link, 6).line();
   doc.align('left').line().wrap(RECEIPT_FOOTER).line();
   doc.line(`Emissão : ${issued.toLocaleDateString('pt-BR')} ${issued.toLocaleTimeString('pt-BR')}`);
-  return doc.feed(4).cut().build();
+  doc.align('center').rule().bold(true).line(label).bold(false).align('left');
+  doc.feed(4).cut();
 }
 
 // DANFE NFC-e no modelo do cupom fiscal (mesmas regras do impresso pela janela do Windows).
@@ -183,8 +191,9 @@ async function buildNfce(receipt: PosSaleReceipt, store: PosStoreProfile | null,
     doc.align('left').line().pair(`Cupom: ${formatReceiptNumber(receipt.receiptNumber)}`, receipt.sellerName ? `Vendedor: ${receipt.sellerName.toUpperCase()}` : '');
     doc.wrap(RECEIPT_FOOTER).feed(4).cut();
   };
+  // Sempre duas vias: consumidor e estabelecimento.
   await via('Via Consumidor');
-  if (contingency) await via('Via Estabelecimento');
+  await via('Via Estabelecimento');
   return doc.build();
 }
 

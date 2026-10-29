@@ -175,7 +175,7 @@ function buildNfceHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, l
 </style>
 </head>
 <body>
-  ${contingency ? `${danfeSection('Via Consumidor')}<div class="page-break"></div>${danfeSection('Via Estabelecimento')}` : danfeSection('Via Consumidor')}
+  ${danfeSection('Via Consumidor')}<div class="page-break"></div>${danfeSection('Via Estabelecimento')}
 </body>
 </html>`;
 }
@@ -226,35 +226,8 @@ export function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null
     store?.phone ? `<div>Telefone :${e(store.phone.replace(/\s+/g, ''))}</div>` : '',
   ].join('');
 
-  return `<!doctype html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<title>Cupom ${formatReceiptNumber(receipt.receiptNumber)}</title>
-<style>
-  @page { size: 80mm auto; margin: 0; }
-  * { box-sizing: border-box; }
-  /* Impressora termica pelo driver do Windows: fonte em negrito e preto puro, senao o texto sai fraco */
-  html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body { margin: 0; width: 80mm; padding: 4mm 4mm 6mm; font-family: 'Courier New', Courier, monospace; font-size: 12px; font-weight: bold; color: #000; line-height: 1.35; -webkit-font-smoothing: none; text-rendering: optimizeSpeed; }
-  .center { text-align: center; }
-  .logo { display: block; width: 46mm; margin: 0 auto 6px; filter: grayscale(1) contrast(2) brightness(0.85); }
-  .store-name { font-weight: bold; font-size: 13px; margin-bottom: 2px; }
-  .title { margin: 4px 0 2px; }
-  hr { border: 0; border-top: 2px dashed #000; margin: 3px 0; }
-  .row { display: flex; justify-content: space-between; gap: 6px; }
-  .row span:last-child { white-space: nowrap; }
-  .sub { padding-left: 2ch; }
-  .head { display: flex; justify-content: space-between; }
-  .totals { margin-top: 6px; }
-  .bold { font-weight: bold; }
-  .block { margin-top: 10px; }
-  .qr { display: block; width: 32mm; height: 32mm; margin: 10px auto; image-rendering: pixelated; }
-  .footer { margin-top: 8px; text-transform: uppercase; }
-  .issued { margin-top: 16px; }
-</style>
-</head>
-<body>
+  // Duas vias: uma fica com a loja, outra com o cliente.
+  const davSection = (via: string) => `
   <img class="logo" src="${logo}" alt="">
   <div class="center">
     ${storeLines}
@@ -284,6 +257,40 @@ export function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null
   ${qrDataUrl ? `<img class="qr" src="${qrDataUrl}" alt="">` : ''}
   <div class="footer">${RECEIPT_FOOTER}</div>
   <div class="issued">Emissão : &nbsp; ${issued.toLocaleDateString('pt-BR')} ${issued.toLocaleTimeString('pt-BR')}</div>
+  <div class="via-label">${via}</div>`;
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Cupom ${formatReceiptNumber(receipt.receiptNumber)}</title>
+<style>
+  @page { size: 80mm auto; margin: 0; }
+  * { box-sizing: border-box; }
+  /* Impressora termica pelo driver do Windows: fonte em negrito e preto puro, senao o texto sai fraco */
+  html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0; width: 80mm; padding: 4mm 4mm 6mm; font-family: 'Courier New', Courier, monospace; font-size: 12px; font-weight: bold; color: #000; line-height: 1.35; -webkit-font-smoothing: none; text-rendering: optimizeSpeed; }
+  .center { text-align: center; }
+  .logo { display: block; width: 46mm; margin: 0 auto 6px; filter: grayscale(1) contrast(2) brightness(0.85); }
+  .store-name { font-weight: bold; font-size: 13px; margin-bottom: 2px; }
+  .title { margin: 4px 0 2px; }
+  hr { border: 0; border-top: 2px dashed #000; margin: 3px 0; }
+  .row { display: flex; justify-content: space-between; gap: 6px; }
+  .row span:last-child { white-space: nowrap; }
+  .sub { padding-left: 2ch; }
+  .head { display: flex; justify-content: space-between; }
+  .totals { margin-top: 6px; }
+  .bold { font-weight: bold; }
+  .block { margin-top: 10px; }
+  .qr { display: block; width: 32mm; height: 32mm; margin: 10px auto; image-rendering: pixelated; }
+  .footer { margin-top: 8px; text-transform: uppercase; }
+  .issued { margin-top: 16px; }
+  .via-label { margin-top: 8px; text-align: center; font-size: 13px; border-top: 2px dashed #000; padding-top: 4px; }
+  .page-break { break-after: page; page-break-after: always; height: 10mm; }
+</style>
+</head>
+<body>
+  ${davSection('VIA DA LOJA')}<div class="page-break"></div>${davSection('VIA DO CLIENTE')}
 </body>
 </html>`;
 }
