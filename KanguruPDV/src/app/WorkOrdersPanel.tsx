@@ -210,7 +210,7 @@ function NewWorkOrder({ seller, sellerSlot, loadStore, onCharge, onCreated, onCa
   return (
     <section className="reservations-panel trade-in-panel">
       <h1>Nova ordem de serviço</h1>
-      <p className="modal-copy">O cliente deixa o aparelho. Ao confirmar, o comprovante de entrada sai impresso em duas vias.</p>
+      <p className="modal-copy">O cliente deixa o aparelho. Ao confirmar, o comprovante de abertura sai impresso em duas vias.</p>
 
       <h2 className="trade-in-section">Cliente</h2>
       {customer ? (
@@ -458,7 +458,7 @@ function WorkOrderDetail({ orderId, seller, sellerSlot, loadStore, onCharge, onB
       <div className="modal-actions">
         <button className="text-action" type="button" onClick={() => onBack()} disabled={busy}>Voltar à lista</button>
         <button className="text-action" type="button" onClick={() => void loadStore().then((store) => printWorkOrder(order, store, 'entry'))} disabled={busy}>
-          Reimprimir entrada
+          Reimprimir abertura
         </button>
         {closed && (
           <button className="text-action" type="button" onClick={() => void loadStore().then((store) => printWorkOrder(order, store, 'delivery'))} disabled={busy}>

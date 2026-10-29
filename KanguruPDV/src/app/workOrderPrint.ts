@@ -67,7 +67,7 @@ function via(data: WorkOrderRecord, store: PosStoreProfile | null, logo: string,
   const row = (name: string, value: string | null) => `<tr><th>${name}</th><td>${value ? e(value) : '—'}</td></tr>`;
   const title = delivered
     ? (withoutRepair ? 'COMPROVANTE DE DEVOLUÇÃO DA ORDEM DE SERVIÇO' : 'COMPROVANTE DE ENTREGA DA ORDEM DE SERVIÇO')
-    : 'COMPROVANTE DE ENTRADA DA ORDEM DE SERVIÇO';
+    : 'COMPROVANTE DE ABERTURA DA ORDEM DE SERVIÇO';
   const terms = delivered
     ? (withoutRepair ? WITHOUT_REPAIR_TERMS : paragraphs(data.deliveryTerms, DEFAULT_WORK_ORDER_DELIVERY_TERMS))
     : paragraphs(data.terms, DEFAULT_WORK_ORDER_TERMS);
@@ -168,7 +168,7 @@ export function buildWorkOrderHtml(data: WorkOrderRecord, store: PosStoreProfile
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<title>OS nº ${data.orderNumber} - ${escapeHtml(data.customerName)}</title>
+<title>${kind === 'entry' ? 'Abertura' : data.status === 'DEVOLVIDO' ? 'Devolução' : 'Entrega'} OS nº ${data.orderNumber} - ${escapeHtml(data.customerName)}</title>
 <style>
   @page { size: A4 portrait; margin: 11mm; }
   * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }

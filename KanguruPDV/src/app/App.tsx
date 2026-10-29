@@ -1339,7 +1339,7 @@ export function App() {
         await printWorkOrder(record, await loadStoreProfile(), 'delivery');
       } else {
         const record = await getWorkOrder(order.workOrderId);
-        setMessage(`OS nº ${order.orderNumber} paga.${change} Colha a assinatura do cliente no comprovante de entrada.`);
+        setMessage(`OS nº ${order.orderNumber} paga.${change} Colha a assinatura do cliente no comprovante de abertura.`);
         await printWorkOrder(record, await loadStoreProfile(), 'entry');
       }
     } catch (error) {
