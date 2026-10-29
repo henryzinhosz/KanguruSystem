@@ -205,6 +205,10 @@ export default function FinanceiroView({
     setSaleSuccess('');
     const sale = sales.find(item => item.id === saleId);
     if (!sale) return;
+    if (sale.cashClosed) {
+      setSaleError('O caixa desta venda já foi fechado. Use Trocar/Devolver no PDV.');
+      return;
+    }
     const goesToApproval = sale.grossAmount > 300 && !isAdmin;
     if (!goesToApproval && !(await cancelNfceBeforeRefund(sale))) return;
     const res = cancelSale(saleId);
@@ -221,7 +225,12 @@ export default function FinanceiroView({
     setSaleError('');
     setSaleSuccess('');
     const sale = sales.find(item => item.id === saleId);
-    if (!sale || !(await cancelNfceBeforeRefund(sale))) return;
+    if (!sale) return;
+    if (sale.cashClosed) {
+      setSaleError('O caixa desta venda já foi fechado. Use Trocar/Devolver no PDV.');
+      return;
+    }
+    if (!(await cancelNfceBeforeRefund(sale))) return;
     cancelSale(saleId, currentUser.name);
     setSaleSuccess('Estorno aprovado com sucesso.');
   };
@@ -650,7 +659,10 @@ export default function FinanceiroView({
                             {isCompleted && (s.returns || []).length > 0 && (
                               <span className="text-[9px] text-slate-400 font-semibold block" title="Venda com troca/devolução não pode ser estornada">Com devolução</span>
                             )}
-                            {isCompleted && (s.returns || []).length === 0 && (
+                            {isCompleted && (s.returns || []).length === 0 && s.cashClosed && (
+                              <span className="text-[9px] text-slate-400 font-semibold block" title="O caixa desta venda já foi fechado. Use Trocar/Devolver no PDV.">Caixa fechado: use Trocar/Devolver no PDV</span>
+                            )}
+                            {isCompleted && (s.returns || []).length === 0 && !s.cashClosed && (
                               <button
                                 type="button"
                                 onClick={() => void handleCancelSale(s.id)}

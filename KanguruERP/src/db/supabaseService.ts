@@ -1349,8 +1349,14 @@ export const supabaseService = {
       });
     }
 
+    // Caixas do PDV ja fechados (estorno bloqueado). Tolerante a falha antes da migration 20261105.
+    const closedSessions = new Set<string>();
+    const { data: closedRows, error: closedError } = await supabase.rpc('list_closed_cash_session_ids');
+    if (!closedError) ((closedRows || []) as unknown[]).forEach(row => closedSessions.add(String(typeof row === 'object' && row !== null ? Object.values(row)[0] : row)));
+
     return (data || []).map(s => ({
       id: s.id,
+      cashClosed: Boolean(s.cash_session_id && closedSessions.has(s.cash_session_id)),
       invoiceNumber: s.invoice_number,
       unitId: s.unit_id,
       items: s.items,

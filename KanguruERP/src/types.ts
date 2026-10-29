@@ -269,6 +269,7 @@ export type SaleStatus = 'CONCLUIDA' | 'PENDENTE_APROVACAO' | 'CANCELADA' | 'REJ
 
 export interface Sale {
   id: string;
+  cashClosed?: boolean; // venda de caixa do PDV ja fechado: estorno bloqueado (usar Trocar/Devolver no PDV)
   invoiceNumber: string;
   unitId: string;
   items: SaleItem[];
