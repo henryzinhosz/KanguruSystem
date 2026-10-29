@@ -145,7 +145,6 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
           {tile('warranty', 'green', <ShieldCheck size={28} strokeWidth={1.8} />, 'Garantia', '4', offline)}
           {tile('trade-in', 'green', <Gamepad2 size={28} strokeWidth={1.8} />, 'Troca Gamer', '1', offline || !cashOpen)}
           {tile('work-orders', 'green', <Wrench size={28} strokeWidth={1.8} />, 'Ordem de serviço', '0', offline)}
-          {tile('receipts', 'green', <Receipt size={28} strokeWidth={1.8} />, 'Cupons e notas', '5', false, false, true)}
         </div>
       </section>
       <section className="menu-side">
@@ -160,6 +159,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
               <span className="menu-tile-label">Abrir gaveta</span>
               {!drawerAvailable && <span className="menu-tile-sub">escolha a impressora</span>}
             </button>
+            {tile('receipts', 'blue', <Receipt size={26} strokeWidth={1.8} />, 'Cupons e notas', '5', false, false, true)}
           </div>
         </div>
         <div>
