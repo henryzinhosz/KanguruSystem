@@ -11,6 +11,7 @@ import {
   Expense, 
   TradeIn, 
   WorkOrder, 
+  WorkOrderStatus,
   StoreConfig, 
   Supplier,
   SupplierInvoiceReminder,
@@ -1602,8 +1603,34 @@ export const supabaseService = {
       unitId: w.unit_id,
       operatorId: w.operator_id,
       operatorName: w.operator_name,
-      timestamp: w.timestamp
+      timestamp: w.timestamp,
+      orderNumber: w.order_number ?? undefined,
+      clientCpf: w.client_cpf || undefined,
+      equipmentType: w.equipment_type || undefined,
+      accessories: w.accessories || undefined,
+      entryCondition: w.entry_condition || undefined,
+      notes: w.notes || undefined,
+      items: Array.isArray(w.items)
+        ? w.items.map((item: any) => ({ serviceId: String(item.serviceId), sku: String(item.sku ?? ''), name: String(item.name ?? ''), price: Number(item.price ?? 0) }))
+        : [],
+      expectedDate: w.expected_date || undefined,
+      staffCode: w.staff_code || undefined,
+      staffName: w.staff_name || undefined,
+      saleId: w.sale_id || undefined,
+      paidAt: w.paid_at || undefined,
+      deliveredAt: w.delivered_at || undefined,
+      deliveredByName: w.delivered_by_name || undefined,
+      warrantyUntil: w.warranty_until || undefined
     }));
+  },
+
+  // So a situacao (a OS e aberta, cobrada e entregue pelo PDV).
+  async updateWorkOrderStatus(id: string, status: WorkOrderStatus): Promise<void> {
+    const { error } = await supabase
+      .from('work_orders')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error) throw error;
   },
 
   async upsertWorkOrder(w: WorkOrder): Promise<void> {
@@ -1648,6 +1675,8 @@ export const supabaseService = {
       contactEmail: c.contact_email || undefined,
       reservationVoucherTerms: c.reservation_voucher_terms || undefined,
       tradeInTerms: c.trade_in_terms || undefined,
+      workOrderTerms: c.work_order_terms || undefined,
+      workOrderDeliveryTerms: c.work_order_delivery_terms || undefined,
       instagram: c.instagram || undefined,
       exchangeDays: c.exchange_days == null ? undefined : Number(c.exchange_days)
     }));
@@ -1668,6 +1697,8 @@ export const supabaseService = {
       contact_email: c.contactEmail || null,
       reservation_voucher_terms: c.reservationVoucherTerms?.trim() || null,
       trade_in_terms: c.tradeInTerms?.trim() || null,
+      work_order_terms: c.workOrderTerms?.trim() || null,
+      work_order_delivery_terms: c.workOrderDeliveryTerms?.trim() || null,
       instagram: c.instagram?.trim() || null,
       ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {})
     };

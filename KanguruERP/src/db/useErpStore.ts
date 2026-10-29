@@ -13,6 +13,7 @@ import {
   TradeIn, 
   TradeInApproval,
   WorkOrder, 
+  WorkOrderStatus,
   StoreConfig, 
   Supplier, 
   PdvOperator,
@@ -760,35 +761,10 @@ export function useErpStore() {
     }));
   };
 
-  // Work Orders / OS
-  const addWorkOrder = (wo: Omit<WorkOrder, 'id' | 'osNumber' | 'operatorId' | 'operatorName' | 'timestamp'>) => {
-    const osNumber = `OS-2026-${String(workOrders.length + 1).padStart(3, '0')}`;
-    const newWo: WorkOrder = {
-      ...wo,
-      id: 'wo_' + Math.random().toString(36).substring(2, 9),
-      osNumber,
-      operatorId: currentUser.id,
-      operatorName: currentUser.name,
-      timestamp: new Date().toISOString()
-    };
-    setWorkOrders(prev => [newWo, ...prev]);
-    if (useSupabase) {
-      supabaseService.upsertWorkOrder(newWo).catch(err => console.error('Erro ao criar OS no Supabase:', err));
-    }
-    return newWo;
-  };
-
-  const updateWorkOrderStatus = (woId: string, status: 'AGUARDANDO_PECA' | 'EM_ANALISE' | 'PRONTO' | 'ENTREGUE') => {
-    setWorkOrders(prev => prev.map(wo => {
-      if (wo.id === woId) {
-        const updated = { ...wo, status };
-        if (useSupabase) {
-          supabaseService.upsertWorkOrder(updated).catch(err => console.error('Erro ao atualizar OS no Supabase:', err));
-        }
-        return updated;
-      }
-      return wo;
-    }));
+  // Ordens de servico: abertas, cobradas e entregues no PDV; o ERP acompanha e muda a situacao.
+  const updateWorkOrderStatus = async (woId: string, status: WorkOrderStatus): Promise<void> => {
+    if (useSupabase) await supabaseService.updateWorkOrderStatus(woId, status);
+    setWorkOrders(prev => prev.map(wo => (wo.id === woId ? { ...wo, status } : wo)));
   };
 
   // Configure fees and fixed costs per store
@@ -960,7 +936,6 @@ export function useErpStore() {
     registerTradeIn,
     approveTradeIn,
     cancelTradeIn,
-    addWorkOrder,
     updateWorkOrderStatus,
     updateStoreConfig,
     deleteStoreConfig,

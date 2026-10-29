@@ -390,7 +390,15 @@ export interface TradeInApproval {
   taxBurdenPercent: number | null;
 }
 
-export type WorkOrderStatus = 'AGUARDANDO_PECA' | 'EM_ANALISE' | 'PRONTO' | 'ENTREGUE';
+// DEVOLVIDO = devolvido ao cliente sem conserto.
+export type WorkOrderStatus = 'AGUARDANDO_PECA' | 'EM_ANALISE' | 'PRONTO' | 'ENTREGUE' | 'DEVOLVIDO';
+
+export interface WorkOrderItem {
+  serviceId: string;
+  sku: string;
+  name: string;
+  price: number;
+}
 
 export interface WorkOrder {
   id: string;
@@ -408,6 +416,22 @@ export interface WorkOrder {
   operatorId: string;
   operatorName: string;
   timestamp: string;
+  // OS aberta pelo PDV (numeracao por loja, servicos do cadastro, venda ligada).
+  orderNumber?: number;
+  clientCpf?: string;
+  equipmentType?: string;
+  accessories?: string;
+  entryCondition?: string;
+  notes?: string;
+  items?: WorkOrderItem[];
+  expectedDate?: string;
+  staffCode?: string;
+  staffName?: string;
+  saleId?: string;
+  paidAt?: string;
+  deliveredAt?: string;
+  deliveredByName?: string;
+  warrantyUntil?: string;
 }
 
 export interface StoreConfig {
@@ -425,6 +449,9 @@ export interface StoreConfig {
   reservationVoucherTerms?: string;
   // Texto das declaracoes do termo da Troca Gamer (vazio = texto padrao).
   tradeInTerms?: string;
+  // Condicoes dos comprovantes da Ordem de Servico (vazio = texto padrao).
+  workOrderTerms?: string;
+  workOrderDeliveryTerms?: string;
   instagram?: string; // perfil da loja (QR code do cupom)
   exchangeDays?: number; // prazo de troca em dias (2.9; padrao 7)
   paymentFees: {

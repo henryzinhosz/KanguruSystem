@@ -18,6 +18,8 @@ interface ConfiguracoesViewProps {
 // Mesmo texto padrao do PDV (KanguruPDV/src/app/reservationVoucher.ts).
 // Mesmo texto padrao do PDV (KanguruPDV/src/app/tradeInTermPrint.ts).
 const DEFAULT_TRADE_IN_TERMS = 'Declaro, para todos os fins de direito, que sou o legítimo proprietário do equipamento descrito acima, que ele tem origem lícita e não é produto de furto, roubo, receptação ou de qualquer outro crime, assumindo integral responsabilidade civil e criminal por esta declaração.\n\nDeclaro que o equipamento está livre de dívidas, alienação, penhora ou bloqueio, e transfiro à loja a sua propriedade pelo valor acima, dando plena e total quitação, sem nada mais a reclamar.\n\nEstou ciente de que a loja pode consultar a procedência do equipamento e comunicar às autoridades competentes qualquer suspeita de irregularidade.\n\nAutorizo o uso dos meus dados pessoais exclusivamente para o registro desta operação, nos termos da Lei Geral de Proteção de Dados (Lei nº 13.709/2018).';
+const DEFAULT_WORK_ORDER_TERMS = "O valor dos serviços é uma estimativa e pode mudar após a análise técnica. A loja avisa o cliente e só executa serviço com valor diferente depois da autorização dele.\n\nA loja não se responsabiliza por dados, jogos, contas ou arquivos salvos no aparelho. Recomendamos fazer cópia de segurança antes de deixar o aparelho.\n\nA abertura do aparelho pode romper o selo de garantia do fabricante.\n\nAparelho não retirado em até 90 (noventa) dias após o aviso de que está pronto poderá ser considerado abandonado, nos termos da lei.\n\nA retirada só é feita com este comprovante ou pelo próprio cliente com documento com foto.\n\nAutorizo o uso dos meus dados pessoais exclusivamente para o atendimento desta ordem de serviço, nos termos da Lei Geral de Proteção de Dados (Lei nº 13.709/2018).";
+const DEFAULT_WORK_ORDER_DELIVERY_TERMS = "Declaro que recebi o equipamento descrito acima, testado na minha presença, funcionando quanto aos serviços executados, nada mais tendo a reclamar.\n\nA garantia de 90 (noventa) dias cobre somente os serviços executados e as peças trocadas (Código de Defesa do Consumidor, art. 26). Não cobre mau uso, quedas, contato com líquidos, oxidação, descarga elétrica ou abertura do aparelho por terceiros.\n\nPara usar a garantia, apresente este comprovante.";
 
 const DEFAULT_VOUCHER_TERMS =
   'Reserva de compra garantida. Para retirada do produto, apresente este voucher juntamente com a nota emitida. ' +
@@ -34,6 +36,8 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   contactEmail: '',
   reservationVoucherTerms: '',
   tradeInTerms: '',
+  workOrderTerms: '',
+  workOrderDeliveryTerms: '',
   instagram: '',
   exchangeDays: 7,
   fixedCost: 0,
@@ -175,6 +179,8 @@ export default function ConfiguracoesView({
       contactEmail: store.contactEmail || '',
       reservationVoucherTerms: store.reservationVoucherTerms || '',
       tradeInTerms: store.tradeInTerms || '',
+      workOrderTerms: store.workOrderTerms || '',
+      workOrderDeliveryTerms: store.workOrderDeliveryTerms || '',
       instagram: store.instagram || '',
       exchangeDays: store.exchangeDays ?? 7,
       fixedCost: store.fixedCost,
@@ -520,6 +526,26 @@ function StoreFields({ form, onChange }: {
           value={form.tradeInTerms || ''}
           placeholder={DEFAULT_TRADE_IN_TERMS}
           onChange={event => onChange('tradeInTerms', event.target.value)}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Condições do comprovante de entrada da OS desta loja <span className="font-normal text-slate-400">(impressas quando o cliente deixa o aparelho; uma linha em branco separa os parágrafos; em branco usa o texto padrão)</span>
+        <textarea
+          rows={6}
+          value={form.workOrderTerms || ''}
+          placeholder={DEFAULT_WORK_ORDER_TERMS}
+          onChange={event => onChange('workOrderTerms', event.target.value)}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Declaração do comprovante de entrega da OS desta loja <span className="font-normal text-slate-400">(impressa quando o cliente retira o aparelho consertado; em branco usa o texto padrão)</span>
+        <textarea
+          rows={5}
+          value={form.workOrderDeliveryTerms || ''}
+          placeholder={DEFAULT_WORK_ORDER_DELIVERY_TERMS}
+          onChange={event => onChange('workOrderDeliveryTerms', event.target.value)}
           className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
         />
       </label>

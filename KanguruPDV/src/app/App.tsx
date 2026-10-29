@@ -43,6 +43,9 @@ import {
 import { ReceiptsPanel } from './ReceiptsPanel';
 import { ReturnModal, type ReturnDone } from './ReturnModal';
 import { TradeInPanel, type TradeInDone } from './TradeInPanel';
+import { WorkOrdersPanel, type WorkOrderCharge } from './WorkOrdersPanel';
+import { deliverWorkOrder, getWorkOrder } from '../services/supabase/workOrders';
+import { printWorkOrder } from './workOrderPrint';
 import { getCustomerCreditBalance } from '../services/supabase/returns';
 import { searchPosCustomers } from '../services/supabase/customers';
 import { setUpdateAllowed } from './UpdateNotice';
@@ -126,6 +129,7 @@ type Screen =
   | 'receipts'
   | 'warranty'
   | 'trade-in'
+  | 'work-orders'
   | 'cash-movement'
   | 'cash-close';
 type PaymentMethod = PaymentMethodKey;
@@ -147,6 +151,9 @@ interface CartItem extends PosCatalogItem {
   serialUnit?: PosSerialUnit;
   // Encomenda: sem estoque agora; so pode ser reservado.
   backorder?: boolean;
+  // Servico de uma Ordem de Servico sendo cobrada (o banco liga a venda a OS).
+  workOrderId?: string;
+  workOrderNumber?: number;
 }
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -383,6 +390,12 @@ export function App() {
   const [tradeSellerCode, setTradeSellerCode] = useState('');
   const [tradeSeller, setTradeSeller] = useState<PosSeller | null>(null);
   const [tradeInKey, setTradeInKey] = useState(0);
+  // Ordem de Servico: vendedor da tela, OS a reabrir e cobranca em andamento na venda.
+  const [workOrderSellerCode, setWorkOrderSellerCode] = useState('');
+  const [workOrderSeller, setWorkOrderSeller] = useState<PosSeller | null>(null);
+  const [workOrdersKey, setWorkOrdersKey] = useState(0);
+  const [workOrderFocus, setWorkOrderFocus] = useState<string | null>(null);
+  const [workOrderCharge, setWorkOrderCharge] = useState<WorkOrderCharge | null>(null);
   const [saleSeller, setSaleSeller] = useState<PosSeller | null>(null);
   const [reservationSellerCode, setReservationSellerCode] = useState('');
   const [reservationSeller, setReservationSeller] = useState<PosSeller | null>(null);
@@ -769,7 +782,7 @@ export function App() {
 
   function addProduct(product: PosCatalogItem) {
     setCart((current) => {
-      const existing = current.find((item) => item.id === product.id && item.itemType === product.itemType && !item.serialUnit && !item.backorder);
+      const existing = current.find((item) => item.id === product.id && item.itemType === product.itemType && !item.serialUnit && !item.backorder && !item.workOrderId);
       if (!existing) return [...current, { ...product, quantity: 1, discountPercent: 0 }];
 
       if (product.itemType === 'PRODUCT' && existing.quantity >= product.availableQuantity) {
@@ -794,7 +807,7 @@ export function App() {
   function changeQuantity(productId: string, itemType: PosCatalogItem['itemType'], change: number) {
     setCart((current) =>
       current.flatMap((item) => {
-        if (item.id !== productId || item.itemType !== itemType) return [item];
+        if (item.id !== productId || item.itemType !== itemType || item.workOrderId) return [item];
         const quantity = item.quantity + change;
         if (quantity <= 0) return [];
         return item.itemType === 'PRODUCT' && !item.backorder && quantity > item.availableQuantity ? [item] : [{ ...item, quantity }];
@@ -858,6 +871,10 @@ export function App() {
       setMessage('Informe o código do vendedor para finalizar a venda.');
       return;
     }
+    if (isOffline() && cart.some((item) => item.workOrderId)) {
+      setMessage('Sem internet não dá para cobrar a ordem de serviço. Aguarde a conexão voltar.');
+      return;
+    }
     const resolution = resolvePayments(paymentLines, grossAmount);
     if (resolution.error) {
       setMessage(resolution.error);
@@ -904,6 +921,7 @@ export function App() {
                 serials: [item.serialUnit.serialNumber],
               }
             : {}),
+          ...(item.workOrderId ? { workOrderId: item.workOrderId } : {}),
         })),
         paymentMethod: legacyPaymentMethod(resolution.applied),
         payments: resolution.applied,
@@ -939,6 +957,8 @@ export function App() {
         setAdminApprovalError(passwordLockedMessage(result.lockedUntil));
         return;
       }
+      const charge = cart.some((item) => item.workOrderId) ? workOrderCharge : null;
+      const sellerCode = saleSeller.code;
       setCart([]);
       setCatalogItems([]);
       setQuery('');
@@ -948,12 +968,14 @@ export function App() {
       setSaleCustomer(null);
       setAdminApprovalPassword('');
       setAdminApprovalOpen(false);
+      setWorkOrderCharge(null);
       setMessage(
         resolution.changeCents > 0
           ? `Venda registrada com sucesso. Troco: ${currency.format(resolution.changeCents / 100)}.`
           : 'Venda registrada com sucesso.'
       );
       void deliverReceipt(saleId, resolution.changeCents / 100);
+      if (charge) void finishWorkOrderSale(charge, sellerCode, resolution.changeCents / 100);
       // Venda com dinheiro: abre a gaveta (impressao direta configurada).
       if (resolution.applied.some((line) => line.paymentMethod === 'DINHEIRO')) void openCashDrawer();
     } catch (error) {
@@ -1120,6 +1142,9 @@ export function App() {
         setTradeSeller(null);
         setScreen('trade-in');
         break;
+      case 'work-orders':
+        openWorkOrders(null);
+        break;
       case 'receipts':
         if (offlineNow) void reprintLastOfflineReceipt();
         else setScreen('receipts');
@@ -1259,6 +1284,67 @@ export function App() {
     if (customer) setSaleCustomer(customer);
     setScreen('sale');
     setMessage(`${text} Escolha os produtos e clique em "Usar vale-troca" (${currency.format(record.amount)}).`);
+  }
+
+  function openWorkOrders(focusId: string | null) {
+    setWorkOrdersKey((key) => key + 1);
+    setWorkOrderSellerCode('');
+    setWorkOrderSeller(null);
+    setWorkOrderFocus(focusId);
+    setScreen('work-orders');
+  }
+
+  // Cobrar a OS: venda normal com os servicos da OS no carrinho e o cliente preenchido.
+  // Preco e limite de desconto atuais do cadastro (o servidor recalcula na venda).
+  async function chargeWorkOrder(charge: WorkOrderCharge): Promise<string | null> {
+    if (!cashSession) return 'Abra o caixa para cobrar a ordem de serviço.';
+    if (cart.length > 0) return 'Há uma venda em andamento: finalize ou limpe o carrinho antes de cobrar a OS.';
+    const { order } = charge;
+    const items: CartItem[] = [];
+    for (const service of order.items) {
+      const found = (await searchPosItems(service.sku)).find((item) => item.itemType === 'SERVICE' && item.id === service.serviceId);
+      if (!found) return `O serviço "${service.name}" está inativo ou foi excluído no ERP. Troque o serviço na OS.`;
+      items.push({ ...found, quantity: 1, discountPercent: 0, workOrderId: order.workOrderId, workOrderNumber: order.orderNumber });
+    }
+    if (order.customerCpf) {
+      const customers = await searchPosCustomers(order.customerCpf).catch(() => []);
+      setSaleCustomer(customers.find((item) => item.cpf === order.customerCpf) ?? null);
+    }
+    setCart(items);
+    setPaymentLines([]);
+    setWorkOrderCharge(charge);
+    setScreen('sale');
+    setMessage(`Cobrança da OS nº ${order.orderNumber}${charge.deliver ? ' (entrega)' : ''}: escolha a forma de pagamento e finalize em "Não Fiscal".`);
+    return null;
+  }
+
+  function cancelWorkOrderCharge() {
+    const number = workOrderCharge?.order.orderNumber;
+    setCart((current) => current.filter((item) => !item.workOrderId));
+    setWorkOrderCharge(null);
+    setMessage(number ? `Cobrança da OS nº ${number} cancelada. A OS continua a pagar.` : null);
+  }
+
+  // Depois da venda da OS: entrega registra e imprime o comprovante de entrega;
+  // pagamento na abertura imprime o comprovante de entrada ja como "pago".
+  async function finishWorkOrderSale(charge: WorkOrderCharge, sellerCode: string, changeAmount: number) {
+    const { order } = charge;
+    const change = changeAmount > 0 ? ` Troco: ${currency.format(changeAmount)}.` : '';
+    try {
+      if (charge.deliver) {
+        const result = await deliverWorkOrder(order.workOrderId, sellerCode, { withoutRepair: false, tested: true });
+        if (result.status !== 'OK') throw new Error(result.status === 'INVALID_SELLER' ? 'código do vendedor inválido' : 'OS não ficou paga');
+        const record = result.order;
+        setMessage(`OS nº ${order.orderNumber} paga e entregue.${change} Colha a assinatura do cliente no comprovante de entrega.`);
+        await printWorkOrder(record, await loadStoreProfile(), 'delivery');
+      } else {
+        const record = await getWorkOrder(order.workOrderId);
+        setMessage(`OS nº ${order.orderNumber} paga.${change} Colha a assinatura do cliente no comprovante de entrada.`);
+        await printWorkOrder(record, await loadStoreProfile(), 'entry');
+      }
+    } catch (error) {
+      setMessage(`Venda registrada, mas a OS nº ${order.orderNumber} não foi atualizada: ${errorMessage(error)}. Abra a OS em "Ordens de serviço" e conclua por lá.`);
+    }
   }
 
   // Troca: volta para a venda com o cliente selecionado; o vale ja esta no CPF dele.
@@ -1566,6 +1652,11 @@ export function App() {
     }
   }
 
+  // Carrinho limpo (cancelar venda, F6...): a cobranca da OS deixa de valer.
+  useEffect(() => {
+    if (workOrderCharge && !cart.some((item) => item.workOrderId)) setWorkOrderCharge(null);
+  }, [cart, workOrderCharge]);
+
   useEffect(() => {
     if (screen !== 'sale' && screen !== 'receipts') return;
     // Sem internet vale a configuracao guardada (NFC-e pelo Comunicador Offline).
@@ -1677,6 +1768,8 @@ export function App() {
 
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
   const cartHasBackorder = cart.some((item) => item.backorder);
+  // Servicos ficam fora da NFC-e: venda so com servicos sai como Nao Fiscal.
+  const cartHasProduct = cart.some((item) => item.itemType === 'PRODUCT');
   const reservationDepositAmount = valueAsNumber(reservationDeposit);
 
   useEffect(() => {
@@ -1996,6 +2089,44 @@ export function App() {
           loadStore={loadStoreProfile}
           onPaidCash={() => void openCashDrawer()}
           onDone={(result) => void finishTradeIn(result)}
+        />
+      </main>
+    );
+  }
+
+  if (screen === 'work-orders') {
+    return (
+      <main className="sale-shell">
+        <header className="sale-header">
+          <div>
+            <Brand compact />
+            <div>
+              <strong>Ordens de serviço</strong>
+              <span>{terminal?.tradeName ?? terminal?.unitId}</span>
+            </div>
+          </div>
+          <div className="header-actions">
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('menu')}>
+              Voltar ao menu
+            </button>
+          </div>
+        </header>
+        <WorkOrdersPanel
+          key={workOrdersKey}
+          seller={workOrderSeller}
+          sellerSlot={(
+            <SellerCodeField
+              label="Código do vendedor"
+              value={workOrderSellerCode}
+              seller={workOrderSeller}
+              disabled={false}
+              onValue={setWorkOrderSellerCode}
+              onSeller={setWorkOrderSeller}
+            />
+          )}
+          initialOrderId={workOrderFocus}
+          loadStore={loadStoreProfile}
+          onCharge={chargeWorkOrder}
         />
       </main>
     );
@@ -2337,15 +2468,22 @@ export function App() {
               </small>
             )}
           </div>
+          {workOrderCharge && (
+            <div className="work-order-charge">
+              <span>Cobrando a <strong>OS nº {workOrderCharge.order.orderNumber}</strong>{workOrderCharge.deliver ? ' (entrega)' : ''} · {workOrderCharge.order.customerName}</span>
+              <button className="text-action" type="button" onClick={cancelWorkOrderCharge} disabled={busy}>Cancelar cobrança</button>
+            </div>
+          )}
           <div className="cart-list">
             {cart.length === 0 ? (
               <p className="empty-state">Adicione um produto para iniciar.</p>
             ) : (
               cart.map((item) => (
-                <div className="cart-item" key={item.serialUnit?.serialUnitId ?? `${item.itemType}-${item.id}${item.backorder ? '-encomenda' : ''}`}>
+                <div className="cart-item" key={item.serialUnit?.serialUnitId ?? `${item.itemType}-${item.id}${item.backorder ? '-encomenda' : ''}${item.workOrderId ? `-${item.workOrderId}` : ''}`}>
                   <div>
                     <strong>{item.name}</strong>
                     {item.backorder && <span className="backorder-tag">Encomenda · sem estoque</span>}
+                    {item.workOrderNumber && <span className="backorder-tag work-order-tag">OS nº {item.workOrderNumber}</span>}
                     <small>{item.itemType === 'SERVICE' ? 'Serviço' : 'Produto'} | {currency.format(item.sellPrice)} cada</small>
                     {item.serialUnit ? (
                       <>
@@ -2363,7 +2501,7 @@ export function App() {
                       />
                     </label>
                   </div>
-                  {item.serialUnit ? (
+                  {item.workOrderId ? null : item.serialUnit ? (
                     <button
                       className="remove-serial-unit"
                       type="button"
@@ -2500,15 +2638,17 @@ export function App() {
                   <button
                     className="primary-action finish-button finish-nfce"
                     type="button"
-                    disabled={!nfceConfig?.configured || busy || nfceEmitting || cart.length === 0 || !saleSeller || cartHasBackorder}
-                    title={nfceConfig?.configured ? 'Finalizar com NFC-e' : 'NFC-e não configurada para esta loja.'}
+                    disabled={!nfceConfig?.configured || busy || nfceEmitting || cart.length === 0 || !saleSeller || cartHasBackorder || !cartHasProduct}
+                    title={!nfceConfig?.configured ? 'NFC-e não configurada para esta loja.' : !cartHasProduct && cart.length > 0 ? 'Venda só com serviços não gera NFC-e: use Não Fiscal.' : 'Finalizar com NFC-e'}
                     onClick={() => void finalizeSale('NFCE')}
                   >
                     <CreditCard size={20} />
                     {nfceEmitting ? 'Emitindo...' : 'NFC-e'}
                     {!nfceConfig?.configured
                       ? <small>não configurada</small>
-                      : nfceConfig.environment === 'homologacao' && <small>teste</small>}
+                      : !cartHasProduct && cart.length > 0
+                        ? <small>só serviços</small>
+                        : nfceConfig.environment === 'homologacao' && <small>teste</small>}
                   </button>
                   <button
                     className="primary-action finish-button"

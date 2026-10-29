@@ -1,20 +1,26 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Check, Pencil, Plus, Save, Trash2, Wrench } from 'lucide-react';
-import { Service } from '../types';
+import { Service, StoreConfig, WorkOrder, WorkOrderStatus } from '../types';
 import { supabaseService } from '../db/supabaseService';
 import { sanitizeItemCode } from '../db/itemCode';
 import ValueInput from './ValueInput';
+import OrdensServicoPanel from './OrdensServicoPanel';
 
 interface ServicosViewProps {
   services: Service[];
   saveService: (service: Service) => Promise<void>;
   deleteService: (id: string) => Promise<void>;
+  workOrders: WorkOrder[];
+  storeConfigs: StoreConfig[];
+  updateWorkOrderStatus: (id: string, status: WorkOrderStatus) => Promise<void>;
 }
 
 const emptyForm = { sku: '', name: '', category: 'Serviço adicional', sellPrice: 0, isActive: true };
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
-export default function ServicosView({ services, saveService, deleteService }: ServicosViewProps) {
+export default function ServicosView({ services, saveService, deleteService, workOrders, storeConfigs, updateWorkOrderStatus }: ServicosViewProps) {
+  // Ordens de servico ativas (abertas no PDV) e cadastro dos servicos usados nelas e na venda.
+  const [tab, setTab] = useState<'ordens' | 'cadastro'>('ordens');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState('');
@@ -85,10 +91,16 @@ export default function ServicosView({ services, saveService, deleteService }: S
 
   return (
     <div className="space-y-6">
-      <header>
-        <h2 className="text-xl font-bold text-slate-900">Serviços</h2>
+      <header className="space-y-3">
+        <h2 className="text-xl font-bold text-slate-900">Serviços / OS</h2>
+        <div className="flex gap-1 border-b border-slate-200">
+          {([['ordens', 'Ordens de serviço ativas'], ['cadastro', 'Cadastro de serviços']] as const).map(([id, label]) => (
+            <button key={id} type="button" onClick={() => setTab(id)} className={`px-4 py-2 text-xs font-bold border-b-2 -mb-px ${tab === id ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{label}</button>
+          ))}
+        </div>
       </header>
-      <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6">
+      {tab === 'ordens' && <OrdensServicoPanel workOrders={workOrders} storeConfigs={storeConfigs} updateWorkOrderStatus={updateWorkOrderStatus} />}
+      {tab === 'cadastro' && <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6">
         <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left">
@@ -131,7 +143,7 @@ export default function ServicosView({ services, saveService, deleteService }: S
             <button type="submit" disabled={busy} className="ml-auto px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2">{editingId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}{busy ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Cadastrar serviço'}</button>
           </div>
         </form>
-      </section>
+      </section>}
     </div>
   );
 }

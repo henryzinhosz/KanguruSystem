@@ -1836,3 +1836,45 @@ small {
 .reservation-header-actions {
   align-items: center;
 }
+
+/* Ordem de servico (lista, servicos, detalhe e cobranca no carrinho) */
+.menu-tile.is-wide { grid-column: 1 / -1; }
+.wo-detail-heading { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+.wo-detail-heading h1 { margin-right: auto; }
+.wo-status { border-radius: 4px; padding: 0.3rem 0.55rem; color: #1f4f8a; background: #e3edf9; font: 700 0.7rem 'Trebuchet MS', sans-serif; white-space: nowrap; }
+.wo-status.is-ready { color: #285e3a; background: #e4efe1; }
+.wo-status.is-waiting { color: #8a5a10; background: #fbefd7; }
+.wo-status.is-closed { color: #4f5a52; background: #e9ece8; }
+.wo-row { display: flex; align-items: center; gap: 1rem; width: 100%; text-align: left; border: 1px solid #c5d3c1; border-left: 5px solid #285e3a; border-radius: 6px; padding: 0.8rem 1rem; background: #fbfcf7; cursor: pointer; }
+.wo-row:hover { background: #f1f7ee; }
+.wo-row-number { font: 700 1.05rem 'Trebuchet MS', sans-serif; color: #24452c; min-width: 4.5rem; }
+.wo-row-main { display: grid; flex: 1; gap: 0.15rem; min-width: 0; }
+.wo-row-main small, .wo-row-side small { color: #5c7360; }
+.wo-row-side { display: grid; justify-items: end; gap: 0.2rem; text-align: right; }
+.wo-message { padding: 0.6rem 0.8rem; border-radius: 6px; background: #eef6ea; }
+.wo-check { display: flex; align-items: center; gap: 0.5rem; margin: 0.6rem 0; }
+.wo-check input { width: auto; }
+.wo-services { display: grid; gap: 0.5rem; margin: 0.4rem 0; }
+.wo-service-list { list-style: none; margin: 0; padding: 0; border: 1px solid #d0dacd; border-radius: 6px; }
+.wo-service-list li { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.75rem; border-top: 1px solid #e1e8de; }
+.wo-service-list li:first-child { border-top: 0; }
+.wo-service-list li > span:first-child { display: grid; flex: 1; }
+.wo-service-list small { color: #5c7360; }
+.wo-service-total { justify-content: space-between; background: #f4f9f2; }
+.wo-price { font-weight: 700; }
+.wo-service-search { display: flex; gap: 0.5rem; margin: 0.5rem 0; }
+.wo-service-search input { flex: 1; }
+.wo-service-results { display: grid; border: 1px solid #c9dbc5; border-radius: 6px; overflow: hidden; }
+.wo-service-results button { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; padding: 0.55rem 0.75rem; border: 0; border-top: 1px solid #e1e8de; background: #fff; text-align: left; cursor: pointer; }
+.wo-service-results button:first-child { border-top: 0; }
+.wo-service-results button:hover { background: #f1f7ee; }
+.wo-service-results button > span:first-child { display: grid; }
+.wo-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem 1rem; padding: 0.8rem 1rem; border: 1px solid #d0dacd; border-radius: 6px; background: #fbfcf7; }
+.wo-summary > div { display: grid; gap: 0.1rem; }
+.wo-summary small { color: #5c7360; text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.03em; }
+.work-order-tag { background: #e3edf9; color: #1f4f8a; }
+.work-order-charge { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.6rem; padding: 0.55rem 0.8rem; border: 1px solid #b9cfe8; border-radius: 6px; background: #eef4fb; font-size: 0.9rem; }
+@media (max-width: 640px) {
+  .wo-summary { grid-template-columns: 1fr; }
+  .wo-row { flex-wrap: wrap; }
+}

@@ -12,7 +12,6 @@ import DashboardView from './components/DashboardView';
 import EstoqueView from './components/EstoqueView';
 import VendasView from './components/VendasView';
 import FinanceiroView from './components/FinanceiroView';
-import AssistênciaView from './components/AssistênciaView';
 import AdminToolsView from './components/AdminToolsView';
 import ConfiguracoesView from './components/ConfiguracoesView';
 import ServicosView from './components/ServicosView';
@@ -65,7 +64,6 @@ export default function App() {
     registerTradeIn,
     approveTradeIn,
     cancelTradeIn,
-    addWorkOrder,
     updateWorkOrderStatus,
     updateStoreConfig,
     deleteStoreConfig,
@@ -80,7 +78,7 @@ export default function App() {
   } = useErpStore();
 
   // Active Main View Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'servicos' | 'clientes' | 'vendas' | 'assistencia' | 'financeiro' | 'admin' | 'configuracoes'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'servicos' | 'clientes' | 'vendas' | 'financeiro' | 'admin' | 'configuracoes'>('dashboard');
 
   if (!currentUser) {
     return <LoginScreen accessError={authProfileError} />;
@@ -116,10 +114,9 @@ export default function App() {
   const navigationItems = [
     { id: 'dashboard', name: 'Dashboard Geral', icon: LayoutDashboard },
     { id: 'estoque', name: 'Catálogo & Estoque', icon: Package },
-    { id: 'servicos', name: 'Serviços', icon: Wrench },
+    { id: 'servicos', name: 'Serviços / OS', icon: Wrench },
     { id: 'clientes', name: 'Clientes', icon: Users },
     { id: 'vendas', name: 'Troca Gamer', icon: Coins },
-    { id: 'assistencia', name: 'Assistência / OS', icon: Wrench },
     { id: 'financeiro', name: 'Livro Caixa & DRE', icon: DollarSign },
     { id: 'admin', name: 'Fornecedores', icon: FileSpreadsheet },
     { id: 'configuracoes', name: 'Configurações', icon: Settings }
@@ -222,7 +219,14 @@ export default function App() {
           )}
 
           {activeTab === 'servicos' && (
-            <ServicosView services={services} saveService={saveService} deleteService={deleteService} />
+            <ServicosView
+              services={services}
+              saveService={saveService}
+              deleteService={deleteService}
+              workOrders={workOrders}
+              storeConfigs={storeConfigs}
+              updateWorkOrderStatus={updateWorkOrderStatus}
+            />
           )}
 
           {activeTab === 'clientes' && (
@@ -238,16 +242,6 @@ export default function App() {
               storeConfigs={storeConfigs}
               approveTradeIn={approveTradeIn}
               cancelTradeIn={cancelTradeIn}
-            />
-          )}
-
-          {activeTab === 'assistencia' && (
-            <AssistênciaView 
-              currentUser={currentUser}
-              workOrders={workOrders}
-              storeConfigs={storeConfigs}
-              addWorkOrder={addWorkOrder}
-              updateWorkOrderStatus={updateWorkOrderStatus}
             />
           )}
 
