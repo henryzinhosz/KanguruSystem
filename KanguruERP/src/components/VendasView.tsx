@@ -25,7 +25,7 @@ import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fisca
 
 // Dados fiscais padrao da Troca Gamer (so videogames), informados pelo usuario em 2026-10-28.
 // CFOP 5102 sai sozinho na NFC-e (CSOSN 102). O franqueado pode alterar na aprovacao.
-const TRADE_FISCAL_DEFAULTS = { ncm: '9504.50.00', origin: '0', csosn: '102', cst: '', cest: '', icmsRate: 0, icmsReduction: 0 };
+const TRADE_FISCAL_DEFAULTS = { ncm: '9504.50.00', origin: '0', csosn: '102', cst: '', cest: '', icmsRate: 0, icmsReduction: 0, taxBurden: 26.87 };
 
 interface VendasViewProps {
   currentUser: User;
@@ -83,7 +83,7 @@ export default function VendasView({
   const [approveCest, setApproveCest] = useState(TRADE_FISCAL_DEFAULTS.cest);
   const [approveIcmsRate, setApproveIcmsRate] = useState<number | null>(TRADE_FISCAL_DEFAULTS.icmsRate);
   const [approveIcmsReduction, setApproveIcmsReduction] = useState<number | null>(TRADE_FISCAL_DEFAULTS.icmsReduction);
-  const [approveTaxBurden, setApproveTaxBurden] = useState<number | null>(null);
+  const [approveTaxBurden, setApproveTaxBurden] = useState<number | null>(TRADE_FISCAL_DEFAULTS.taxBurden);
   const [approveError, setApproveError] = useState('');
   const [approveSaving, setApproveSaving] = useState(false);
 
@@ -136,6 +136,7 @@ export default function VendasView({
     setApproveCest(TRADE_FISCAL_DEFAULTS.cest);
     setApproveIcmsRate(TRADE_FISCAL_DEFAULTS.icmsRate);
     setApproveIcmsReduction(TRADE_FISCAL_DEFAULTS.icmsReduction);
+    setApproveTaxBurden(TRADE_FISCAL_DEFAULTS.taxBurden);
     setApproveError('');
   };
 
