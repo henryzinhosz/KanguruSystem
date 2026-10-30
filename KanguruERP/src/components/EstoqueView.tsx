@@ -798,8 +798,8 @@ export default function EstoqueView({
           </div>
 
           {inlineError && <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{inlineError}</p>}
-          {/* Grid Catalog Display */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Lista do catalogo: um produto por linha */}
+          <div className="grid grid-cols-1 gap-5">
             {filteredProducts.map(p => {
               const prodInv = inventory.find(i => i.productId === p.id);
               
@@ -816,9 +816,9 @@ export default function EstoqueView({
               return (
                 <div key={p.id} className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col justify-between">
                   <div className="p-5 space-y-4">
-                    {/* Catalog Details */}
-                    <div className="flex justify-between items-start">
-                      <div>
+                    {/* Esquerda: dados e preco; direita: estoque por loja */}
+                    <div className="flex flex-col md:flex-row md:items-start gap-4">
+                      <div className="md:w-2/5 min-w-0">
                         <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded uppercase font-mono">
                           {p.category}
                         </span>
@@ -841,8 +841,7 @@ export default function EstoqueView({
                           {(!p.ncm || !p.icmsOrigin || !(p.csosn || p.icmsCst)) && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100" title="Sem os dados fiscais a NFC-e é recusada: edite o produto">DADOS FISCAIS PENDENTES</span>}
                         </h3>
                         <p className="text-xs text-slate-400 font-mono mt-0.5">Código: {p.sku}</p>
-                      </div>
-                      <div className="text-right">
+                        <div className="mt-3">
                         <span className="text-[10px] text-slate-400 font-mono block">Preço de Venda</span>
                         <span className="text-base font-black text-slate-900 font-mono">
                           R$ {p.sellPrice.toLocaleString('pt-BR')}
@@ -852,11 +851,11 @@ export default function EstoqueView({
                             Custo padrão: {formatMoney(p.costPrice)}
                           </span>
                         )}
+                        </div>
                       </div>
-                    </div>
 
                     {/* Stock levels by physical units */}
-                    <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-100/80 space-y-2">
+                    <div className="flex-1 min-w-0 bg-slate-50 p-3.5 rounded-lg border border-slate-100/80 space-y-2">
                       <h4 className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-sans mb-1">
                         Estoque por Unidade
                       </h4>
@@ -868,7 +867,7 @@ export default function EstoqueView({
                           return (
                             <div key={unit.id} className="flex justify-between items-center p-1 bg-white rounded border border-slate-200/50">
                               <div className="min-w-0">
-                                <span className="text-slate-600 truncate max-w-[100px] font-medium text-[11px] block">
+                                <span className="text-slate-600 truncate font-medium text-[11px] block">
                                   {unit.name.split(' - ')[0]}
                                 </span>
                                 {isAdmin && (
@@ -895,6 +894,7 @@ export default function EstoqueView({
                           );
                         })}
                       </div>
+                    </div>
                     </div>
 
                     {/* Serialization or Conditions metadata */}
