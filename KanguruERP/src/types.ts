@@ -492,12 +492,19 @@ export interface StoreConfig {
   workOrderDeliveryTerms?: string;
   instagram?: string; // perfil da loja (QR code do cupom)
   exchangeDays?: number; // prazo de troca em dias (2.9; padrao 7)
+  // Taxas do cartao em % (calculadora de juros do PDV): debito e credito de 1x a 12x.
+  cardFeeTable?: CardFeeTable | null;
   paymentFees: {
     DINHEIRO: number; // percentage (e.g. 0)
     PIX: number; // percentage (e.g. 0.005 = 0.5%)
     CREDITO: number; // percentage (e.g. 0.035 = 3.5%)
     DEBITO: number; // percentage (e.g. 0.019 = 1.9%)
   };
+}
+
+export interface CardFeeTable {
+  debito: number;
+  credito: number[]; // 12 valores: posicao 0 = 1x ... posicao 11 = 12x
 }
 
 export interface Supplier {

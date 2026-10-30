@@ -413,6 +413,42 @@ small {
   font-size: 0.95rem;
 }
 
+.payment-card-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  padding: 0.3rem 0 0.15rem;
+  font-size: 0.85rem;
+  color: #2d4a2b;
+}
+
+.payment-card-options select {
+  min-height: 34px;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid #b4c7b1;
+  border-radius: 5px;
+  background: #fff;
+  font-size: 0.9rem;
+}
+
+.payment-pass-fee {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.payment-pass-fee input {
+  width: 18px;
+  height: 18px;
+}
+
+.payment-card-charge strong {
+  color: #b85c00;
+}
+
 .payment-lines-summary {
   display: grid;
   grid-template-columns: 1fr auto;

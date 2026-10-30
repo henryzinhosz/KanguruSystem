@@ -1814,6 +1814,7 @@ export const supabaseService = {
       fixedCost: Number(c.fixed_cost),
       maxItemDiscountPercent: Number(c.max_item_discount_percent ?? 0),
       paymentFees: c.payment_fees,
+      cardFeeTable: c.card_fee_table ?? null,
       tradeName: c.trade_name || undefined,
       legalName: c.legal_name || undefined,
       cnpj: c.cnpj || undefined,
@@ -1848,7 +1849,9 @@ export const supabaseService = {
       work_order_terms: c.workOrderTerms?.trim() || null,
       work_order_delivery_terms: c.workOrderDeliveryTerms?.trim() || null,
       instagram: c.instagram?.trim() || null,
-      ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {})
+      ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {}),
+      // Antes da migration 20261111 a coluna nao existe: so envia quando foi lida do banco.
+      ...(c.cardFeeTable !== undefined ? { card_fee_table: c.cardFeeTable } : {})
     };
 
     const { error } = await supabase.from('store_configs').upsert(payload);

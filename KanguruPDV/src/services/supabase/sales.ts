@@ -12,6 +12,43 @@ export interface PaymentLine {
   paymentMethod: PaymentMethodKey;
   amount: number;
   installments?: number;
+  // Credito/debito: cliente paga a taxa da maquininha (juros entram no preco dos itens).
+  passFee?: boolean;
+  // Juros calculados pelo PDV (o servidor recalcula e confere).
+  surcharge?: number;
+}
+
+// Taxas do cartao da loja (em %), configuradas no ERP: debito e credito de 1x a 12x.
+export interface CardFeeTable {
+  debito?: number | null;
+  credito?: Array<number | null>;
+}
+
+export function cardFeeRate(table: CardFeeTable | null, method: PaymentMethodKey, installments = 1): number {
+  if (!table) return 0;
+  const rate = method === 'DEBITO'
+    ? table.debito
+    : method === 'CREDITO' && installments >= 1 && installments <= 12
+      ? table.credito?.[installments - 1]
+      : null;
+  return Number.isFinite(Number(rate)) && Number(rate) > 0 ? Number(rate) : 0;
+}
+
+// Juros para a loja receber o valor cheio: valor / (1 - taxa) - valor (mesma conta do servidor).
+export function cardSurcharge(amount: number, rate: number): number {
+  if (rate <= 0 || rate >= 100) return 0;
+  return Math.round((amount / (1 - rate / 100) - amount) * 100 + Number.EPSILON) / 100;
+}
+
+export function lineSurcharge(table: CardFeeTable | null, line: PaymentLine): number {
+  if (!line.passFee || (line.paymentMethod !== 'CREDITO' && line.paymentMethod !== 'DEBITO')) return 0;
+  return cardSurcharge(line.amount, cardFeeRate(table, line.paymentMethod, line.installments ?? 1));
+}
+
+export async function getPosCardFees(): Promise<CardFeeTable | null> {
+  const { data, error } = await supabase.rpc('get_pos_card_fees');
+  if (error) throw error;
+  return (data as CardFeeTable | null) ?? null;
 }
 
 // Senha errada ou bloqueada nao gera excecao: a RPC devolve o status para a
@@ -87,6 +124,7 @@ export const saleRpc = {
             paymentMethod: line.paymentMethod,
             amount: Number(line.amount.toFixed(2)),
             installments: line.installments ?? 1,
+            ...(line.passFee ? { passFee: true, surcharge: Number((line.surcharge ?? 0).toFixed(2)) } : {}),
           }))
         : null,
       p_admin_password: transaction.adminPassword && transaction.adminPassword.length > 0

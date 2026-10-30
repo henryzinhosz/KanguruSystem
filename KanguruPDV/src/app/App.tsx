@@ -32,9 +32,13 @@ import {
 import {
   emitPosNfce,
   getPosNfceStatus,
+  getPosCardFees,
   getPosSaleReceipt,
+  cardFeeRate,
+  lineSurcharge,
   saleRpc,
   syncNfceContingency,
+  type CardFeeTable,
   type NfceStatus,
   type PaymentLine,
   type PaymentMethodKey,
@@ -287,6 +291,17 @@ function resolvePayments(lines: PaymentLine[], total: number): PaymentResolution
   return { ...base, applied };
 }
 
+// Linhas de cartao com "Repassar taxa": juros calculados para o servidor conferir.
+function withCardSurcharge(lines: PaymentLine[], table: CardFeeTable | null): PaymentLine[] {
+  return lines.map((line) => (line.passFee ? { ...line, surcharge: lineSurcharge(table, line) } : line));
+}
+
+function surchargeTotal(lines: PaymentLine[]): number {
+  return lines.reduce((sum, line) => sum + toCents(line.surcharge ?? 0), 0) / 100;
+}
+
+const percentText = (value: number) => value.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+
 function legacyPaymentMethod(applied: PaymentLine[]): string {
   return applied.length === 1 ? applied[0].paymentMethod : 'DIVIDIDO';
 }
@@ -374,6 +389,8 @@ export function App() {
   const [reservationCustomerPhone, setReservationCustomerPhone] = useState('');
   const [reservationCustomerCpf, setReservationCustomerCpf] = useState('');
   const [storeProfile, setStoreProfile] = useState<PosStoreProfile | null>(null);
+  // Taxas do cartao da loja (ERP > Livro Caixa): parcelas e "Repassar taxa".
+  const [cardFees, setCardFees] = useState<CardFeeTable | null>(null);
   // Cliente da venda (opcional): identifica a compra para nota e garantia.
   const [saleCustomer, setSaleCustomer] = useState<PosCustomer | null>(null);
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
@@ -947,6 +964,12 @@ export function App() {
       setAdminApprovalOpen(true);
       return;
     }
+    const charged = withCardSurcharge(resolution.applied, cardFees);
+    const juros = surchargeTotal(charged);
+    if (juros > 0 && isOffline()) {
+      setMessage('Sem internet não dá para repassar a taxa do cartão. Desligue "Repassar taxa" e cobre na maquininha sem juros.');
+      return;
+    }
     setBusy(true);
     setMessage(null);
     setAdminApprovalError(null);
@@ -980,7 +1003,7 @@ export function App() {
           ...(item.workOrderId ? { workOrderId: item.workOrderId } : {}),
         })),
         paymentMethod: legacyPaymentMethod(resolution.applied),
-        payments: resolution.applied,
+        payments: charged,
         grossAmount,
         feeAmount: 0,
         netAmount: grossAmount,
@@ -1026,9 +1049,10 @@ export function App() {
       setAdminApprovalOpen(false);
       setWorkOrderCharge(null);
       setMessage(
-        resolution.changeCents > 0
+        (resolution.changeCents > 0
           ? `Venda registrada com sucesso. Troco: ${currency.format(resolution.changeCents / 100)}.`
-          : 'Venda registrada com sucesso.'
+          : 'Venda registrada com sucesso.')
+          + (juros > 0 ? ` Total com juros do cartão: ${currency.format(grossAmount + juros)}.` : '')
       );
       void deliverReceipt(saleId, resolution.changeCents / 100);
       if (charge) void finishWorkOrderSale(charge, sellerCode, resolution.changeCents / 100);
@@ -1038,12 +1062,18 @@ export function App() {
       // Caiu a internet no meio: registra offline com o mesmo id (o envio e idempotente).
       if (isNetworkError(error)) {
         setOffline(true);
+        if (juros > 0) {
+          setMessage('A internet caiu. Sem internet não dá para repassar a taxa do cartão: desligue "Repassar taxa" e finalize de novo.');
+          return;
+        }
         await finalizeOffline(saleId, resolution.applied, resolution.changeCents / 100);
         return;
       }
       const text = errorMessage(error);
       setMessage(text);
       if (adminApprovalOpen) setAdminApprovalError(text);
+      // Taxa alterada no ERP durante o dia: recarrega para o vendedor conferir.
+      getPosCardFees().then(setCardFees).catch(() => undefined);
     } finally {
       setBusy(false);
     }
@@ -1650,7 +1680,7 @@ export function App() {
         paymentMethod: resolution
           ? legacyPaymentMethod(resolution.applied)
           : reservation.depositPaymentMethod ?? 'DINHEIRO',
-        payments: resolution ? resolution.applied : null,
+        payments: resolution ? withCardSurcharge(resolution.applied, cardFees) : null,
         grossAmount: total,
         feeAmount: 0,
         netAmount: total,
@@ -1731,6 +1761,11 @@ export function App() {
     if (screen !== 'sale' && screen !== 'receipts') return;
     // Sem internet vale a configuracao guardada (NFC-e pelo Comunicador Offline).
     getPosNfceStatus().then(setNfceConfig).catch(async () => setNfceConfig((await getSnapshot())?.nfce ?? null));
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen !== 'sale' && screen !== 'reservations') return;
+    getPosCardFees().then(setCardFees).catch(() => undefined);
   }, [screen]);
 
   useEffect(() => {
@@ -2361,6 +2396,7 @@ export function App() {
           <ReservationPaymentModal
             reservation={conversionReservation}
             paymentLines={conversionPaymentLines}
+            cardFees={cardFees}
             busy={busy}
             message={message}
             sellerCode={conversionSellerCode}
@@ -2738,6 +2774,7 @@ export function App() {
                 total={grossAmount}
                 totalLabel="Total da venda"
                 busy={busy}
+                cardFees={cardFees}
                 onChange={setPaymentLines}
               />
 
@@ -2988,13 +3025,15 @@ interface PaymentLinesEditorProps {
   total: number;
   totalLabel: string;
   busy: boolean;
+  cardFees: CardFeeTable | null;
   onChange: (lines: PaymentLine[]) => void;
 }
 
-function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: PaymentLinesEditorProps) {
+function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange }: PaymentLinesEditorProps) {
   const resolution = resolvePayments(lines, total);
   const totalCents = toCents(total);
   const balanced = resolution.error === null;
+  const jurosCents = toCents(surchargeTotal(withCardSurcharge(lines, cardFees)));
 
   function updateLine(index: number, patch: Partial<PaymentLine>) {
     onChange(lines.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
@@ -3018,12 +3057,19 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
       ) : (
         lines.map((line, index) => {
           const otherLinesCents = lines.reduce((acc, current, i) => (i === index ? acc : acc + toCents(current.amount)), 0);
+          const isCard = line.paymentMethod === 'CREDITO' || line.paymentMethod === 'DEBITO';
+          const installments = line.installments ?? 1;
+          const rate = isCard ? cardFeeRate(cardFees, line.paymentMethod, installments) : 0;
+          const juros = lineSurcharge(cardFees, line);
+          const charged = (line.amount || 0) + juros;
           return (
-            <div className="payment-line" key={`payment-${index}`}>
+            <div className="payment-line-block" key={`payment-${index}`}>
+            <div className="payment-line">
               <select
                 aria-label={`Forma ${index + 1}`}
                 value={line.paymentMethod}
-                onChange={(event) => updateLine(index, { paymentMethod: event.target.value as PaymentMethod })}
+                onChange={(event) =>
+                  updateLine(index, { paymentMethod: event.target.value as PaymentMethod, installments: 1, passFee: false })}
               >
                 {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((method) => (
                   <option key={method} value={method}>
@@ -3054,6 +3100,49 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
                 <Trash2 size={16} />
               </button>
             </div>
+            {isCard && (
+              <div className="payment-card-options">
+                {line.paymentMethod === 'CREDITO' && (
+                  <select
+                    aria-label={`Parcelas da forma ${index + 1}`}
+                    value={installments}
+                    onChange={(event) => updateLine(index, { installments: Number(event.target.value) })}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((count) => {
+                      const countRate = cardFeeRate(cardFees, 'CREDITO', count);
+                      return (
+                        <option key={count} value={count}>
+                          {count}x{countRate > 0 ? ` (${percentText(countRate)}%)` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
+                {rate > 0 ? (
+                  <label className="payment-pass-fee">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(line.passFee)}
+                      onChange={(event) => updateLine(index, { passFee: event.target.checked })}
+                    />
+                    Repassar taxa ({percentText(rate)}%)
+                  </label>
+                ) : (
+                  <small>Taxa não cadastrada no ERP</small>
+                )}
+                {line.passFee && juros > 0 ? (
+                  <small className="payment-card-charge">
+                    Cobrar na maquininha: <strong>{currency.format(charged)}</strong>
+                    {line.paymentMethod === 'CREDITO' && installments > 1
+                      ? ` (${installments}x de ${currency.format(charged / installments)})`
+                      : ''}
+                  </small>
+                ) : rate > 0 ? (
+                  <small>A taxa de {percentText(rate)}% fica com a loja</small>
+                ) : null}
+              </div>
+            )}
+            </div>
           );
         })
       )}
@@ -3066,6 +3155,12 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
           <>
             <span>Falta</span>
             <strong className="negative">{currency.format(resolution.missingCents / 100)}</strong>
+          </>
+        )}
+        {jurosCents > 0 && (
+          <>
+            <span>Total com juros do cartão</span>
+            <strong>{currency.format((totalCents + jurosCents) / 100)}</strong>
           </>
         )}
         {resolution.changeCents > 0 && (
@@ -3090,6 +3185,7 @@ interface ReservationPaymentModalProps {
   unitChoices: Record<string, string>;
   onUnitChoice: (reservationItemId: string, unitId: string) => void;
   paymentLines: PaymentLine[];
+  cardFees: CardFeeTable | null;
   busy: boolean;
   message: string | null;
   sellerCode: string;
@@ -3108,6 +3204,7 @@ function ReservationPaymentModal({
   unitChoices,
   onUnitChoice,
   paymentLines,
+  cardFees,
   busy,
   message,
   sellerCode,
@@ -3179,6 +3276,7 @@ function ReservationPaymentModal({
             total={remaining}
             totalLabel="Saldo a cobrar"
             busy={busy}
+            cardFees={cardFees}
             onChange={onPaymentLines}
           />
         ) : (

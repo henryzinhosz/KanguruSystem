@@ -260,8 +260,10 @@ export default function FinanceiroView({
   const [selectedConfigUnit, setSelectedConfigUnit] = useState<string>('');
   const [editFixedCost, setEditFixedCost] = useState<number>(10000);
   const [editPixFee, setEditPixFee] = useState('0.5');
-  const [editCredFee, setEditCredFee] = useState('3.5');
-  const [editDebFee, setEditDebFee] = useState('1.5');
+  // Taxas do cartao (%): debito e credito de 1x a 12x (calculadora de juros do PDV).
+  const [editDebitFee, setEditDebitFee] = useState<number | null>(null);
+  const [editCreditFees, setEditCreditFees] = useState<Array<number | null>>(() => Array(12).fill(null));
+  const [configError, setConfigError] = useState('');
 
   useEffect(() => {
     if (!stores.length) return;
@@ -276,17 +278,23 @@ export default function FinanceiroView({
     paymentFees: { DINHEIRO: 0, PIX: 0.005, CREDITO: 0.035, DEBITO: 0.015 }
   };
 
-  // Set values when config store changes
+  // Carrega os valores salvos da loja escolhida.
   const handleConfigStoreChange = (unitId: string) => {
     setSelectedConfigUnit(unitId);
+    setConfigSuccess('');
+    setConfigError('');
     const cfg = storeConfigs.find(c => c.unitId === unitId);
     if (cfg) {
       setEditFixedCost(cfg.fixedCost);
-      setEditPixFee(String(cfg.paymentFees.PIX * 100));
-      setEditCredFee(String(cfg.paymentFees.CREDITO * 100));
-      setEditDebFee(String(cfg.paymentFees.DEBITO * 100));
+      setEditPixFee(String((cfg.paymentFees?.PIX ?? 0) * 100));
+      setEditDebitFee(cfg.cardFeeTable?.debito || null);
+      setEditCreditFees(Array.from({ length: 12 }, (_, index) => cfg.cardFeeTable?.credito?.[index] || null));
     }
   };
+
+  useEffect(() => {
+    if (selectedConfigUnit) handleConfigStoreChange(selectedConfigUnit);
+  }, [selectedConfigUnit, storeConfigs.length]);
 
   const parsePercentage = (value: string) => {
     const parsed = Number(value.replace(',', '.'));
@@ -322,18 +330,31 @@ export default function FinanceiroView({
   };
 
   // Submit Store Configuration (Only available for Admins!)
-  const handleConfigSubmit = (e: React.FormEvent) => {
+  const handleConfigSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setConfigSuccess('');
-    updateStoreConfig(selectedConfigUnit, {
-      fixedCost: editFixedCost,
-      paymentFees: {
-        DINHEIRO: 0,
-        PIX: parsePercentage(editPixFee),
-        CREDITO: parsePercentage(editCredFee),
-        DEBITO: parsePercentage(editDebFee)
-      }
-    });
+    setConfigError('');
+    const credito = editCreditFees.map(value => value ?? 0);
+    const debito = editDebitFee ?? 0;
+    if ([debito, ...credito].some(value => value < 0 || value >= 100)) {
+      setConfigError('As taxas do cartão precisam ficar entre 0% e 99,99%.');
+      return;
+    }
+    try {
+      await updateStoreConfig(selectedConfigUnit, {
+        fixedCost: editFixedCost,
+        cardFeeTable: { debito, credito },
+        paymentFees: {
+          DINHEIRO: 0,
+          PIX: parsePercentage(editPixFee),
+          CREDITO: credito[0] / 100,
+          DEBITO: debito / 100
+        }
+      });
+    } catch (error) {
+      setConfigError(`Não foi possível salvar: ${error instanceof Error ? error.message : (error as { message?: string })?.message || 'erro no banco'}`);
+      return;
+    }
     setConfigSuccess('Configurações de custos e taxas salvas com sucesso.');
   };
 
@@ -1137,7 +1158,7 @@ export default function FinanceiroView({
                   Taxas de Operadoras de Pagamento
                 </h4>
                 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="font-bold text-slate-600 block text-[10px]">PIX (%)</label>
                     <input
@@ -1152,30 +1173,33 @@ export default function FinanceiroView({
                   </div>
 
                   <div className="space-y-1">
-                    <label className="font-bold text-slate-600 block text-[10px]">Crédito (%)</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      pattern="[0-9]*[.,]?[0-9]*"
-                      value={editCredFee}
-                      onChange={(e) => setEditCredFee(e.target.value.replace(/[^0-9,.]/g, ''))}
-                      className="w-full bg-white border border-slate-200 rounded p-1.5 outline-none font-mono"
-                    />
-                    <span className="text-[10px] text-slate-400 font-mono">{editCredFee || '0'}%</span>
-                  </div>
-
-                  <div className="space-y-1">
                     <label className="font-bold text-slate-600 block text-[10px]">Débito (%)</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      pattern="[0-9]*[.,]?[0-9]*"
-                      value={editDebFee}
-                      onChange={(e) => setEditDebFee(e.target.value.replace(/[^0-9,.]/g, ''))}
+                    <ValueInput
+                      value={editDebitFee}
+                      onValueChange={setEditDebitFee}
                       className="w-full bg-white border border-slate-200 rounded p-1.5 outline-none font-mono"
                     />
-                    <span className="text-[10px] text-slate-400 font-mono">{editDebFee || '0'}%</span>
                   </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="font-bold text-slate-600 block text-[10px]">Crédito por número de parcelas (%)</label>
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {editCreditFees.map((value, index) => (
+                      <div key={index} className="space-y-0.5">
+                        <span className="text-[10px] text-slate-500 font-bold">{index + 1}x</span>
+                        <ValueInput
+                          aria-label={`Crédito ${index + 1}x (%)`}
+                          value={value}
+                          onValueChange={(next) => setEditCreditFees(previous => previous.map((current, i) => i === index ? next : current))}
+                          className="w-full bg-white border border-slate-200 rounded p-1.5 outline-none font-mono"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    O PDV usa estas taxas ao escolher crédito (e as parcelas) ou débito. Com "Repassar taxa" o cliente paga os juros e a loja recebe o valor cheio; sem repassar, a taxa é descontada do lucro nos relatórios.
+                  </p>
                 </div>
 
                 <div className="text-[10px] text-slate-400 bg-white p-2 rounded border border-slate-150 font-sans mt-2">
@@ -1189,6 +1213,9 @@ export default function FinanceiroView({
               >
                 Salvar Configuração de Custos
               </button>
+              {configError && (
+                <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-xs">{configError}</div>
+              )}
               {configSuccess && (
                 <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-lg flex items-center gap-2 text-xs">
                   <Check className="w-4 h-4 shrink-0" />
