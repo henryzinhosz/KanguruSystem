@@ -47,7 +47,6 @@ export default function App() {
     storeConfigs,
     suppliers,
     pdvOperators,
-    resetDatabase,
     addProduct,
     editProduct,
     saveProduct,
@@ -67,7 +66,6 @@ export default function App() {
     savePdvOperator,
     deletePdvOperator,
     updateCurrentUserDisplayName,
-    importBulkProducts,
     addSupplier,
     editSupplier,
     deleteSupplier,
@@ -257,8 +255,6 @@ export default function App() {
 
           {activeTab === 'admin' && (
             <AdminToolsView 
-              onResetDb={resetDatabase}
-              importBulkProducts={importBulkProducts}
               suppliers={suppliers}
               addSupplier={addSupplier}
               editSupplier={editSupplier}

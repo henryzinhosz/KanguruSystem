@@ -24,8 +24,6 @@ import {
 } from 'lucide-react';
 
 interface AdminToolsViewProps {
-  onResetDb: () => void;
-  importBulkProducts: (csvText: string) => number;
   suppliers: Supplier[];
   addSupplier: (supplier: Omit<Supplier, 'id' | 'historyCount'>) => Promise<Supplier>;
   editSupplier: (updatedSupplier: Supplier) => Promise<void>;
@@ -33,8 +31,6 @@ interface AdminToolsViewProps {
 }
 
 export default function AdminToolsView({
-  onResetDb,
-  importBulkProducts,
   suppliers,
   addSupplier,
   editSupplier,

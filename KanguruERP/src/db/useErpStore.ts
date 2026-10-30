@@ -223,80 +223,6 @@ export function useErpStore() {
     }
   }, [currentUser, loadAllFromSupabase]);
 
-  // Toggle useSupabase state
-  const toggleUseSupabase = async (enabled: boolean): Promise<{ success: boolean; error?: string; missingTables?: string[] }> => {
-    if (!enabled) {
-      return { success: false, error: 'O uso do Supabase é obrigatório e não pode ser desativado.' };
-    }
-    if (currentUser?.role === UserRole.SUPER_ADMIN) {
-      clearOperationalData();
-      return { success: false, error: 'Dados operacionais não estão disponíveis para administração da plataforma.' };
-    }
-    setSupabaseLoading(true);
-    const conn = await supabaseService.testConnection();
-    setSupabaseConnected(conn.connected);
-    
-    if (!conn.connected) {
-      setSupabaseLoading(false);
-      return { success: false, error: conn.error || 'Não foi possível conectar ao Supabase' };
-    }
-    
-    if (conn.missingTables && conn.missingTables.length > 0) {
-      setSupabaseMissingTables(conn.missingTables);
-      setSupabaseLoading(false);
-      return { success: false, error: 'Tabelas ausentes no banco de dados', missingTables: conn.missingTables };
-    }
-
-    setSupabaseMissingTables([]);
-    const loaded = await loadAllFromSupabase();
-    if (loaded) {
-      setSupabaseLoading(false);
-      return { success: true };
-    } else {
-      setSupabaseLoading(false);
-      return { success: false, error: 'Falha ao buscar dados após conectar.' };
-    }
-  };
-
-  // Export current local storage data into Supabase
-  const exportLocalToSupabase = async (): Promise<{ success: boolean; errors: string[] }> => {
-    setSupabaseLoading(true);
-    const result = await supabaseService.exportAllToSupabase({
-      products,
-      inventory,
-      movements,
-      sales,
-      expenses,
-      tradeIns,
-      workOrders,
-      storeConfigs,
-      suppliers
-    });
-    
-    if (result.success) {
-      await loadAllFromSupabase();
-    }
-    setSupabaseLoading(false);
-    return result;
-  };
-
-  // RESET DATABASE helper
-  const resetDatabase = () => {
-    setCurrentUser(null);
-    setProducts([]);
-    setServices([]);
-    setInventory([]);
-    setMovements([]);
-    setSales([]);
-    setExpenses([]);
-    setTradeIns([]);
-    setWorkOrders([]);
-    setStoreConfigs([]);
-    setSuppliers([]);
-    setPdvOperators([]);
-    setProductStoreCosts([]);
-  };
-
   // Add a product to the catalog
   // Codigo vazio: o banco gera o proximo numero. Erro (ex.: codigo repetido) sobe para a tela.
   const addProduct = async (
@@ -574,47 +500,6 @@ export function useErpStore() {
   };
 
   // Bulk CSV import of product catalog or past sales spreadsheet!
-  const importBulkProducts = (csvText: string) => {
-    const lines = csvText.split('\n');
-    let importedCount = 0;
-    
-    // Simple parser: sku, name, category, brand, costPrice, sellPrice, ncm, warrantyMonths, isSerialized
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      
-      const cols = line.split(';'); // semicolon-separated
-      if (cols.length < 6) continue;
-
-      const sku = cols[0]?.trim();
-      const name = cols[1]?.trim();
-      const category = cols[2]?.trim() || 'Outros';
-      const brand = cols[3]?.trim() || 'Desconhecida';
-      const costPrice = parseFloat(cols[4]) || 0;
-      const sellPrice = parseFloat(cols[5]) || 0;
-      const ncm = cols[6]?.trim() || '0000.00.00';
-      const warrantyMonths = parseInt(cols[7]) || 12;
-      const isSerialized = cols[8]?.trim().toLowerCase() === 'sim' || cols[8]?.trim().toLowerCase() === 'true';
-
-      if (sku && name) {
-        addProduct({
-          sku,
-          name,
-          category,
-          brand,
-          costPrice,
-          sellPrice,
-          ncm,
-          warrantyMonths,
-          isSerialized,
-          isUsed: false
-        }).catch(err => console.error('Erro ao importar produto no Supabase:', err));
-        importedCount++;
-      }
-    }
-    return importedCount;
-  };
-
   const addSupplier = async (supplier: Omit<Supplier, 'id' | 'historyCount'>) => {
     const newId = 's_' + Math.random().toString(36).substring(2, 9);
     const newSupplier: Supplier = { 
@@ -658,10 +543,7 @@ export function useErpStore() {
     supabaseMissingTables,
     supabaseError,
     authProfileError,
-    toggleUseSupabase,
     loadAllFromSupabase,
-    exportLocalToSupabase,
-    resetDatabase,
     addProduct,
     editProduct,
     saveProduct,
@@ -680,7 +562,6 @@ export function useErpStore() {
     savePdvOperator,
     deletePdvOperator,
     updateCurrentUserDisplayName,
-    importBulkProducts,
     addSupplier,
     editSupplier,
     deleteSupplier
