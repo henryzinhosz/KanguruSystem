@@ -17,7 +17,7 @@ import ConfiguracoesView from './components/ConfiguracoesView';
 import ServicosView from './components/ServicosView';
 import ClientesView from './components/ClientesView';
 import UcpView from './components/UcpView';
-import { UserRole } from './types';
+import { DEFAULT_MANAGER_PERMISSIONS, ErpArea, UserRole } from './types';
 import { 
   LayoutDashboard, 
   Package, 
@@ -118,6 +118,27 @@ export default function App() {
     { id: 'configuracoes', name: 'Configurações', icon: Settings }
   ] as const;
 
+  // Gerente de loja: so as areas liberadas pelo dono; Configuracoes so para o administrador.
+  const AREA_BY_TAB: Partial<Record<(typeof navigationItems)[number]['id'], ErpArea>> = {
+    dashboard: 'relatorios',
+    estoque: 'estoque',
+    servicos: 'servicos',
+    clientes: 'clientes',
+    vendas: 'troca_gamer',
+    financeiro: 'financeiro',
+    admin: 'fornecedores',
+  };
+  const canOpen = (id: (typeof navigationItems)[number]['id']) => {
+    if (currentUser.role === UserRole.ADMIN) return true;
+    if (id === 'configuracoes') return false;
+    const area = AREA_BY_TAB[id];
+    const permissions = currentUser.permissions ?? DEFAULT_MANAGER_PERMISSIONS;
+    return Boolean(area && permissions[area]);
+  };
+  const allowedItems = navigationItems.filter(item => canOpen(item.id));
+  // Aba sem permissao (ex.: link antigo): abre a primeira liberada.
+  const tab = canOpen(activeTab) ? activeTab : (allowedItems[0]?.id ?? 'dashboard');
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       {/* Top Header with Store & Account controls */}
@@ -153,9 +174,9 @@ export default function App() {
 
           {/* Navigation Menu */}
           <nav className="py-4 space-y-1 flex-1 pr-3" aria-label="Menu Principal">
-            {navigationItems.map((item) => {
+            {allowedItems.map((item) => {
               const IconComponent = item.icon;
-              const isActive = activeTab === item.id;
+              const isActive = tab === item.id;
 
               return (
                 <button
@@ -184,7 +205,7 @@ export default function App() {
 
         {/* Main Content Workspace Container */}
         <main className="erp-workspace flex-1 p-3 sm:p-4 lg:p-5 w-full overflow-y-auto">
-          {activeTab === 'dashboard' && (
+          {tab === 'dashboard' && (
             <DashboardView 
               currentUser={currentUser}
               products={products}
@@ -196,7 +217,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'estoque' && (
+          {tab === 'estoque' && (
             <EstoqueView 
               currentUser={currentUser}
               products={products}
@@ -215,7 +236,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'servicos' && (
+          {tab === 'servicos' && (
             <ServicosView
               services={services}
               saveService={saveService}
@@ -226,11 +247,11 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'clientes' && (
+          {tab === 'clientes' && (
             <ClientesView sales={sales} products={products} storeConfigs={storeConfigs} />
           )}
 
-          {activeTab === 'vendas' && (
+          {tab === 'vendas' && (
             <VendasView 
               currentUser={currentUser}
               products={products}
@@ -242,7 +263,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'financeiro' && (
+          {tab === 'financeiro' && (
             <FinanceiroView 
               currentUser={currentUser}
               expenses={expenses}
@@ -256,7 +277,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'admin' && (
+          {tab === 'admin' && (
             <AdminToolsView 
               suppliers={suppliers}
               addSupplier={addSupplier}
@@ -265,7 +286,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'configuracoes' && (
+          {tab === 'configuracoes' && (
             <ConfiguracoesView
               currentUser={currentUser}
               storeConfigs={storeConfigs}

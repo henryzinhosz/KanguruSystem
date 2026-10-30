@@ -85,16 +85,23 @@ export function useErpStore() {
         if (profile.role !== UserRole.SUPER_ADMIN && !profile.tenantId) {
           throw new Error('Usuário de tenant sem tenant_id.');
         }
+        if (profile.isActive === false) {
+          throw new Error('Seu acesso ao ERP foi desativado pelo administrador da empresa.');
+        }
+        // Gerente: lojas liberadas. Com mais de uma, as telas mostram o seletor (como o dono).
+        const managerStores = profile.role === UserRole.ADMIN ? null : profile.storeIds ?? null;
 
       const metadataName = typeof authUser.user_metadata?.name === 'string' ? authUser.user_metadata.name : undefined;
         const baseUser: User = {
           id: authUser.id,
-          name: metadataName || authUser.email?.split('@')[0] || 'Gestor',
+          name: profile.displayName || metadataName || authUser.email?.split('@')[0] || 'Gestor',
           role: profile.role,
           tenantId: profile.tenantId,
-          unitId: profile.unitId || 'central',
+          unitId: managerStores && managerStores.length > 1 ? 'central' : profile.unitId || 'central',
           planCode: profile.planCode,
-          subscriptionStatus: profile.subscriptionStatus
+          subscriptionStatus: profile.subscriptionStatus,
+          permissions: profile.role === UserRole.ADMIN ? null : profile.permissions ?? null,
+          storeIds: managerStores
         };
 
         if (baseUser.role === UserRole.SUPER_ADMIN) {
@@ -111,6 +118,8 @@ export function useErpStore() {
           && previous.unitId === baseUser.unitId
           && previous.planCode === baseUser.planCode
           && previous.subscriptionStatus === baseUser.subscriptionStatus
+          && JSON.stringify(previous.permissions ?? null) === JSON.stringify(baseUser.permissions ?? null)
+          && JSON.stringify(previous.storeIds ?? null) === JSON.stringify(baseUser.storeIds ?? null)
           ? previous
           : baseUser);
         setAuthProfileError(null);
@@ -522,6 +531,11 @@ export function useErpStore() {
     setSuppliers(prev => prev.filter(s => s.id !== id));
   };
 
+  // Gerente so enxerga as lojas liberadas para ele (o banco ja bloqueia o resto).
+  const visibleStoreConfigs = currentUser?.storeIds
+    ? storeConfigs.filter(config => config.unitId === 'central' || currentUser.storeIds!.includes(config.unitId))
+    : storeConfigs;
+
   return {
     currentUser,
     setCurrentUser,
@@ -533,7 +547,7 @@ export function useErpStore() {
     expenses,
     tradeIns,
     workOrders,
-    storeConfigs,
+    storeConfigs: visibleStoreConfigs,
     suppliers,
     pdvOperators,
     productStoreCosts,

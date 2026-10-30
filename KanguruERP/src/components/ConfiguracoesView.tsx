@@ -4,6 +4,7 @@ import { PdvOperator, PdvOperatorPermissions, StoreConfig, StoreNfceStatus, User
 import { supabaseService } from '../db/supabaseService';
 import ValueInput from './ValueInput';
 import ManagerPasswordPanel from './ManagerPasswordPanel';
+import TenantUsersPanel from './TenantUsersPanel';
 
 interface ConfiguracoesViewProps {
   currentUser: User;
@@ -397,6 +398,8 @@ export default function ConfiguracoesView({
         </div>
 
       </section>
+
+      {currentUser.role === UserRole.ADMIN && <TenantUsersPanel currentUser={currentUser} storeConfigs={storeConfigs} />}
 
       {currentUser.role === UserRole.ADMIN && <ManagerPasswordPanel storeConfigs={storeConfigs} />}
 

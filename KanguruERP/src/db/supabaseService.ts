@@ -12,6 +12,8 @@ import {
   TradeIn, 
   WorkOrder, 
   WorkOrderStatus,
+  ErpPermissions,
+  TenantUser,
   StockCount,
   StoreConfig, 
   Supplier,
@@ -876,6 +878,10 @@ export const supabaseService = {
     unitId: string | null;
     planCode: string | null;
     subscriptionStatus: 'ATIVO' | 'ATRASADO' | 'BLOQUEADO' | 'CANCELADO' | null;
+    displayName?: string | null;
+    permissions?: ErpPermissions | null;
+    storeIds?: string[] | null;
+    isActive?: boolean;
   } | null> {
     const { data, error } = await supabase
       .from('app_users')
@@ -906,13 +912,60 @@ export const supabaseService = {
       }
     }
 
+    // Areas e lojas do usuario (antes da migration 20261110 a funcao nao existe: acesso de sempre).
+    let access: { displayName?: string | null; permissions?: ErpPermissions | null; stores?: string[] | null; isActive?: boolean } | null = null;
+    const { data: accessData, error: accessError } = await supabase.rpc('get_my_erp_access');
+    if (!accessError && accessData) access = accessData as typeof access;
+
     return {
       role: data.role as UserRole,
       tenantId: data.tenant_id,
       unitId: data.unit_id,
       planCode,
-      subscriptionStatus
+      subscriptionStatus,
+      displayName: access?.displayName ?? null,
+      permissions: access?.permissions ?? null,
+      storeIds: access?.stores ?? null,
+      isActive: access?.isActive !== false
     };
+  },
+
+  // === Usuarios do ERP (equipe do franqueado) ===
+  async listTenantUsers(): Promise<TenantUser[]> {
+    const { data, error } = await supabase.rpc('list_tenant_users');
+    if (error) throw error;
+    return ((data || []) as any[]).map(row => ({
+      authUid: row.auth_uid,
+      email: row.email || '',
+      displayName: row.display_name || '',
+      role: row.role,
+      stores: row.stores || [],
+      permissions: row.permissions ?? null,
+      isActive: row.is_active !== false,
+      lastSignInAt: row.last_sign_in_at ?? null
+    }));
+  },
+
+  async saveTenantUser(user: { authUid: string; displayName: string; role: string; stores: string[]; permissions: ErpPermissions | null }): Promise<void> {
+    const { error } = await supabase.rpc('save_tenant_user', {
+      p_caller: null,
+      p_auth_uid: user.authUid,
+      p_display_name: user.displayName,
+      p_role: user.role,
+      p_stores: user.stores,
+      p_permissions: user.permissions
+    });
+    if (error) throw error;
+  },
+
+  async manageTenantUser(body: Record<string, unknown>): Promise<void> {
+    const { data, error } = await supabase.functions.invoke('manage-tenant-users', { body });
+    if (error) {
+      const context = (error as { context?: Response }).context;
+      const payload = context && typeof context.json === 'function' ? await context.json().catch(() => null) : null;
+      throw new Error(payload?.error || 'Não foi possível concluir. Confira se a função manage-tenant-users foi publicada.');
+    }
+    if (data?.error) throw new Error(data.error);
   },
 
   // Test connection and find missing tables
