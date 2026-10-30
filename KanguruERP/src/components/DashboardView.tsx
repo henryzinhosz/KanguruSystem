@@ -11,8 +11,11 @@ import {
   StockInventory,
   Sale,
   Expense,
-  StoreConfig
+  StoreConfig,
+  ProductStoreCost
 } from '../types';
+import { StaleProductsPanel, StockValuePanel } from './ProductReports';
+import { BalancosReportPanel } from './BalancoPanel';
 import {
   TrendingUp,
   DollarSign,
@@ -63,6 +66,7 @@ interface DashboardProps {
   sales: Sale[];
   expenses: Expense[];
   storeConfigs: StoreConfig[];
+  productStoreCosts: ProductStoreCost[];
 }
 
 // Paleta categorica validada (ordem fixa; a cor segue a loja/categoria, nunca a posicao no ranking).
@@ -112,7 +116,8 @@ export default function DashboardView({
   inventory,
   sales,
   expenses,
-  storeConfigs
+  storeConfigs,
+  productStoreCosts
 }: DashboardProps) {
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const canChooseStore = currentUser.unitId === 'central';
@@ -126,6 +131,7 @@ export default function DashboardView({
   // Escopo (consolidado ou loja) e periodo
   const [selectedStoreFilter, setSelectedStoreFilter] = useState<string>(CONSOLIDATED);
   const activeUnitId = canChooseStore ? selectedStoreFilter : currentUser.unitId;
+  const [section, setSection] = useState<'financeiro' | 'produtos'>('financeiro');
   const [periodPreset, setPeriodPreset] = useState<PeriodPreset>('mes');
   const [customFrom, setCustomFrom] = useState(() => toLocalDateKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
   const [customTo, setCustomTo] = useState(() => toLocalDateKey(new Date()));
@@ -463,7 +469,7 @@ export default function DashboardView({
       {/* Cabecalho: escopo e periodo */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-4 rounded-lg border border-slate-200 shadow-xs gap-3">
         <div>
-          <h2 className="text-xl font-bold text-slate-900 font-sans tracking-tight">Painel de Indicadores</h2>
+          <h2 className="text-xl font-bold text-slate-900 font-sans tracking-tight">Relatórios Gerais</h2>
           <p className="text-xs text-slate-500">
             {PERIOD_LABELS[periodPreset]} ({rangeLabel}) · {activeUnitId === CONSOLIDATED ? 'Todas as lojas' : storeName(activeUnitId)}
           </p>
@@ -487,6 +493,22 @@ export default function DashboardView({
         </div>
       </div>
 
+      {/* Relatorios Gerais: Financeiro | Produtos */}
+      <div className="flex gap-1 border-b border-slate-200">
+        {([['financeiro', 'Financeiro'], ['produtos', 'Produtos']] as const).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setSection(id)}
+            className={`px-4 py-2 text-xs font-bold border-b-2 -mb-px ${section === id ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {section === 'financeiro' && (
+        <>
       {/* Cards principais */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
         {/* Card 1: Faturamento Bruto */}
@@ -562,9 +584,7 @@ export default function DashboardView({
         </div>
       </div>
 
-      {/* Linha 2: diario vs meta + itens em alerta */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="mb-4">
             <h4 className="text-sm font-bold text-slate-900 font-sans uppercase tracking-wider">Acompanhamento Diário vs. Meta</h4>
             <p className="text-xs text-slate-400">
@@ -593,56 +613,6 @@ export default function DashboardView({
           </div>
         </div>
 
-        {/* Itens em Alerta */}
-        <div id="stat-card-stock" className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col">
-          <div className="flex items-start justify-between gap-2 mb-1">
-            <h4 className="text-sm font-bold text-slate-900 font-sans uppercase tracking-wider">Itens em Alerta</h4>
-            {canChooseStore && stores.length > 0 && (
-              <select
-                id="dashboard-alert-store"
-                aria-label="Loja dos alertas"
-                value={alertStoreId}
-                onChange={(e) => setAlertStoreId(e.target.value)}
-                className="bg-slate-50 hover:bg-slate-100 text-slate-800 text-[11px] font-semibold border border-slate-200 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-blue-500 max-w-[150px]"
-              >
-                {stores.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.unitId}</option>)}
-              </select>
-            )}
-          </div>
-          <p className="text-xs text-slate-400 mb-3">
-            {stockAlerts.length} produto(s) em alerta{alertStoreId ? ` · ${storeName(alertStoreId)}` : ''}
-          </p>
-
-          <div className="flex-1 overflow-y-auto max-h-64 space-y-1.5 pr-1">
-            {stockAlerts.map(alert => (
-              <div key={alert.product.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border border-slate-100 bg-slate-50/60">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold text-slate-800 truncate">{alert.product.name}</p>
-                  <p className="text-[10px] text-slate-500 font-mono">{alert.qty} un · {alert.reason}</p>
-                </div>
-                <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border ${
-                  alert.risk === 'ALTO'
-                    ? 'bg-rose-50 text-rose-700 border-rose-200'
-                    : 'bg-amber-50 text-amber-800 border-amber-200'
-                }`}>
-                  <AlertTriangle className="w-3 h-3" />
-                  {alert.risk === 'ALTO' ? 'Alto' : 'Médio'}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <p className="text-[11px] mt-3 pt-3 border-t border-slate-100">
-            {stockAlerts.length === 0 ? (
-              <span className="text-emerald-600 font-semibold">Níveis de estoque normais</span>
-            ) : highRiskCount > 0 ? (
-              <span className="text-rose-600 font-semibold">{highRiskCount} item(ns) de alto risco: repor com urgência</span>
-            ) : (
-              <span className="text-amber-700 font-semibold">Acompanhe a reposição</span>
-            )}
-          </p>
-        </div>
-      </div>
 
       {/* Linha 3: comparativo entre lojas + faturamento por categoria */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -705,50 +675,6 @@ export default function DashboardView({
         {categoryPanel(!showComparison)}
       </div>
 
-      {/* Curva ABC e insights */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <h4 className="text-sm font-bold text-slate-900 font-sans uppercase tracking-wider mb-2">Curva ABC de Produtos</h4>
-          <p className="text-xs text-slate-400 mb-4">Contribuição de cada produto no faturamento do período.</p>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left text-slate-500">
-              <thead className="text-[10px] text-slate-400 uppercase bg-slate-50 font-bold font-sans">
-                <tr>
-                  <th className="px-4 py-2.5">Produto</th>
-                  <th className="px-4 py-2.5 text-center">Unidades</th>
-                  <th className="px-4 py-2.5 text-right">Faturamento</th>
-                  <th className="px-4 py-2.5 text-center">Classificação</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-sans">
-                {topProducts.map(item => (
-                  <tr key={item.product.id} className="hover:bg-slate-50/80">
-                    <td className="px-4 py-2.5 font-medium text-slate-900 truncate max-w-xs">{item.product.name}</td>
-                    <td className="px-4 py-2.5 text-center font-semibold text-slate-700">{item.qty}</td>
-                    <td className="px-4 py-2.5 text-right font-bold text-slate-900">{formatMoney(item.revenue)}</td>
-                    <td className="px-4 py-2.5 text-center">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
-                        item.classification === 'A'
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : item.classification === 'B'
-                            ? 'bg-blue-50 text-blue-700 border-blue-200'
-                            : 'bg-slate-50 text-slate-600 border-slate-200'
-                      }`}>
-                        Classe {item.classification}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-                {topProducts.length === 0 && (
-                  <tr>
-                    <td colSpan={4} className="px-4 py-8 text-center text-slate-400">Nenhum produto vendido no período.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <h4 className="text-sm font-bold text-slate-900 font-sans uppercase tracking-wider">Insights & Previsão de Cobertura</h4>
 
@@ -797,7 +723,109 @@ export default function DashboardView({
             </div>
           </div>
         </div>
-      </div>
+        </>
+      )}
+
+      {section === 'produtos' && (
+        <>
+          <StockValuePanel products={products} inventory={inventory} productStoreCosts={productStoreCosts} stores={stores} activeUnitId={activeUnitId} />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Itens em Alerta */}
+        <div id="stat-card-stock" className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+          <div className="flex items-start justify-between gap-2 mb-1">
+            <h4 className="text-sm font-bold text-slate-900 font-sans uppercase tracking-wider">Itens em Alerta</h4>
+            {canChooseStore && stores.length > 0 && (
+              <select
+                id="dashboard-alert-store"
+                aria-label="Loja dos alertas"
+                value={alertStoreId}
+                onChange={(e) => setAlertStoreId(e.target.value)}
+                className="bg-slate-50 hover:bg-slate-100 text-slate-800 text-[11px] font-semibold border border-slate-200 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-blue-500 max-w-[150px]"
+              >
+                {stores.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.unitId}</option>)}
+              </select>
+            )}
+          </div>
+          <p className="text-xs text-slate-400 mb-3">
+            {stockAlerts.length} produto(s) em alerta{alertStoreId ? ` · ${storeName(alertStoreId)}` : ''}
+          </p>
+
+          <div className="flex-1 overflow-y-auto max-h-64 space-y-1.5 pr-1">
+            {stockAlerts.map(alert => (
+              <div key={alert.product.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border border-slate-100 bg-slate-50/60">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-slate-800 truncate">{alert.product.name}</p>
+                  <p className="text-[10px] text-slate-500 font-mono">{alert.qty} un · {alert.reason}</p>
+                </div>
+                <span className={`shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold border ${
+                  alert.risk === 'ALTO'
+                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                    : 'bg-amber-50 text-amber-800 border-amber-200'
+                }`}>
+                  <AlertTriangle className="w-3 h-3" />
+                  {alert.risk === 'ALTO' ? 'Alto' : 'Médio'}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <p className="text-[11px] mt-3 pt-3 border-t border-slate-100">
+            {stockAlerts.length === 0 ? (
+              <span className="text-emerald-600 font-semibold">Níveis de estoque normais</span>
+            ) : highRiskCount > 0 ? (
+              <span className="text-rose-600 font-semibold">{highRiskCount} item(ns) de alto risco: repor com urgência</span>
+            ) : (
+              <span className="text-amber-700 font-semibold">Acompanhe a reposição</span>
+            )}
+          </p>
+        </div>
+        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+          <h4 className="text-sm font-bold text-slate-900 font-sans uppercase tracking-wider mb-2">Curva ABC de Produtos</h4>
+          <p className="text-xs text-slate-400 mb-4">Contribuição de cada produto no faturamento do período.</p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left text-slate-500">
+              <thead className="text-[10px] text-slate-400 uppercase bg-slate-50 font-bold font-sans">
+                <tr>
+                  <th className="px-4 py-2.5">Produto</th>
+                  <th className="px-4 py-2.5 text-center">Unidades</th>
+                  <th className="px-4 py-2.5 text-right">Faturamento</th>
+                  <th className="px-4 py-2.5 text-center">Classificação</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-sans">
+                {topProducts.map(item => (
+                  <tr key={item.product.id} className="hover:bg-slate-50/80">
+                    <td className="px-4 py-2.5 font-medium text-slate-900 truncate max-w-xs">{item.product.name}</td>
+                    <td className="px-4 py-2.5 text-center font-semibold text-slate-700">{item.qty}</td>
+                    <td className="px-4 py-2.5 text-right font-bold text-slate-900">{formatMoney(item.revenue)}</td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                        item.classification === 'A'
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          : item.classification === 'B'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
+                            : 'bg-slate-50 text-slate-600 border-slate-200'
+                      }`}>
+                        Classe {item.classification}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+                {topProducts.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="px-4 py-8 text-center text-slate-400">Nenhum produto vendido no período.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+          </div>
+          <StaleProductsPanel products={products} inventory={inventory} productStoreCosts={productStoreCosts} sales={sales} stores={stores} activeUnitId={activeUnitId} />
+          <BalancosReportPanel products={products} inventory={inventory} storeConfigs={storeConfigs} productStoreCosts={productStoreCosts} activeUnitId={activeUnitId} />
+        </>
+      )}
     </div>
   );
 }

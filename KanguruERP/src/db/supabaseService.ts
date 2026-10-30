@@ -12,6 +12,9 @@ import {
   TradeIn, 
   WorkOrder, 
   WorkOrderStatus,
+  ErpPermissions,
+  TenantUser,
+  StockCount,
   StoreConfig, 
   Supplier,
   SupplierInvoiceReminder,
@@ -745,6 +748,13 @@ ALTER TABLE public.store_configs ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE public.store_configs ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE public.store_configs ADD COLUMN IF NOT EXISTS contact_email TEXT;`;
 
+// Senha Gerente por loja: so a situacao (o hash nunca sai do banco).
+export interface StoreManagerPasswordStatus {
+  unitId: string;
+  setAt: string;
+  setByName: string | null;
+}
+
 export const supabaseService = {
   async getPlatformTenants(): Promise<PlatformTenant[]> {
     const { data, error } = await supabase.rpc('platform_list_tenants');
@@ -868,6 +878,10 @@ export const supabaseService = {
     unitId: string | null;
     planCode: string | null;
     subscriptionStatus: 'ATIVO' | 'ATRASADO' | 'BLOQUEADO' | 'CANCELADO' | null;
+    displayName?: string | null;
+    permissions?: ErpPermissions | null;
+    storeIds?: string[] | null;
+    isActive?: boolean;
   } | null> {
     const { data, error } = await supabase
       .from('app_users')
@@ -898,13 +912,60 @@ export const supabaseService = {
       }
     }
 
+    // Areas e lojas do usuario (antes da migration 20261110 a funcao nao existe: acesso de sempre).
+    let access: { displayName?: string | null; permissions?: ErpPermissions | null; stores?: string[] | null; isActive?: boolean } | null = null;
+    const { data: accessData, error: accessError } = await supabase.rpc('get_my_erp_access');
+    if (!accessError && accessData) access = accessData as typeof access;
+
     return {
       role: data.role as UserRole,
       tenantId: data.tenant_id,
       unitId: data.unit_id,
       planCode,
-      subscriptionStatus
+      subscriptionStatus,
+      displayName: access?.displayName ?? null,
+      permissions: access?.permissions ?? null,
+      storeIds: access?.stores ?? null,
+      isActive: access?.isActive !== false
     };
+  },
+
+  // === Usuarios do ERP (equipe do franqueado) ===
+  async listTenantUsers(): Promise<TenantUser[]> {
+    const { data, error } = await supabase.rpc('list_tenant_users');
+    if (error) throw error;
+    return ((data || []) as any[]).map(row => ({
+      authUid: row.auth_uid,
+      email: row.email || '',
+      displayName: row.display_name || '',
+      role: row.role,
+      stores: row.stores || [],
+      permissions: row.permissions ?? null,
+      isActive: row.is_active !== false,
+      lastSignInAt: row.last_sign_in_at ?? null
+    }));
+  },
+
+  async saveTenantUser(user: { authUid: string; displayName: string; role: string; stores: string[]; permissions: ErpPermissions | null }): Promise<void> {
+    const { error } = await supabase.rpc('save_tenant_user', {
+      p_caller: null,
+      p_auth_uid: user.authUid,
+      p_display_name: user.displayName,
+      p_role: user.role,
+      p_stores: user.stores,
+      p_permissions: user.permissions
+    });
+    if (error) throw error;
+  },
+
+  async manageTenantUser(body: Record<string, unknown>): Promise<void> {
+    const { data, error } = await supabase.functions.invoke('manage-tenant-users', { body });
+    if (error) {
+      const context = (error as { context?: Response }).context;
+      const payload = context && typeof context.json === 'function' ? await context.json().catch(() => null) : null;
+      throw new Error(payload?.error || 'Não foi possível concluir. Confira se a função manage-tenant-users foi publicada.');
+    }
+    if (data?.error) throw new Error(data.error);
   },
 
   // Test connection and find missing tables
@@ -1410,6 +1471,82 @@ export const supabaseService = {
     if (error) throw error;
   },
 
+  // === Balanco de estoque ===
+  async getStockCounts(): Promise<StockCount[]> {
+    const { data, error } = await supabase
+      .from('stock_counts')
+      .select('*, stock_count_items(*)')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      unitId: row.unit_id,
+      countNumber: row.count_number,
+      status: row.status,
+      categories: row.categories ?? null,
+      notes: row.notes || undefined,
+      createdByName: row.created_by_name || undefined,
+      createdAt: row.created_at,
+      savedAt: row.saved_at || undefined,
+      approvedAt: row.approved_at || undefined,
+      approvedByName: row.approved_by_name || undefined,
+      items: (row.stock_count_items || []).map((item: any) => ({
+        productId: item.product_id,
+        countedQty: Number(item.counted_qty),
+        systemQty: Number(item.system_qty),
+        countedSerials: item.counted_serials || [],
+        systemSerials: item.system_serials || [],
+        reservedSerials: item.reserved_serials || [],
+        countedByName: item.counted_by_name || undefined,
+        updatedAt: item.updated_at
+      }))
+    }));
+  },
+
+  async startStockCount(unitId: string, categories: string[] | null): Promise<string> {
+    const { data, error } = await supabase.rpc('start_stock_count', { p_unit_id: unitId, p_categories: categories && categories.length ? categories : null });
+    if (error) throw error;
+    return String(data);
+  },
+
+  async recordStockCountItem(countId: string, productId: string, countedQty: number, countedSerials: string[]): Promise<void> {
+    const { error } = await supabase.rpc('record_stock_count_item', { p_count_id: countId, p_product_id: productId, p_counted_qty: countedQty, p_counted_serials: countedSerials });
+    if (error) throw error;
+  },
+
+  async removeStockCountItem(countId: string, productId: string): Promise<void> {
+    const { error } = await supabase.rpc('remove_stock_count_item', { p_count_id: countId, p_product_id: productId });
+    if (error) throw error;
+  },
+
+  async saveStockCount(countId: string, notes: string): Promise<void> {
+    const { error } = await supabase.rpc('save_stock_count', { p_count_id: countId, p_notes: notes || null });
+    if (error) throw error;
+  },
+
+  async cancelStockCount(countId: string): Promise<void> {
+    const { error } = await supabase.rpc('cancel_stock_count', { p_count_id: countId });
+    if (error) throw error;
+  },
+
+  async approveStockCount(countId: string): Promise<number> {
+    const { data, error } = await supabase.rpc('approve_stock_count', { p_count_id: countId });
+    if (error) throw error;
+    return Number((data as any)?.adjustedProducts ?? 0);
+  },
+
+  // Seriais em estoque numa loja (para reconhecer o serial bipado no balanco).
+  async getStoreSerials(unitId: string): Promise<{ productId: string; serial: string; status: string }[]> {
+    const { data, error } = await supabase
+      .from('product_serial_units')
+      .select('product_id, serial_number, status')
+      .eq('unit_id', unitId)
+      .in('status', ['DISPONIVEL', 'RESERVADO']);
+    if (error) throw error;
+    return (data || []).map((row: any) => ({ productId: row.product_id, serial: String(row.serial_number).toUpperCase(), status: row.status }));
+  },
+
   // === Avariados (2.9): saldo por loja (sem serial) e unidades serializadas avariadas ===
   async getDamagedStock(): Promise<{ unitId: string; productId: string; quantity: number; serials: string[] }[]> {
     const rows = new Map<string, { unitId: string; productId: string; quantity: number; serials: string[] }>();
@@ -1435,6 +1572,17 @@ export const supabaseService = {
   },
 
   // === NFC-e (2.8b) ===
+  async listStoreManagerPasswordStatus(): Promise<StoreManagerPasswordStatus[]> {
+    const { data, error } = await supabase.rpc('list_store_manager_password_status');
+    if (error) throw error;
+    return ((data || []) as any[]).map(row => ({ unitId: row.unit_id, setAt: row.set_at, setByName: row.set_by_name ?? null }));
+  },
+
+  async setStoreManagerPassword(unitId: string, password: string): Promise<void> {
+    const { error } = await supabase.rpc('set_store_manager_password', { p_unit_id: unitId, p_password: password });
+    if (error) throw error;
+  },
+
   async getStoreNfceStatus(): Promise<StoreNfceStatus[]> {
     const { data, error } = await supabase.rpc('list_store_nfce_status');
     if (error) throw error;
@@ -1848,97 +1996,5 @@ export const supabaseService = {
   async deleteSupplierInvoice(id: string): Promise<void> {
     const { error } = await supabase.from('supplier_invoices').delete().eq('id', id);
     if (error) throw error;
-  },
-
-  // Export all local database structures to Supabase in bulk
-  async exportAllToSupabase(data: {
-    products: Product[];
-    inventory: StockInventory[];
-    movements: StockMovement[];
-    sales: Sale[];
-    expenses: Expense[];
-    tradeIns: TradeIn[];
-    workOrders: WorkOrder[];
-    storeConfigs: StoreConfig[];
-    suppliers: Supplier[];
-  }): Promise<{ success: boolean; errors: string[] }> {
-    const errors: string[] = [];
-
-    // Helper to upload in batches
-    const runTask = async (name: string, fn: () => Promise<void>) => {
-      try {
-        await fn();
-      } catch (err: any) {
-        errors.push(`Erro ao exportar ${name}: ${err.message || err}`);
-      }
-    };
-
-    // 1. Products
-    await runTask('Produtos', async () => {
-      for (const p of data.products) {
-        await this.upsertProduct(p);
-      }
-    });
-
-    // 2. Inventory
-    await runTask('Estoque', async () => {
-      for (const i of data.inventory) {
-        await this.upsertInventory(i);
-      }
-    });
-
-    // 3. Movements
-    await runTask('Movimentações', async () => {
-      for (const m of data.movements) {
-        await this.upsertMovement(m);
-      }
-    });
-
-    // 4. Sales
-    await runTask('Vendas', async () => {
-      for (const s of data.sales) {
-        await this.upsertSale(s);
-      }
-    });
-
-    // 5. Expenses
-    await runTask('Despesas', async () => {
-      for (const e of data.expenses) {
-        await this.upsertExpense(e);
-      }
-    });
-
-    // 6. Trade Ins
-    await runTask('Trocas', async () => {
-      for (const t of data.tradeIns) {
-        await this.upsertTradeIn(t);
-      }
-    });
-
-    // 7. Work Orders
-    await runTask('Ordens de Serviço', async () => {
-      for (const w of data.workOrders) {
-        await this.upsertWorkOrder(w);
-      }
-    });
-
-    // 8. Store Configs
-    await runTask('Configurações', async () => {
-      for (const c of data.storeConfigs) {
-        await this.upsertStoreConfig(c);
-      }
-    });
-
-    // 9. Suppliers
-    await runTask('Fornecedores', async () => {
-      for (const s of data.suppliers) {
-        await this.upsertSupplier(s);
-      }
-    });
-
-    return {
-      success: errors.length === 0,
-      errors
-    };
   }
 };

@@ -42,11 +42,13 @@ interface HomeMenuProps {
   cashOpen: boolean;
   version: string | null;
   onAction: (action: MenuAction) => void;
+  // Configuracoes pedem a senha Gerente: abre o sub-menu depois de liberar.
+  onRequestSettings: (open: () => void) => void;
 }
 
 const OFFLINE_BLOCK = 'Indisponível sem internet';
 
-export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction }: HomeMenuProps) {
+export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction, onRequestSettings }: HomeMenuProps) {
   const [group, setGroup] = useState<Group | null>(null);
 
   const submenus: Record<Group, { title: string; tone: string; options: Option[] }> = {
@@ -57,7 +59,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
         { action: 'open-cash', label: 'Abrir caixa', description: 'Imprime o relatório gerencial de abertura', disabled: cashOpen ? 'O caixa já está aberto' : offline ? OFFLINE_BLOCK : null },
         { action: 'close-cash', label: 'Fechar caixa', description: 'Contagem, diferença e relatório de fechamento', disabled: !cashOpen ? 'Nenhum caixa aberto' : offline ? OFFLINE_BLOCK : null },
         { action: 'reprint-opening', label: 'Reimprimir abertura', description: 'Relatório gerencial de abertura deste caixa', disabled: !cashOpen ? 'Nenhum caixa aberto' : null },
-        { action: 'lock', label: 'Bloquear terminal', description: 'Pede a senha administrativa para voltar' },
+        { action: 'lock', label: 'Bloquear terminal', description: 'Pede a senha Gerente para voltar' },
       ],
     },
     consultas: {
@@ -173,7 +175,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
               <Search size={26} strokeWidth={1.8} aria-hidden="true" />
               <span className="menu-tile-label">Consultas</span>
             </button>
-            <button type="button" className="menu-tile tone-purple is-compact" onClick={() => setGroup('config')}>
+            <button type="button" className="menu-tile tone-purple is-compact" onClick={() => onRequestSettings(() => setGroup('config'))}>
               <Settings size={26} strokeWidth={1.8} aria-hidden="true" />
               <span className="menu-tile-label">Configurações</span>
             </button>

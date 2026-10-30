@@ -22,6 +22,7 @@ import { supabaseService } from '../db/supabaseService';
 import { sanitizeItemCode } from '../db/itemCode';
 import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fiscal';
 import ValueInput from './ValueInput';
+import BalancoPanel from './BalancoPanel';
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
 const DEFAULT_MIN_STOCK = 2;
@@ -57,7 +58,8 @@ import {
   Calendar,
   Layers,
   ArrowRight,
-  Pencil
+  Pencil,
+  ClipboardCheck
 } from 'lucide-react';
 
 interface EstoqueViewProps {
@@ -73,18 +75,8 @@ interface EstoqueViewProps {
     initialQty?: number,
     initialSerials?: string[]
   ) => Promise<Product>;
-  editProduct: (product: Product) => void;
+  editProduct: (product: Product) => Promise<void>;
   saveProduct: (product: Product) => Promise<void>;
-  registerMovement: (
-    productId: string,
-    fromUnitId: string,
-    toUnitId: string,
-    type: 'TRANSFERENCIA' | 'ENTRADA' | 'PERDA',
-    qty: number,
-    serials?: string[],
-    cardCondition?: CardCondition,
-    reason?: string
-  ) => void;
   registerSerializedStockEntry: (
     productId: string,
     unitId: string,
@@ -107,6 +99,7 @@ interface EstoqueViewProps {
     reason: string
   ) => Promise<void>;
   productStoreCosts: ProductStoreCost[];
+  onStockChanged: () => Promise<void>;
 }
 
 type SerializedEntryDraft = { serialNumber: string; imei: string; unitCost: string };
@@ -122,11 +115,11 @@ export default function EstoqueView({
   addProduct,
   editProduct,
   saveProduct,
-  registerMovement,
   registerSerializedStockEntry,
   registerTransfer,
   registerStockEntry,
-  productStoreCosts
+  productStoreCosts,
+  onStockChanged
 }: EstoqueViewProps) {
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const stores = storeConfigs.filter(store => store.unitId !== 'central');
@@ -139,7 +132,7 @@ export default function EstoqueView({
   const [categoryFilter, setCategoryFilter] = useState('Todas');
   
   // UI Tabs inside Estoque
-  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'avariados'>('catalogo');
+  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'avariados' | 'balanco'>('catalogo');
   // Avariados (2.9): produtos devolvidos com defeito, fora da venda.
   const [damaged, setDamaged] = useState<{ unitId: string; productId: string; quantity: number; serials: string[] }[] | null>(null);
   const [damagedError, setDamagedError] = useState('');
@@ -587,6 +580,13 @@ export default function EstoqueView({
     }
   };
 
+  // Edicao direto na lista: erro do banco aparece acima dos produtos.
+  const [inlineError, setInlineError] = useState('');
+  const saveInline = (product: Product) => {
+    setInlineError('');
+    editProduct(product).catch(error => setInlineError(`Não foi possível salvar ${product.name}: ${error instanceof Error ? error.message : (error as { message?: string })?.message || 'erro no banco'}`));
+  };
+
   const saveMinStock = (product: Product) => {
     const draft = minStockDrafts[product.id];
     if (draft === undefined) return;
@@ -602,7 +602,7 @@ export default function EstoqueView({
       return;
     }
     if (value !== (product.minStock ?? null)) {
-      editProduct({ ...product, minStock: value });
+      saveInline({ ...product, minStock: value });
     }
     clearDraft();
   };
@@ -618,7 +618,7 @@ export default function EstoqueView({
     });
     if (value !== null && (value < 0 || value > 100)) return;
     if (value !== (product.maxDiscountPercent ?? null)) {
-      editProduct({ ...product, maxDiscountPercent: value });
+      saveInline({ ...product, maxDiscountPercent: value });
     }
   };
 
@@ -752,6 +752,18 @@ export default function EstoqueView({
             <Package className="w-4 h-4 mr-1.5" />
             Avariados
           </button>
+          <button
+            id="tab-estoque-balanco"
+            onClick={() => setActiveSubTab('balanco')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeSubTab === 'balanco'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <ClipboardCheck className="w-4 h-4 mr-1.5" />
+            Balanço
+          </button>
         </div>
 
         {activeSubTab === 'catalogo' && (
@@ -799,6 +811,7 @@ export default function EstoqueView({
             </div>
           </div>
 
+          {inlineError && <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{inlineError}</p>}
           {/* Grid Catalog Display */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {filteredProducts.map(p => {
@@ -1547,6 +1560,17 @@ export default function EstoqueView({
       )}
 
       {/* 3. VIEW: Avariados */}
+      {activeSubTab === 'balanco' && (
+        <BalancoPanel
+          currentUser={currentUser}
+          products={products}
+          inventory={inventory}
+          storeConfigs={storeConfigs}
+          productStoreCosts={productStoreCosts}
+          onStockChanged={onStockChanged}
+        />
+      )}
+
       {activeSubTab === 'avariados' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-4 border-b border-slate-100">

@@ -19,6 +19,44 @@ export interface User {
   unitId: string;
   planCode: string | null;
   subscriptionStatus: 'ATIVO' | 'ATRASADO' | 'BLOQUEADO' | 'CANCELADO' | null;
+  // Gerente de loja: areas liberadas e lojas que acessa (nulo = administrador, tudo).
+  permissions?: ErpPermissions | null;
+  storeIds?: string[] | null;
+}
+
+// Areas do ERP que o dono libera para cada gerente (Configuracoes fica sempre so com o dono).
+export type ErpArea = 'relatorios' | 'estoque' | 'servicos' | 'clientes' | 'troca_gamer' | 'financeiro' | 'fornecedores';
+export type ErpPermissions = Partial<Record<ErpArea, boolean>>;
+
+export const ERP_AREA_LABELS: Record<ErpArea, string> = {
+  relatorios: 'Relatórios Gerais',
+  estoque: 'Catálogo & Estoque',
+  servicos: 'Serviços / OS',
+  clientes: 'Clientes',
+  troca_gamer: 'Troca Gamer',
+  financeiro: 'Livro Caixa & DRE',
+  fornecedores: 'Fornecedores',
+};
+
+export const DEFAULT_MANAGER_PERMISSIONS: ErpPermissions = {
+  relatorios: true,
+  estoque: true,
+  servicos: true,
+  clientes: true,
+  troca_gamer: true,
+  financeiro: false,
+  fornecedores: false,
+};
+
+export interface TenantUser {
+  authUid: string;
+  email: string;
+  displayName: string;
+  role: 'ADMIN' | 'MANAGER' | string;
+  stores: string[];
+  permissions: ErpPermissions | null;
+  isActive: boolean;
+  lastSignInAt: string | null;
 }
 
 export type SubscriptionStatus = 'ATIVO' | 'ATRASADO' | 'BLOQUEADO' | 'CANCELADO';
@@ -484,4 +522,33 @@ export interface SupplierInvoiceReminder {
   status: 'PENDENTE' | 'PAGO';
   notes?: string;
   createdAt: string;
+}
+
+// Balanco de estoque (checklist): contado x sistema no momento da contagem.
+export type StockCountStatus = 'ABERTO' | 'SALVO' | 'APROVADO' | 'CANCELADO';
+
+export interface StockCountItem {
+  productId: string;
+  countedQty: number;
+  systemQty: number;
+  countedSerials: string[];
+  systemSerials: string[];
+  reservedSerials: string[];
+  countedByName?: string;
+  updatedAt: string;
+}
+
+export interface StockCount {
+  id: string;
+  unitId: string;
+  countNumber: number;
+  status: StockCountStatus;
+  categories: string[] | null;
+  notes?: string;
+  createdByName?: string;
+  createdAt: string;
+  savedAt?: string;
+  approvedAt?: string;
+  approvedByName?: string;
+  items: StockCountItem[];
 }

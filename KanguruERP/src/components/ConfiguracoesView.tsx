@@ -3,6 +3,8 @@ import { Building2, Check, Pencil, Plus, Save, Store, Trash2, UserRound, Users, 
 import { PdvOperator, PdvOperatorPermissions, StoreConfig, StoreNfceStatus, User, UserRole } from '../types';
 import { supabaseService } from '../db/supabaseService';
 import ValueInput from './ValueInput';
+import ManagerPasswordPanel from './ManagerPasswordPanel';
+import TenantUsersPanel from './TenantUsersPanel';
 
 interface ConfiguracoesViewProps {
   currentUser: User;
@@ -396,6 +398,10 @@ export default function ConfiguracoesView({
         </div>
 
       </section>
+
+      {currentUser.role === UserRole.ADMIN && <TenantUsersPanel currentUser={currentUser} storeConfigs={storeConfigs} />}
+
+      {currentUser.role === UserRole.ADMIN && <ManagerPasswordPanel storeConfigs={storeConfigs} />}
 
       {storeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="presentation" onKeyDown={event => { if (event.key === 'Escape') closeStoreModal(); }}>

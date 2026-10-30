@@ -47,8 +47,44 @@ export async function requireAdminPassword(password: string): Promise<TerminalCo
   const { data, error } = await supabase.rpc('unlock_pos_terminal', { p_password: password });
   if (error) throw error;
   // Senha errada devolve zero linhas (a tentativa fica registrada no servidor).
-  if (!data?.[0]) throw new Error('Senha administrativa incorreta.');
+  if (!data?.[0]) throw new Error('Senha Gerente incorreta.');
   return mapTerminalContext(data[0], null);
+}
+
+// Senha Gerente da loja (cadastrada no ERP). Enquanto a loja nao tiver, vale a senha
+// administrativa antiga do terminal (terminalHasAdmin).
+export interface ManagerPasswordStatus {
+  configured: boolean;
+  setAt: string | null;
+  terminalHasAdmin: boolean;
+}
+
+export async function getManagerPasswordStatus(): Promise<ManagerPasswordStatus> {
+  const { data, error } = await supabase.rpc('get_pos_manager_password_status');
+  if (error) throw error;
+  const row = (data ?? {}) as Record<string, unknown>;
+  return {
+    configured: row.configured === true,
+    setAt: row.setAt ? String(row.setAt) : null,
+    terminalHasAdmin: row.terminalHasAdmin === true,
+  };
+}
+
+export type ManagerAction = 'CASH_DRAWER' | 'CASH_WITHDRAWAL' | 'CASH_SUPPLY' | 'CASH_CLOSE' | 'RESERVATION_CANCEL' | 'PDV_SETTINGS';
+
+export type ManagerAuthorization =
+  | { status: 'OK' }
+  | { status: 'INVALID'; remainingAttempts: number }
+  | { status: 'LOCKED'; lockedUntil: string };
+
+// Confere a senha antes da acao; o servidor aceita a acao seguinte por 5 minutos.
+export async function authorizeManager(password: string, action: ManagerAction): Promise<ManagerAuthorization> {
+  const { data, error } = await supabase.rpc('authorize_pos_manager', { p_password: password, p_context: action });
+  if (error) throw error;
+  const row = (data ?? {}) as Record<string, unknown>;
+  if (row.status === 'OK') return { status: 'OK' };
+  if (row.status === 'LOCKED') return { status: 'LOCKED', lockedUntil: String(row.lockedUntil ?? '') };
+  return { status: 'INVALID', remainingAttempts: Number(row.remainingAttempts ?? 0) };
 }
 
 function mapTerminalContext(data: Record<string, unknown> | undefined, error: unknown): TerminalContext {

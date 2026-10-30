@@ -58,7 +58,7 @@ export interface PosSaleTransaction {
   timestamp: string;
   status: string;
   requiresApproval: boolean;
-  // Senha administrativa para liberar descontos acima de max_item_discount_percent.
+  // Senha Gerente para liberar descontos acima de max_item_discount_percent.
   // So e exigida quando a RPC identificar itens acima do limite.
   adminPassword?: string | null;
   reservationId?: string | null;

@@ -47,6 +47,7 @@ export interface OfflineSnapshot {
 const SNAPSHOT_KEY = 'snapshot';
 const TERMINAL_KEY = 'terminal';
 const PASSWORD_KEY = 'admin-password';
+const PASSWORD_VERSION_KEY = 'manager-password-version';
 const LAST_RECEIPT_KEY = 'last-offline-receipt';
 
 export async function refreshSnapshot(): Promise<OfflineSnapshot | null> {
@@ -74,7 +75,7 @@ export async function getCachedTerminal(): Promise<TerminalContext | null> {
   return (await (await offlineStore()).get(TERMINAL_KEY)) as TerminalContext | null;
 }
 
-// Senha administrativa para desbloquear sem internet: so um hash PBKDF2 com sal guardado
+// Senha Gerente para desbloquear, sangria e gaveta sem internet: so um hash PBKDF2 com sal guardado
 // no computador (a senha em si nunca e gravada).
 async function hashPassword(password: string, salt: Uint8Array<ArrayBuffer>): Promise<string> {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveBits']);
@@ -86,6 +87,16 @@ export async function rememberAdminPassword(password: string) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const hash = await hashPassword(password, salt);
   await (await offlineStore()).set(PASSWORD_KEY, { salt: Array.from(salt), hash });
+}
+
+// Senha Gerente trocada no ERP: a copia local da senha antiga deixa de valer
+// (volta a valer depois do proximo desbloqueio com internet).
+export async function syncManagerPasswordVersion(setAt: string | null) {
+  const store = await offlineStore();
+  const current = ((await store.get(PASSWORD_VERSION_KEY)) as string | null) ?? null;
+  if (current === setAt) return;
+  await store.set(PASSWORD_KEY, null);
+  await store.set(PASSWORD_VERSION_KEY, setAt);
 }
 
 export async function verifyAdminPasswordOffline(password: string): Promise<boolean> {

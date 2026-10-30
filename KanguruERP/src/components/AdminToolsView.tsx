@@ -24,17 +24,13 @@ import {
 } from 'lucide-react';
 
 interface AdminToolsViewProps {
-  onResetDb: () => void;
-  importBulkProducts: (csvText: string) => number;
   suppliers: Supplier[];
-  addSupplier: (supplier: Omit<Supplier, 'id' | 'historyCount'>) => Supplier;
-  editSupplier: (updatedSupplier: Supplier) => void;
-  deleteSupplier: (id: string) => void;
+  addSupplier: (supplier: Omit<Supplier, 'id' | 'historyCount'>) => Promise<Supplier>;
+  editSupplier: (updatedSupplier: Supplier) => Promise<void>;
+  deleteSupplier: (id: string) => Promise<void>;
 }
 
 export default function AdminToolsView({
-  onResetDb,
-  importBulkProducts,
   suppliers,
   addSupplier,
   editSupplier,
@@ -85,7 +81,7 @@ export default function AdminToolsView({
   const [supplierFormError, setSupplierFormError] = useState<string>('');
 
   // Handle supplier addition/editing
-  const handleSupplierFormSubmit = (e: React.FormEvent) => {
+  const handleSupplierFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSupplierFormError('');
 
@@ -98,8 +94,9 @@ export default function AdminToolsView({
       return;
     }
 
+    try {
     if (editingSupplier) {
-      editSupplier({
+      await editSupplier({
         ...editingSupplier,
         name: supplierFormName.trim(),
         cnpj: supplierFormCnpj.trim(),
@@ -109,7 +106,7 @@ export default function AdminToolsView({
         website: supplierFormWebsite.trim() || undefined,
       });
     } else {
-      addSupplier({
+      await addSupplier({
         name: supplierFormName.trim(),
         cnpj: supplierFormCnpj.trim(),
         contact: supplierFormContact.trim(),
@@ -117,6 +114,10 @@ export default function AdminToolsView({
         phone: supplierFormPhone.trim() || undefined,
         website: supplierFormWebsite.trim() || undefined,
       });
+    }
+    } catch (error) {
+      setSupplierFormError(`Não foi possível salvar o fornecedor: ${error instanceof Error ? error.message : (error as { message?: string })?.message || 'erro no banco'}`);
+      return;
     }
 
     setShowSupplierModal(false);
@@ -234,7 +235,12 @@ export default function AdminToolsView({
     setPendingDeletion(null);
 
     if (deletion.kind === 'supplier') {
-      deleteSupplier(deletion.id);
+      setInvoiceError(null);
+      try {
+        await deleteSupplier(deletion.id);
+      } catch (error) {
+        setInvoiceError(`Não foi possível excluir o fornecedor: ${error instanceof Error ? error.message : (error as { message?: string })?.message || 'erro no banco'}`);
+      }
       return;
     }
 

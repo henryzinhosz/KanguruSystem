@@ -85,16 +85,23 @@ export function useErpStore() {
         if (profile.role !== UserRole.SUPER_ADMIN && !profile.tenantId) {
           throw new Error('Usuário de tenant sem tenant_id.');
         }
+        if (profile.isActive === false) {
+          throw new Error('Seu acesso ao ERP foi desativado pelo administrador da empresa.');
+        }
+        // Gerente: lojas liberadas. Com mais de uma, as telas mostram o seletor (como o dono).
+        const managerStores = profile.role === UserRole.ADMIN ? null : profile.storeIds ?? null;
 
       const metadataName = typeof authUser.user_metadata?.name === 'string' ? authUser.user_metadata.name : undefined;
         const baseUser: User = {
           id: authUser.id,
-          name: metadataName || authUser.email?.split('@')[0] || 'Gestor',
+          name: profile.displayName || metadataName || authUser.email?.split('@')[0] || 'Gestor',
           role: profile.role,
           tenantId: profile.tenantId,
-          unitId: profile.unitId || 'central',
+          unitId: managerStores && managerStores.length > 1 ? 'central' : profile.unitId || 'central',
           planCode: profile.planCode,
-          subscriptionStatus: profile.subscriptionStatus
+          subscriptionStatus: profile.subscriptionStatus,
+          permissions: profile.role === UserRole.ADMIN ? null : profile.permissions ?? null,
+          storeIds: managerStores
         };
 
         if (baseUser.role === UserRole.SUPER_ADMIN) {
@@ -111,6 +118,8 @@ export function useErpStore() {
           && previous.unitId === baseUser.unitId
           && previous.planCode === baseUser.planCode
           && previous.subscriptionStatus === baseUser.subscriptionStatus
+          && JSON.stringify(previous.permissions ?? null) === JSON.stringify(baseUser.permissions ?? null)
+          && JSON.stringify(previous.storeIds ?? null) === JSON.stringify(baseUser.storeIds ?? null)
           ? previous
           : baseUser);
         setAuthProfileError(null);
@@ -223,80 +232,6 @@ export function useErpStore() {
     }
   }, [currentUser, loadAllFromSupabase]);
 
-  // Toggle useSupabase state
-  const toggleUseSupabase = async (enabled: boolean): Promise<{ success: boolean; error?: string; missingTables?: string[] }> => {
-    if (!enabled) {
-      return { success: false, error: 'O uso do Supabase é obrigatório e não pode ser desativado.' };
-    }
-    if (currentUser?.role === UserRole.SUPER_ADMIN) {
-      clearOperationalData();
-      return { success: false, error: 'Dados operacionais não estão disponíveis para administração da plataforma.' };
-    }
-    setSupabaseLoading(true);
-    const conn = await supabaseService.testConnection();
-    setSupabaseConnected(conn.connected);
-    
-    if (!conn.connected) {
-      setSupabaseLoading(false);
-      return { success: false, error: conn.error || 'Não foi possível conectar ao Supabase' };
-    }
-    
-    if (conn.missingTables && conn.missingTables.length > 0) {
-      setSupabaseMissingTables(conn.missingTables);
-      setSupabaseLoading(false);
-      return { success: false, error: 'Tabelas ausentes no banco de dados', missingTables: conn.missingTables };
-    }
-
-    setSupabaseMissingTables([]);
-    const loaded = await loadAllFromSupabase();
-    if (loaded) {
-      setSupabaseLoading(false);
-      return { success: true };
-    } else {
-      setSupabaseLoading(false);
-      return { success: false, error: 'Falha ao buscar dados após conectar.' };
-    }
-  };
-
-  // Export current local storage data into Supabase
-  const exportLocalToSupabase = async (): Promise<{ success: boolean; errors: string[] }> => {
-    setSupabaseLoading(true);
-    const result = await supabaseService.exportAllToSupabase({
-      products,
-      inventory,
-      movements,
-      sales,
-      expenses,
-      tradeIns,
-      workOrders,
-      storeConfigs,
-      suppliers
-    });
-    
-    if (result.success) {
-      await loadAllFromSupabase();
-    }
-    setSupabaseLoading(false);
-    return result;
-  };
-
-  // RESET DATABASE helper
-  const resetDatabase = () => {
-    setCurrentUser(null);
-    setProducts([]);
-    setServices([]);
-    setInventory([]);
-    setMovements([]);
-    setSales([]);
-    setExpenses([]);
-    setTradeIns([]);
-    setWorkOrders([]);
-    setStoreConfigs([]);
-    setSuppliers([]);
-    setPdvOperators([]);
-    setProductStoreCosts([]);
-  };
-
   // Add a product to the catalog
   // Codigo vazio: o banco gera o proximo numero. Erro (ex.: codigo repetido) sobe para a tela.
   const addProduct = async (
@@ -338,7 +273,7 @@ export function useErpStore() {
     setProducts(prev => prev.map(p => p.id === saved.id ? saved : p));
   };
 
-  const editProduct = (updatedProduct: Product) => {
+  const editProduct = async (updatedProduct: Product) => {
     const sanitizedProduct: Product = {
       ...updatedProduct,
       sku: updatedProduct.sku.trim(),
@@ -347,10 +282,8 @@ export function useErpStore() {
       ncm: updatedProduct.ncm.trim()
     };
 
+    if (useSupabase) await supabaseService.upsertProduct(sanitizedProduct);
     setProducts(prev => prev.map(p => p.id === sanitizedProduct.id ? sanitizedProduct : p));
-    if (useSupabase) {
-      supabaseService.upsertProduct(sanitizedProduct).catch(err => console.error('Erro ao editar produto no Supabase:', err));
-    }
   };
 
   const saveService = async (service: Service) => {
@@ -370,117 +303,6 @@ export function useErpStore() {
   const deleteService = async (id: string) => {
     await supabaseService.deleteService(id);
     setServices(previous => previous.filter(service => service.id !== id));
-  };
-
-  // Log raw movement & update quantity atomically
-  const registerMovement = (
-    productId: string,
-    fromUnitId: string | 'FORNECEDOR',
-    toUnitId: string | 'CLIENTE' | 'PERDA',
-    type: MovementType,
-    quantity: number,
-    serials: string[] = [],
-    cardCondition?: CardCondition,
-    reason: string = '',
-    syncToSupabase: boolean = true
-  ) => {
-    const createEmptyInventory = (): StockInventory => ({
-      productId,
-      quantities: Object.fromEntries(
-        storeConfigs.map(store => [store.unitId, { unitId: store.unitId, qty: 0, serials: [], cardConditions: {} }])
-      )
-    });
-
-    // Generate movement log
-    const moveLog: StockMovement = {
-      id: 'm_' + Math.random().toString(36).substring(2, 9),
-      productId,
-      fromUnitId,
-      toUnitId,
-      type,
-      quantity,
-      serials,
-      cardCondition,
-      operatorId: currentUser.id,
-      operatorName: currentUser.name,
-      timestamp: new Date().toISOString(),
-      reason
-    };
-
-    setMovements(prev => [moveLog, ...prev]);
-    if (useSupabase && syncToSupabase) {
-      supabaseService.processInventoryMovement(moveLog).catch(err => console.error('Erro ao salvar movimentação no Supabase:', err));
-    }
-
-    // Update quantities atomically inside the stock state
-    setInventory(prevInv => {
-      const existing = prevInv.find(inv => inv.productId === productId);
-      const baseInventory = existing || createEmptyInventory();
-      const updatedQuantities = { ...baseInventory.quantities };
-
-      if (!existing && fromUnitId === 'FORNECEDOR' && toUnitId !== 'CLIENTE' && toUnitId !== 'PERDA') {
-        updatedQuantities[toUnitId] = {
-          unitId: toUnitId,
-          qty: 0,
-          serials: [],
-          cardConditions: {}
-        };
-      }
-
-      // Subtract from source if it is a real warehouse/store unit
-      if (fromUnitId !== 'FORNECEDOR') {
-        const srcUnit = updatedQuantities[fromUnitId] || { unitId: fromUnitId, qty: 0, serials: [], cardConditions: {} };
-        const newQty = Math.max(0, srcUnit.qty - quantity);
-        let newSerials = [...(srcUnit.serials || [])];
-        if (serials.length > 0) {
-          newSerials = newSerials.filter(s => !serials.includes(s));
-        }
-
-        const newConditions = { ...(srcUnit.cardConditions || {}) };
-        if (cardCondition && newConditions[cardCondition] !== undefined) {
-          newConditions[cardCondition] = Math.max(0, (newConditions[cardCondition] || 0) - quantity);
-        }
-
-        updatedQuantities[fromUnitId] = {
-          ...srcUnit,
-          qty: newQty,
-          serials: newSerials,
-          cardConditions: newConditions
-        };
-      }
-
-      // Add to target if it is a real warehouse/store unit
-      if (toUnitId !== 'CLIENTE' && toUnitId !== 'PERDA') {
-        const destUnit = updatedQuantities[toUnitId] || { unitId: toUnitId, qty: 0, serials: [], cardConditions: {} };
-        const newQty = destUnit.qty + quantity;
-        const newSerials = [...(destUnit.serials || []), ...serials];
-
-        const newConditions = { ...(destUnit.cardConditions || {}) };
-        if (cardCondition) {
-          newConditions[cardCondition] = (newConditions[cardCondition] || 0) + quantity;
-        }
-
-        updatedQuantities[toUnitId] = {
-          ...destUnit,
-          qty: newQty,
-          serials: newSerials,
-          cardConditions: newConditions
-        };
-      }
-
-      const updatedRecord = {
-        ...baseInventory,
-        quantities: updatedQuantities
-      };
-
-      if (useSupabase) {
-        supabaseService.upsertInventory(updatedRecord).catch(err => console.error('Erro ao atualizar estoque no Supabase:', err));
-      }
-
-      return existing
-        ? prevInv.map(inv => inv.productId === productId ? updatedRecord : inv)
-        : [...prevInv, updatedRecord];
-    });
   };
 
   const registerStockEntry = async (
@@ -513,10 +335,6 @@ export function useErpStore() {
     cardCondition: CardCondition | undefined,
     reason: string
   ) => {
-    if (!useSupabase) {
-      registerMovement(productId, fromUnitId, toUnitId, 'TRANSFERENCIA', quantity, serials, cardCondition, reason, false);
-      return;
-    }
     await supabaseService.processInventoryMovement({
       id: 'm_' + Math.random().toString(36).substring(2, 9),
       productId,
@@ -534,141 +352,29 @@ export function useErpStore() {
     await loadAllFromSupabase();
   };
 
-  // Register a point-of-sale Venda
-  const registerSale = (
-    unitId: string,
-    items: { productId: string; variationId?: string; quantity: number; unitPrice: number; serials?: string[]; cardCondition?: CardCondition }[],
-    paymentMethod: PaymentMethod,
-    clientCpf?: string,
-    clientName?: string,
-    customAmount?: number,
-    customDate?: string
-  ) => {
-    const grossAmount = customAmount !== undefined ? customAmount : items.reduce((acc, item) => acc + (item.unitPrice * item.quantity), 0);
-    
-    // Get store configs to calculate fees
-    const config = storeConfigs.find(c => c.unitId === unitId) || {
-      unitId,
-      fixedCost: 10000,
-      maxItemDiscountPercent: 0,
-      paymentFees: { DINHEIRO: 0.0, PIX: 0.005, CREDITO: 0.035, DEBITO: 0.015 }
-    };
-
-    const feeRate = config.paymentFees[paymentMethod];
-    const feeAmount = grossAmount * feeRate;
-    const netAmount = grossAmount - feeAmount;
-
-    const saleId = 's_' + Math.random().toString(36).substring(2, 9);
-    const invoiceNumber = 'VD-' + (1000 + sales.length + 1);
-
-    const isHighValue = grossAmount > 2000; // Trigger demo pending approval status for high value (optional, wait, prompt requested: "Toda venda cancelada ou estornada acima de um valor configurável (ex: R$300) deve exigir aprovação de um Administrador")
-    // Wait, let's keep sales completed immediately, but allow cancellation with Admin approval if > R$300!
-    
-    const newSale: Sale = {
-      id: saleId,
-      invoiceNumber,
-      unitId,
-      items,
-      paymentMethod,
-      grossAmount,
-      feeAmount,
-      netAmount,
-      operatorId: currentUser.id,
-      operatorName: currentUser.name,
-      clientCpf,
-      clientName,
-      timestamp: customDate ? new Date(customDate).toISOString() : new Date().toISOString(),
-      status: 'CONCLUIDA',
-      requiresApproval: false
-    };
-
-    // Commit changes to state
-    setSales(prev => [newSale, ...prev]);
-    if (useSupabase) {
-      // Recarrega as vendas depois de gravar: o servidor congela o custo de cada item.
-      supabaseService.processSaleTransaction(newSale)
-        .then(() => supabaseService.getSales())
-        .then(setSales)
-        .catch(err => console.error('Erro ao salvar venda no Supabase:', err));
-    }
-
-    // Update local inventory/movement state only
-    items.forEach(item => {
-      registerMovement(
-        item.productId,
-        unitId,
-        'CLIENTE',
-        'SAIDA',
-        item.quantity,
-        item.serials || [],
-        item.cardCondition,
-        `Venda ${invoiceNumber}`,
-        false
-      );
-    });
-
-    return newSale;
-  };
-
   // Cancel / Return a Sale
-  const cancelSale = (saleId: string, approvedByAdminName?: string) => {
+  const cancelSale = async (saleId: string, approvedByAdminName?: string): Promise<'PENDENTE_APROVACAO' | 'CANCELADA' | undefined> => {
     const sale = sales.find(s => s.id === saleId);
-    if (!sale) return;
+    if (!sale) return undefined;
 
     const needsAdminApproval = sale.grossAmount > 300;
 
     if (needsAdminApproval && currentUser.role !== UserRole.ADMIN && !approvedByAdminName) {
-      // Mark as pending cancellation approval
-      setSales(prev => prev.map(s => {
-        if (s.id === saleId) {
-          const updated = { ...s, status: 'PENDENTE_APROVACAO' as const };
-          if (useSupabase) {
-            supabaseService.updateSaleStatus(saleId, 'PENDENTE_APROVACAO').catch(err => console.error('Erro ao atualizar venda no Supabase:', err));
-          }
-          return updated;
-        }
-        return s;
-      }));
+      // Pedido de estorno: aguarda a aprovacao de um administrador.
+      if (useSupabase) await supabaseService.updateSaleStatus(saleId, 'PENDENTE_APROVACAO');
+      setSales(prev => prev.map(s => (s.id === saleId ? { ...s, status: 'PENDENTE_APROVACAO' as const } : s)));
       return 'PENDENTE_APROVACAO';
     }
 
-    // Process actual cancellation: return items to store inventory!
-    setSales(prev => prev.map(s => {
-      if (s.id === saleId) {
-        return {
-          ...s,
-          status: 'CANCELADA' as const,
-          approvedBy: approvedByAdminName || currentUser.name
-        };
-      }
-      return s;
-    }));
-
     if (useSupabase) {
-      supabaseService.processSaleCancellation(saleId, approvedByAdminName || currentUser.name)
-        .catch(err => console.error('Erro ao cancelar venda no Supabase:', err));
+      await supabaseService.processSaleCancellation(saleId, approvedByAdminName || currentUser.name);
+      await loadAllFromSupabase();
     }
-
-    sale.items.forEach(item => {
-      if (item.itemType === 'SERVICE' || !item.productId) return;
-      registerMovement(
-        item.productId,
-        'CLIENTE',
-        sale.unitId,
-        'ENTRADA',
-        item.quantity,
-        item.serials || [],
-        item.cardCondition,
-        `Cancelamento da Venda ${sale.invoiceNumber}`,
-        false
-      );
-    });
-
     return 'CANCELADA';
   };
 
   // Register Expenses
-  const addExpense = (expense: Omit<Expense, 'id' | 'operatorId' | 'operatorName' | 'timestamp'>) => {
+  const addExpense = async (expense: Omit<Expense, 'id' | 'operatorId' | 'operatorName' | 'timestamp'>) => {
     const newExpense: Expense = {
       ...expense,
       id: 'e_' + Math.random().toString(36).substring(2, 9),
@@ -676,27 +382,8 @@ export function useErpStore() {
       operatorName: currentUser.name,
       timestamp: new Date().toISOString()
     };
+    if (useSupabase) await supabaseService.upsertExpense(newExpense);
     setExpenses(prev => [newExpense, ...prev]);
-    if (useSupabase) {
-      supabaseService.upsertExpense(newExpense).catch(err => console.error('Erro ao salvar despesa no Supabase:', err));
-    }
-  };
-
-  // Register Trade-in evaluation
-  const registerTradeIn = (trade: Omit<TradeIn, 'id' | 'operatorId' | 'operatorName' | 'timestamp' | 'status'>) => {
-    const newTrade: TradeIn = {
-      ...trade,
-      id: 't_' + Math.random().toString(36).substring(2, 9),
-      operatorId: currentUser.id,
-      operatorName: currentUser.name,
-      timestamp: new Date().toISOString(),
-      status: 'AVALIADO'
-    };
-    setTradeIns(prev => [newTrade, ...prev]);
-    if (useSupabase) {
-      supabaseService.upsertTradeIn(newTrade).catch(err => console.error('Erro ao salvar troca no Supabase:', err));
-    }
-    return newTrade;
   };
 
   // Troca Gamer: cadastra o videogame usado e da entrada da unidade com o serial real.
@@ -748,17 +435,12 @@ export function useErpStore() {
     setTradeIns(prev => prev.map(t => t.id === tradeId ? approved : t));
   };
 
-  const cancelTradeIn = (tradeId: string) => {
-    setTradeIns(prev => prev.map(t => {
-      if (t.id === tradeId) {
-        const updated = { ...t, status: 'CANCELADO' as const };
-        if (useSupabase) {
-          supabaseService.upsertTradeIn(updated).catch(err => console.error('Erro ao cancelar troca no Supabase:', err));
-        }
-        return updated;
-      }
-      return t;
-    }));
+  const cancelTradeIn = async (tradeId: string) => {
+    const trade = tradeIns.find(t => t.id === tradeId);
+    if (!trade) return;
+    const updated = { ...trade, status: 'CANCELADO' as const };
+    if (useSupabase) await supabaseService.upsertTradeIn(updated);
+    setTradeIns(prev => prev.map(t => (t.id === tradeId ? updated : t)));
   };
 
   // Ordens de servico: abertas, cobradas e entregues no PDV; o ERP acompanha e muda a situacao.
@@ -827,74 +509,32 @@ export function useErpStore() {
   };
 
   // Bulk CSV import of product catalog or past sales spreadsheet!
-  const importBulkProducts = (csvText: string) => {
-    const lines = csvText.split('\n');
-    let importedCount = 0;
-    
-    // Simple parser: sku, name, category, brand, costPrice, sellPrice, ncm, warrantyMonths, isSerialized
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      
-      const cols = line.split(';'); // semicolon-separated
-      if (cols.length < 6) continue;
-
-      const sku = cols[0]?.trim();
-      const name = cols[1]?.trim();
-      const category = cols[2]?.trim() || 'Outros';
-      const brand = cols[3]?.trim() || 'Desconhecida';
-      const costPrice = parseFloat(cols[4]) || 0;
-      const sellPrice = parseFloat(cols[5]) || 0;
-      const ncm = cols[6]?.trim() || '0000.00.00';
-      const warrantyMonths = parseInt(cols[7]) || 12;
-      const isSerialized = cols[8]?.trim().toLowerCase() === 'sim' || cols[8]?.trim().toLowerCase() === 'true';
-
-      if (sku && name) {
-        addProduct({
-          sku,
-          name,
-          category,
-          brand,
-          costPrice,
-          sellPrice,
-          ncm,
-          warrantyMonths,
-          isSerialized,
-          isUsed: false
-        }).catch(err => console.error('Erro ao importar produto no Supabase:', err));
-        importedCount++;
-      }
-    }
-    return importedCount;
-  };
-
-  const addSupplier = (supplier: Omit<Supplier, 'id' | 'historyCount'>) => {
+  const addSupplier = async (supplier: Omit<Supplier, 'id' | 'historyCount'>) => {
     const newId = 's_' + Math.random().toString(36).substring(2, 9);
     const newSupplier: Supplier = { 
       ...supplier, 
       id: newId, 
       historyCount: 0 
     };
+    if (useSupabase) await supabaseService.upsertSupplier(newSupplier);
     setSuppliers(prev => [newSupplier, ...prev]);
-    if (useSupabase) {
-      supabaseService.upsertSupplier(newSupplier).catch(err => console.error('Erro ao criar fornecedor no Supabase:', err));
-    }
     return newSupplier;
   };
 
-  const editSupplier = (updatedSupplier: Supplier) => {
+  const editSupplier = async (updatedSupplier: Supplier) => {
+    if (useSupabase) await supabaseService.upsertSupplier(updatedSupplier);
     setSuppliers(prev => prev.map(s => s.id === updatedSupplier.id ? updatedSupplier : s));
-    if (useSupabase) {
-      supabaseService.upsertSupplier(updatedSupplier).catch(err => console.error('Erro ao editar fornecedor no Supabase:', err));
-    }
   };
 
-  const deleteSupplier = (id: string) => {
+  const deleteSupplier = async (id: string) => {
+    if (useSupabase) await supabaseService.deleteSupplier(id);
     setSuppliers(prev => prev.filter(s => s.id !== id));
-    if (useSupabase) {
-      supabaseService.deleteSupplier(id).catch(err => console.error('Erro ao deletar fornecedor no Supabase:', err));
-    }
   };
+
+  // Gerente so enxerga as lojas liberadas para ele (o banco ja bloqueia o resto).
+  const visibleStoreConfigs = currentUser?.storeIds
+    ? storeConfigs.filter(config => config.unitId === 'central' || currentUser.storeIds!.includes(config.unitId))
+    : storeConfigs;
 
   return {
     currentUser,
@@ -907,7 +547,7 @@ export function useErpStore() {
     expenses,
     tradeIns,
     workOrders,
-    storeConfigs,
+    storeConfigs: visibleStoreConfigs,
     suppliers,
     pdvOperators,
     productStoreCosts,
@@ -917,23 +557,17 @@ export function useErpStore() {
     supabaseMissingTables,
     supabaseError,
     authProfileError,
-    toggleUseSupabase,
     loadAllFromSupabase,
-    exportLocalToSupabase,
-    resetDatabase,
     addProduct,
     editProduct,
     saveProduct,
     saveService,
     deleteService,
-    registerMovement,
     registerStockEntry,
     registerSerializedStockEntry,
     registerTransfer,
-    registerSale,
     cancelSale,
     addExpense,
-    registerTradeIn,
     approveTradeIn,
     cancelTradeIn,
     updateWorkOrderStatus,
@@ -942,7 +576,6 @@ export function useErpStore() {
     savePdvOperator,
     deletePdvOperator,
     updateCurrentUserDisplayName,
-    importBulkProducts,
     addSupplier,
     editSupplier,
     deleteSupplier
