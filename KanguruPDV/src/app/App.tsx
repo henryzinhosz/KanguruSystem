@@ -1831,6 +1831,21 @@ export function App() {
     getCashSessionReport().then((report) => setSessionNumber(report?.sessionNumber ?? null)).catch(() => undefined);
   }, [cashSession, offlineNow]);
 
+  // Sair da venda para o menu descarta a venda em andamento (proxima venda comeca limpa).
+  function leaveSaleToMenu() {
+    setCart([]);
+    setCatalogItems([]);
+    setQuery('');
+    setPaymentLines([]);
+    setSaleSellerCode('');
+    setSaleSeller(null);
+    setSaleCustomer(null);
+    setWorkOrderCharge(null);
+    setAdminApprovalPassword('');
+    setMessage(null);
+    setScreen('menu');
+  }
+
   useEffect(() => {
     if (screen !== 'sale') return;
     function onKey(event: KeyboardEvent) {
@@ -1841,7 +1856,7 @@ export function App() {
         setQuery('');
         return;
       }
-      setScreen('menu');
+      leaveSaleToMenu();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -2553,7 +2568,7 @@ export function App() {
             <ArrowLeft size={18} /> Reservas
           </button>
         ) : (
-          <button className="top-bar-menu" type="button" onClick={() => setScreen('menu')} disabled={busy}>
+          <button className="top-bar-menu" type="button" onClick={leaveSaleToMenu} disabled={busy}>
             <LayoutGrid size={18} /> Menu <small>(Esc)</small>
           </button>
         )}
@@ -3040,6 +3055,13 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
     onChange(lines.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
   }
 
+  // Linha ainda sem valor: usa o saldo restante (assim o valor com a taxa aparece na hora).
+  function fillAmount(line: PaymentLine, otherLinesCents: number): Partial<PaymentLine> {
+    if (line.amount) return {};
+    const suggested = Math.max(0, totalCents - otherLinesCents) / 100;
+    return suggested > 0 ? { amount: suggested } : {};
+  }
+
   return (
     <div className="payment-lines">
       <div className="payment-lines-heading">
@@ -3111,7 +3133,7 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
                   <select
                     aria-label={`Parcelas da forma ${index + 1}`}
                     value={installments}
-                    onChange={(event) => updateLine(index, { installments: Number(event.target.value) })}
+                    onChange={(event) => updateLine(index, { installments: Number(event.target.value), ...fillAmount(line, otherLinesCents) })}
                   >
                     {Array.from({ length: 12 }, (_, i) => i + 1).map((count) => {
                       const countRate = cardFeeRate(cardFees, 'CREDITO', count);
@@ -3128,7 +3150,7 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
                     <input
                       type="checkbox"
                       checked={Boolean(line.passFee)}
-                      onChange={(event) => updateLine(index, { passFee: event.target.checked })}
+                      onChange={(event) => updateLine(index, { passFee: event.target.checked, ...fillAmount(line, otherLinesCents) })}
                     />
                     Repassar taxa ({percentText(rate)}%)
                   </label>
