@@ -3051,8 +3051,31 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
   const balanced = resolution.error === null;
   const jurosCents = toCents(surchargeTotal(withCardSurcharge(lines, cardFees)));
 
+  // Cartao com "Repassar taxa" fica travado e sempre cobre o que falta depois das
+  // outras formas (a ordem de lancamento nao importa). Com mais de um, ajusta o ultimo.
+  function balanceCardLine(next: PaymentLine[]): PaymentLine[] {
+    let target = -1;
+    next.forEach((line, i) => {
+      if (line.passFee && (line.paymentMethod === 'CREDITO' || line.paymentMethod === 'DEBITO')) target = i;
+    });
+    if (target < 0) return next;
+    const otherCents = next.reduce((sum, line, i) => (i === target ? sum : sum + toCents(line.amount)), 0);
+    const amount = Math.max(0, totalCents - otherCents) / 100;
+    return next[target].amount === amount ? next : next.map((line, i) => (i === target ? { ...line, amount } : line));
+  }
+
+  function emit(next: PaymentLine[]) {
+    onChange(balanceCardLine(next));
+  }
+
+  // Total mudou (item incluido/removido): reajusta o cartao com repasse.
+  useEffect(() => {
+    const balanced = balanceCardLine(lines);
+    if (balanced !== lines) onChange(balanced);
+  }, [totalCents]);
+
   function updateLine(index: number, patch: Partial<PaymentLine>) {
-    onChange(lines.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
+    emit(lines.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
   }
 
   // Linha ainda sem valor: usa o saldo restante (assim o valor com a taxa aparece na hora).
@@ -3069,7 +3092,7 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
         <button
           className="text-action"
           type="button"
-          onClick={() => onChange([...lines, { paymentMethod: 'DINHEIRO', amount: 0 }])}
+          onClick={() => emit([...lines, { paymentMethod: 'DINHEIRO', amount: 0 }])}
           disabled={busy}
         >
           + Adicionar forma
@@ -3122,7 +3145,7 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
                 className="icon-button"
                 type="button"
                 title="Remover forma"
-                onClick={() => onChange(lines.filter((_, i) => i !== index))}
+                onClick={() => emit(lines.filter((_, i) => i !== index))}
               >
                 <Trash2 size={16} />
               </button>
