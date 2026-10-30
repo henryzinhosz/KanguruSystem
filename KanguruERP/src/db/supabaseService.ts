@@ -12,6 +12,7 @@ import {
   TradeIn, 
   WorkOrder, 
   WorkOrderStatus,
+  StockCount,
   StoreConfig, 
   Supplier,
   SupplierInvoiceReminder,
@@ -1415,6 +1416,82 @@ export const supabaseService = {
   async resolveOfflineConflict(conflictId: string, resolvedBy: string): Promise<void> {
     const { error } = await supabase.rpc("resolve_pos_offline_conflict", { p_conflict_id: conflictId, p_resolved_by: resolvedBy });
     if (error) throw error;
+  },
+
+  // === Balanco de estoque ===
+  async getStockCounts(): Promise<StockCount[]> {
+    const { data, error } = await supabase
+      .from('stock_counts')
+      .select('*, stock_count_items(*)')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) throw error;
+    return (data || []).map((row: any) => ({
+      id: row.id,
+      unitId: row.unit_id,
+      countNumber: row.count_number,
+      status: row.status,
+      categories: row.categories ?? null,
+      notes: row.notes || undefined,
+      createdByName: row.created_by_name || undefined,
+      createdAt: row.created_at,
+      savedAt: row.saved_at || undefined,
+      approvedAt: row.approved_at || undefined,
+      approvedByName: row.approved_by_name || undefined,
+      items: (row.stock_count_items || []).map((item: any) => ({
+        productId: item.product_id,
+        countedQty: Number(item.counted_qty),
+        systemQty: Number(item.system_qty),
+        countedSerials: item.counted_serials || [],
+        systemSerials: item.system_serials || [],
+        reservedSerials: item.reserved_serials || [],
+        countedByName: item.counted_by_name || undefined,
+        updatedAt: item.updated_at
+      }))
+    }));
+  },
+
+  async startStockCount(unitId: string, categories: string[] | null): Promise<string> {
+    const { data, error } = await supabase.rpc('start_stock_count', { p_unit_id: unitId, p_categories: categories && categories.length ? categories : null });
+    if (error) throw error;
+    return String(data);
+  },
+
+  async recordStockCountItem(countId: string, productId: string, countedQty: number, countedSerials: string[]): Promise<void> {
+    const { error } = await supabase.rpc('record_stock_count_item', { p_count_id: countId, p_product_id: productId, p_counted_qty: countedQty, p_counted_serials: countedSerials });
+    if (error) throw error;
+  },
+
+  async removeStockCountItem(countId: string, productId: string): Promise<void> {
+    const { error } = await supabase.rpc('remove_stock_count_item', { p_count_id: countId, p_product_id: productId });
+    if (error) throw error;
+  },
+
+  async saveStockCount(countId: string, notes: string): Promise<void> {
+    const { error } = await supabase.rpc('save_stock_count', { p_count_id: countId, p_notes: notes || null });
+    if (error) throw error;
+  },
+
+  async cancelStockCount(countId: string): Promise<void> {
+    const { error } = await supabase.rpc('cancel_stock_count', { p_count_id: countId });
+    if (error) throw error;
+  },
+
+  async approveStockCount(countId: string): Promise<number> {
+    const { data, error } = await supabase.rpc('approve_stock_count', { p_count_id: countId });
+    if (error) throw error;
+    return Number((data as any)?.adjustedProducts ?? 0);
+  },
+
+  // Seriais em estoque numa loja (para reconhecer o serial bipado no balanco).
+  async getStoreSerials(unitId: string): Promise<{ productId: string; serial: string; status: string }[]> {
+    const { data, error } = await supabase
+      .from('product_serial_units')
+      .select('product_id, serial_number, status')
+      .eq('unit_id', unitId)
+      .in('status', ['DISPONIVEL', 'RESERVADO']);
+    if (error) throw error;
+    return (data || []).map((row: any) => ({ productId: row.product_id, serial: String(row.serial_number).toUpperCase(), status: row.status }));
   },
 
   // === Avariados (2.9): saldo por loja (sem serial) e unidades serializadas avariadas ===

@@ -485,3 +485,32 @@ export interface SupplierInvoiceReminder {
   notes?: string;
   createdAt: string;
 }
+
+// Balanco de estoque (checklist): contado x sistema no momento da contagem.
+export type StockCountStatus = 'ABERTO' | 'SALVO' | 'APROVADO' | 'CANCELADO';
+
+export interface StockCountItem {
+  productId: string;
+  countedQty: number;
+  systemQty: number;
+  countedSerials: string[];
+  systemSerials: string[];
+  reservedSerials: string[];
+  countedByName?: string;
+  updatedAt: string;
+}
+
+export interface StockCount {
+  id: string;
+  unitId: string;
+  countNumber: number;
+  status: StockCountStatus;
+  categories: string[] | null;
+  notes?: string;
+  createdByName?: string;
+  createdAt: string;
+  savedAt?: string;
+  approvedAt?: string;
+  approvedByName?: string;
+  items: StockCountItem[];
+}

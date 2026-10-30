@@ -56,6 +56,7 @@ export default function App() {
     registerTransfer,
     registerStockEntry,
     productStoreCosts,
+    loadAllFromSupabase,
     cancelSale,
     addExpense,
     approveTradeIn,
@@ -210,6 +211,7 @@ export default function App() {
               registerTransfer={registerTransfer}
               registerStockEntry={registerStockEntry}
               productStoreCosts={productStoreCosts}
+              onStockChanged={loadAllFromSupabase}
             />
           )}
 

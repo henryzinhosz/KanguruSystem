@@ -15,6 +15,7 @@ import {
   ProductStoreCost
 } from '../types';
 import { StaleProductsPanel, StockValuePanel } from './ProductReports';
+import { BalancosReportPanel } from './BalancoPanel';
 import {
   TrendingUp,
   DollarSign,
@@ -822,6 +823,7 @@ export default function DashboardView({
 
           </div>
           <StaleProductsPanel products={products} inventory={inventory} productStoreCosts={productStoreCosts} sales={sales} stores={stores} activeUnitId={activeUnitId} />
+          <BalancosReportPanel products={products} inventory={inventory} storeConfigs={storeConfigs} productStoreCosts={productStoreCosts} activeUnitId={activeUnitId} />
         </>
       )}
     </div>
