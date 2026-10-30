@@ -76,7 +76,11 @@ const upload = (file) => {
   );
 };
 upload(remoteName);
+// Link fixo para instalar em loja nova (sempre a versao mais recente).
+copyFileSync(installer, join(releaseDir, 'Kanguru-PDV-setup.exe'));
+upload('Kanguru-PDV-setup.exe');
 // latest.json por ultimo: so anuncia a versao depois que o instalador ja esta no ar.
 upload('latest.json');
 
 console.log(`Pronto: versão ${version} publicada. Os PDVs mostram o aviso ao abrir (ou em até 4 horas).`);
+console.log(`Instalação em loja nova: ${bucketUrl}/Kanguru-PDV-setup.exe`);
