@@ -107,7 +107,7 @@ export default function App() {
       : { label: 'Bloqueado', className: 'bg-rose-500/10 text-rose-400 border-rose-500/20' };
 
   const navigationItems = [
-    { id: 'dashboard', name: 'Dashboard Geral', icon: LayoutDashboard },
+    { id: 'dashboard', name: 'Relatórios Gerais', icon: LayoutDashboard },
     { id: 'estoque', name: 'Catálogo & Estoque', icon: Package },
     { id: 'servicos', name: 'Serviços / OS', icon: Wrench },
     { id: 'clientes', name: 'Clientes', icon: Users },
@@ -191,6 +191,7 @@ export default function App() {
               sales={sales}
               expenses={expenses}
               storeConfigs={storeConfigs}
+              productStoreCosts={productStoreCosts}
             />
           )}
 
