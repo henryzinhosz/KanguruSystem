@@ -745,6 +745,13 @@ ALTER TABLE public.store_configs ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE public.store_configs ADD COLUMN IF NOT EXISTS phone TEXT;
 ALTER TABLE public.store_configs ADD COLUMN IF NOT EXISTS contact_email TEXT;`;
 
+// Senha Gerente por loja: so a situacao (o hash nunca sai do banco).
+export interface StoreManagerPasswordStatus {
+  unitId: string;
+  setAt: string;
+  setByName: string | null;
+}
+
 export const supabaseService = {
   async getPlatformTenants(): Promise<PlatformTenant[]> {
     const { data, error } = await supabase.rpc('platform_list_tenants');
@@ -1435,6 +1442,17 @@ export const supabaseService = {
   },
 
   // === NFC-e (2.8b) ===
+  async listStoreManagerPasswordStatus(): Promise<StoreManagerPasswordStatus[]> {
+    const { data, error } = await supabase.rpc('list_store_manager_password_status');
+    if (error) throw error;
+    return ((data || []) as any[]).map(row => ({ unitId: row.unit_id, setAt: row.set_at, setByName: row.set_by_name ?? null }));
+  },
+
+  async setStoreManagerPassword(unitId: string, password: string): Promise<void> {
+    const { error } = await supabase.rpc('set_store_manager_password', { p_unit_id: unitId, p_password: password });
+    if (error) throw error;
+  },
+
   async getStoreNfceStatus(): Promise<StoreNfceStatus[]> {
     const { data, error } = await supabase.rpc('list_store_nfce_status');
     if (error) throw error;

@@ -78,6 +78,7 @@ import {
   syncOutbox,
   useOfflineState,
   verifyAdminPasswordOffline,
+  syncManagerPasswordVersion,
   type OfflineSaleItem,
   type OfflineSalePayload,
 } from '../offline/offline';
@@ -99,7 +100,9 @@ import {
   getPosStoreProfile,
   getTerminalContext,
   requireAdminPassword,
-  setAdminPassword,
+  getManagerPasswordStatus,
+  authorizeManager,
+  type ManagerAction,
   type PosStoreProfile,
   type TerminalContext,
 } from '../services/supabase/terminal';
@@ -182,6 +185,12 @@ function errorMessage(error: unknown): string {
     return `Desconto bloqueado. O limite deste item é ${discountLimitError[1]}%.`;
   }
 
+  if (message.includes('Manager password is not configured')) {
+    return 'A loja ainda não tem senha Gerente. Cadastre no ERP › Configurações (na loja).';
+  }
+  if (message.includes('Manager password required')) {
+    return 'Esta ação precisa da senha Gerente. Tente de novo.';
+  }
   const passwordLockedError = message.match(/Administrative password locked until (.+)$/i);
   if (passwordLockedError) {
     return passwordLockedMessage(passwordLockedError[1]);
@@ -190,10 +199,10 @@ function errorMessage(error: unknown): string {
     return 'A contagem não pode ser negativa. Digite o valor que realmente está no caixa (pode ser 0).';
   }
   if (message.includes('Invalid administrative password')) {
-    return 'Senha administrativa incorreta.';
+    return 'Senha Gerente incorreta.';
   }
   if (message.includes('Administrative password required')) {
-    return 'Informe a senha administrativa para liberar o desconto.';
+    return 'Informe a senha Gerente para liberar o desconto.';
   }
   if (message.includes('Payment lines do not match the sale total')) {
     return 'A soma das formas de pagamento não confere com o total da venda.';
@@ -221,7 +230,7 @@ function passwordLockedMessage(lockedUntil: string): string {
   const time = Number.isNaN(date.getTime())
     ? lockedUntil
     : date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  return `Senha administrativa bloqueada por excesso de tentativas. Tente novamente às ${time}.`;
+  return `Senha Gerente bloqueada por excesso de tentativas. Tente novamente às ${time}.`;
 }
 
 function toCents(value: number): number {
@@ -338,7 +347,9 @@ export function App() {
   const [activationCode, setActivationCode] = useState<string>('');
   const [terminalName, setTerminalName] = useState('Caixa 01');
   const [password, setPassword] = useState('');
-  const [passwordConfirmation, setPasswordConfirmation] = useState('');
+  // Senha Gerente digitada na sangria, no cancelamento de reserva com sinal e na gaveta.
+  const [managerPassword, setManagerPassword] = useState('');
+  const [drawerAuthOpen, setDrawerAuthOpen] = useState(false);
   const [cashNumber, setCashNumber] = useState('Caixa 01');
   const [responsibleName, setResponsibleName] = useState('');
   const [openingFloat, setOpeningFloat] = useState('');
@@ -446,7 +457,7 @@ export function App() {
         setTerminal(context);
         setCashNumber(context.displayName);
         void cacheTerminal(context);
-        setScreen(context.needsAdminPassword ? 'set-password' : 'unlock');
+        await routeToUnlock(context.needsAdminPassword);
       } catch (error) {
         // Sem internet: nunca voltar para a ativacao; usa o terminal guardado e o modo offline.
         const cached = isNetworkError(error) ? await getCachedTerminal() : null;
@@ -454,7 +465,7 @@ export function App() {
           setOffline(true);
           setTerminal(cached);
           setCashNumber(cached.displayName);
-          setMessage('Sem internet: desbloqueie com a senha administrativa para vender no modo offline.');
+          setMessage('Sem internet: desbloqueie com a senha Gerente para vender no modo offline.');
           setScreen('unlock');
           return;
         }
@@ -480,7 +491,7 @@ export function App() {
       setTerminal(context);
       setCashNumber(context.displayName);
       setActivationCode('');
-      setScreen('set-password');
+      await routeToUnlock(true);
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
@@ -488,24 +499,56 @@ export function App() {
     }
   }
 
-  async function handleSetPassword(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (password !== passwordConfirmation) {
-      setMessage('As senhas nao coincidem.');
-      return;
+  // Senha Gerente da loja (ERP). Sem ela e sem a senha antiga do terminal: aviso para cadastrar.
+  async function routeToUnlock(terminalWithoutPassword: boolean) {
+    try {
+      const status = await getManagerPasswordStatus();
+      void syncManagerPasswordVersion(status.setAt);
+      setScreen(status.configured || status.terminalHasAdmin ? 'unlock' : 'set-password');
+    } catch {
+      setScreen(terminalWithoutPassword ? 'set-password' : 'unlock');
     }
+  }
+
+  async function recheckManagerPassword() {
     setBusy(true);
     setMessage(null);
     try {
-      await setAdminPassword(password);
-      setPassword('');
-      setPasswordConfirmation('');
+      const status = await getManagerPasswordStatus();
+      if (!status.configured && !status.terminalHasAdmin) {
+        setMessage('A senha Gerente ainda não foi cadastrada para esta loja.');
+        return;
+      }
+      void syncManagerPasswordVersion(status.setAt);
       setScreen('unlock');
-      setMessage('Senha administrativa definida. Desbloqueie o terminal para continuar.');
     } catch (error) {
       setMessage(errorMessage(error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Confere a senha Gerente para uma acao. Devolve o erro para mostrar, ou null se liberou.
+  // Sem internet (so gaveta e sangria): confere a copia local da senha.
+  async function authorizeAction(action: ManagerAction, value: string, allowOffline: boolean): Promise<string | null> {
+    if (!value) return 'Digite a senha Gerente.';
+    const offlineCheck = async () => ((await verifyAdminPasswordOffline(value))
+      ? null
+      : 'Senha incorreta (sem internet, vale a senha do último desbloqueio feito com internet).');
+    if (isOffline()) return allowOffline ? offlineCheck() : 'Sem internet esta ação não pode ser liberada.';
+    try {
+      const result = await authorizeManager(value, action);
+      if (result.status === 'OK') return null;
+      if (result.status === 'LOCKED') return passwordLockedMessage(result.lockedUntil);
+      return result.remainingAttempts > 0
+        ? `Senha Gerente incorreta. Restam ${result.remainingAttempts} tentativa(s).`
+        : 'Senha Gerente incorreta. O terminal foi bloqueado temporariamente para senha.';
+    } catch (error) {
+      if (allowOffline && isNetworkError(error)) {
+        setOffline(true);
+        return offlineCheck();
+      }
+      return errorMessage(error);
     }
   }
 
@@ -583,6 +626,15 @@ export function App() {
     setMessage(null);
     try {
       const operator = responsibleName.trim() || cashSession?.openedByName || '';
+      if (movementType === 'SANGRIA') {
+        const denied = await authorizeAction('CASH_WITHDRAWAL', managerPassword, true);
+        if (denied) {
+          setMessage(denied);
+          setManagerPassword('');
+          return;
+        }
+      }
+      setManagerPassword('');
       if (isOffline()) {
         await enqueueOfflineMovement({ type: movementType, amount: valueAsNumber(movementAmount), reason: movementReason, operatorName: operator });
       } else {
@@ -643,7 +695,12 @@ export function App() {
     setBusy(true);
     setMessage(null);
     try {
-      await requireAdminPassword(password);
+      const denied = await authorizeAction('CASH_CLOSE', password, false);
+      if (denied) {
+        setMessage(denied);
+        setPassword('');
+        return;
+      }
       await closeCashSession(responsibleName, counts, closureNotes);
       if (closure) {
         const closingData = { summary: closure, report: closingReport, counts, closedBy: responsibleName.trim(), closedAt: new Date() };
@@ -947,8 +1004,8 @@ export function App() {
         setAdminApprovalPassword('');
         setAdminApprovalError(
           result.remainingAttempts > 0
-            ? `Senha administrativa incorreta. Restam ${result.remainingAttempts} tentativa(s) antes do bloqueio temporário.`
-            : 'Senha administrativa incorreta. O terminal foi bloqueado temporariamente para senha administrativa.'
+            ? `Senha Gerente incorreta. Restam ${result.remainingAttempts} tentativa(s) antes do bloqueio temporário.`
+            : 'Senha Gerente incorreta. O terminal foi bloqueado temporariamente para senha.'
         );
         return;
       }
@@ -1187,7 +1244,8 @@ export function App() {
         break;
       case 'printer': setPrinterOpen(true); break;
       case 'drawer':
-        void openCashDrawer().then((ok) => setMessage(ok ? 'Gaveta aberta.' : 'Não foi possível abrir a gaveta. Confira a impressora em Configurações › Impressora.'));
+        setManagerPassword('');
+        setDrawerAuthOpen(true);
         break;
       default:
         break;
@@ -1205,7 +1263,7 @@ export function App() {
 
   async function confirmDiscountApproval() {
     if (!adminApprovalPassword) {
-      setAdminApprovalError('Digite a senha administrativa para liberar o desconto.');
+      setAdminApprovalError('Digite a senha Gerente para liberar o desconto.');
       return;
     }
     await finalizeSale();
@@ -1638,10 +1696,18 @@ export function App() {
   }
 
   async function confirmCancelReservation(reservation: PosReservation, refundMethod: PaymentMethod | null) {
-    setCancelTarget(null);
     setBusy(true);
     setMessage(null);
     try {
+      if (refundMethod) {
+        const denied = await authorizeAction('RESERVATION_CANCEL', managerPassword, false);
+        setManagerPassword('');
+        if (denied) {
+          setMessage(denied);
+          return;
+        }
+      }
+      setCancelTarget(null);
       await cancelPosReservation(reservation.id, refundMethod);
       setReservations(await getPosReservations());
       setMessage('Reserva cancelada e produto liberado.');
@@ -1832,35 +1898,14 @@ export function App() {
       <AuthFrame>
         <Brand />
         <StoreDetails terminal={terminal} />
-        <h1>Definir senha administrativa</h1>
-        <p>Esta senha sera solicitada quando o aplicativo for reaberto.</p>
-        <form onSubmit={handleSetPassword}>
-          <label>
-            Nova senha
-            <input
-              type="password"
-              minLength={8}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="new-password"
-              required
-            />
-          </label>
-          <label>
-            Confirmar senha
-            <input
-              type="password"
-              minLength={8}
-              value={passwordConfirmation}
-              onChange={(event) => setPasswordConfirmation(event.target.value)}
-              autoComplete="new-password"
-              required
-            />
-          </label>
-          <button className="primary-action" disabled={busy}>
-            {busy ? 'Salvando...' : 'Definir senha'}
-          </button>
-        </form>
+        <h1>Cadastre a senha Gerente</h1>
+        <p>
+          Esta loja ainda não tem senha Gerente. O dono cadastra no ERP, em Configurações, na loja.
+          Ela vale para todos os PDVs da loja e é pedida para desbloquear o terminal e liberar ações do caixa.
+        </p>
+        <button className="primary-action" type="button" disabled={busy} onClick={() => void recheckManagerPassword()}>
+          {busy ? 'Conferindo...' : 'Já cadastrei, continuar'}
+        </button>
         <Notice message={message} />
       </AuthFrame>
     );
@@ -1872,10 +1917,10 @@ export function App() {
         <Brand />
         <StoreDetails terminal={terminal} />
         <h1>Desbloquear terminal</h1>
-        <p>Informe a senha administrativa para abrir o PDV.</p>
+        <p>Informe a senha Gerente para abrir o PDV.</p>
         <form onSubmit={handleUnlock}>
           <label>
-            Senha administrativa
+            Senha Gerente
             <input
               type="password"
               value={password}
@@ -1968,6 +2013,18 @@ export function App() {
               required
             />
           </label>
+          {movementType === 'SANGRIA' && (
+            <label>
+              Senha Gerente
+              <input
+                type="password"
+                value={managerPassword}
+                onChange={(event) => setManagerPassword(event.target.value)}
+                autoComplete="off"
+                required
+              />
+            </label>
+          )}
           <button className="primary-action" disabled={busy}>
             {busy ? 'Registrando...' : 'Confirmar'}
           </button>
@@ -2038,7 +2095,7 @@ export function App() {
             <textarea value={closureNotes} onChange={(event) => setClosureNotes(event.target.value)} />
           </label>
           <label>
-            Senha administrativa
+            Senha Gerente
             <input
               type="password"
               value={password}
@@ -2331,20 +2388,30 @@ export function App() {
                   <p className="eyebrow">Cancelar reserva de {cancelTarget.customerName}</p>
                   <h2 id="cancel-reservation-title">Como o sinal de {currency.format(cancelTarget.depositAmount)} foi devolvido?</h2>
                 </div>
-                <button className="icon-button" type="button" title="Voltar" onClick={() => setCancelTarget(null)}><X size={20} /></button>
+                <button className="icon-button" type="button" title="Voltar" onClick={() => { setCancelTarget(null); setManagerPassword(''); }}><X size={20} /></button>
               </div>
               <p className="modal-copy">
                 A devolução fica registrada no caixa e entra no fechamento. Estorno no cartão ou Pix deve ser feito na maquininha/banco.
               </p>
+              <label>
+                Senha Gerente
+                <input
+                  type="password"
+                  value={managerPassword}
+                  onChange={(event) => setManagerPassword(event.target.value)}
+                  autoComplete="off"
+                />
+              </label>
+              <Notice message={message} />
               <div className="cancel-refund-options">
                 {(['DINHEIRO', 'PIX', 'CREDITO', 'DEBITO'] as PaymentMethod[]).map((method) => (
-                  <button key={method} className="reservation-nav" type="button" disabled={busy} onClick={() => void confirmCancelReservation(cancelTarget, method)}>
+                  <button key={method} className="reservation-nav" type="button" disabled={busy || !managerPassword} onClick={() => void confirmCancelReservation(cancelTarget, method)}>
                     {PAYMENT_METHOD_LABELS[method]}
                   </button>
                 ))}
               </div>
               <div className="modal-actions">
-                <button className="text-action" type="button" onClick={() => setCancelTarget(null)}>Não cancelar</button>
+                <button className="text-action" type="button" onClick={() => { setCancelTarget(null); setManagerPassword(''); }}>Não cancelar</button>
               </div>
             </section>
           </div>
@@ -2368,6 +2435,49 @@ export function App() {
         <TopBar {...topBarProps} subtitle="Kanguru PDV" />
         {message && <div className="menu-notice"><Notice message={message} /></div>}
         <HomeMenu offline={offlineNow} drawerAvailable={Boolean(directPrinter)} cashOpen={Boolean(cashSession)} version={appVersion} onAction={handleMenuAction} />
+        {drawerAuthOpen && (
+          <div className="modal-backdrop" role="presentation">
+            <form
+              className="serial-unit-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="drawer-auth-title"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void (async () => {
+                  setBusy(true);
+                  const denied = await authorizeAction('CASH_DRAWER', managerPassword, true);
+                  setBusy(false);
+                  setManagerPassword('');
+                  if (denied) {
+                    setMessage(denied);
+                    return;
+                  }
+                  setDrawerAuthOpen(false);
+                  const ok = await openCashDrawer();
+                  setMessage(ok ? 'Gaveta aberta.' : 'Não foi possível abrir a gaveta. Confira a impressora em Configurações › Impressora.');
+                })();
+              }}
+            >
+              <div className="modal-heading">
+                <div>
+                  <p className="eyebrow">Abrir gaveta</p>
+                  <h2 id="drawer-auth-title">Senha Gerente</h2>
+                </div>
+                <button className="icon-button" type="button" title="Fechar" onClick={() => { setDrawerAuthOpen(false); setManagerPassword(''); }}><X size={20} /></button>
+              </div>
+              <label>
+                Senha Gerente
+                <input type="password" autoFocus autoComplete="off" value={managerPassword} onChange={(event) => setManagerPassword(event.target.value)} />
+              </label>
+              <Notice message={message} />
+              <div className="modal-actions">
+                <button className="text-action" type="button" onClick={() => { setDrawerAuthOpen(false); setManagerPassword(''); }}>Cancelar</button>
+                <button className="primary-action modal-confirm" type="submit" disabled={busy || !managerPassword}>Abrir gaveta</button>
+              </div>
+            </form>
+          </div>
+        )}
         {printerOpen && (
           <PrinterSettingsModal
             onClose={() => setPrinterOpen(false)}
@@ -2464,7 +2574,7 @@ export function App() {
             <h2>{reservationMode ? 'Itens da reserva' : 'Carrinho'}</h2>
             {cartHasOverLimitDiscount() && (
               <small className="discount-warning">
-                Itens acima do limite exigem a senha administrativa na finalização.
+                Itens acima do limite exigem a senha Gerente na finalização.
               </small>
             )}
           </div>
@@ -3264,7 +3374,7 @@ function AdminApprovalModal({
       <section className="serial-unit-modal" role="dialog" aria-modal="true" aria-labelledby="admin-approval-title">
         <div className="modal-heading">
           <div>
-            <p className="eyebrow">Autorizacao administrativa</p>
+            <p className="eyebrow">Autorização do gerente</p>
             <h2 id="admin-approval-title">Desconto acima do limite</h2>
           </div>
           <button className="icon-button" type="button" title="Cancelar" onClick={onClose} disabled={busy}>
@@ -3275,7 +3385,7 @@ function AdminApprovalModal({
           {overLimit.length === 1
             ? 'Um item deste carrinho excede o limite de desconto.'
             : `${overLimit.length} itens deste carrinho excedem o limite de desconto.`}
-          Informe a senha administrativa para liberar a venda.
+          Informe a senha Gerente para liberar a venda.
         </p>
         <ul className="admin-approval-list">
           {overLimit.map((item) => (
@@ -3291,7 +3401,7 @@ function AdminApprovalModal({
           ))}
         </ul>
         <label>
-          Senha administrativa
+          Senha Gerente
           <input
             type="password"
             autoFocus

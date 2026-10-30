@@ -17,7 +17,7 @@ import { formatReceiptNumber } from './receiptPrint';
 import { printReturnReceipt } from './returnReceiptPrint';
 
 // Troca / devolucao de uma venda (2.9). Itens parciais, destino (estoque ou avariado),
-// forma de devolucao e, quando exigido, CPF/endereco do cliente e a senha administrativa.
+// forma de devolucao e, quando exigido, CPF/endereco do cliente e a senha Gerente.
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -131,19 +131,19 @@ export function ReturnModal({ saleId, loadStore, onClose, onDone }: ReturnModalP
         adminPassword: needsPassword ? password : null,
       });
       if (result.status === 'PASSWORD_REQUIRED') {
-        setError('Digite a senha administrativa para liberar.');
+        setError('Digite a senha Gerente para liberar.');
         return;
       }
       if (result.status === 'INVALID_PASSWORD') {
         setPassword('');
         setError(result.remainingAttempts > 0
-          ? `Senha administrativa incorreta. Restam ${result.remainingAttempts} tentativa(s).`
-          : 'Senha administrativa incorreta. Terminal bloqueado temporariamente para senha.');
+          ? `Senha Gerente incorreta. Restam ${result.remainingAttempts} tentativa(s).`
+          : 'Senha Gerente incorreta. Terminal bloqueado temporariamente para senha.');
         return;
       }
       if (result.status === 'LOCKED') {
         setPassword('');
-        setError('Senha administrativa bloqueada por excesso de tentativas. Aguarde alguns minutos.');
+        setError('Senha Gerente bloqueada por excesso de tentativas. Aguarde alguns minutos.');
         return;
       }
       if (result.status === 'CUSTOMER_REQUIRED') {
@@ -189,7 +189,7 @@ export function ReturnModal({ saleId, loadStore, onClose, onDone }: ReturnModalP
         <p className="modal-copy">
           {sale.withinPeriod
             ? `Dentro do prazo de troca (${sale.exchangeDays} dias, até ${new Date(sale.deadline).toLocaleDateString('pt-BR')}).`
-            : `Fora do prazo de troca (${sale.exchangeDays} dias): exige a senha administrativa.`}
+            : `Fora do prazo de troca (${sale.exchangeDays} dias): exige a senha Gerente.`}
           {sale.fiscalStatus === 'AUTORIZADA' && ' Venda com NFC-e: será emitida a NF-e de devolução.'}
         </p>
 
@@ -260,7 +260,7 @@ export function ReturnModal({ saleId, loadStore, onClose, onDone }: ReturnModalP
         )}
         {needsPassword && (
           <label>
-            Senha administrativa
+            Senha Gerente
             <input type="password" autoComplete="off" value={password} onChange={(event) => setPassword(event.target.value)} />
           </label>
         )}

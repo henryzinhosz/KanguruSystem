@@ -90,13 +90,13 @@ export function TradeInPanel({ seller, sellerSlot, loadStore, onPaidCash, onDone
       if (result.status === 'INVALID_PASSWORD') {
         setPassword('');
         setError(result.remainingAttempts > 0
-          ? `Senha administrativa incorreta. Restam ${result.remainingAttempts} tentativa(s).`
-          : 'Senha administrativa incorreta. Terminal bloqueado temporariamente para senha.');
+          ? `Senha Gerente incorreta. Restam ${result.remainingAttempts} tentativa(s).`
+          : 'Senha Gerente incorreta. Terminal bloqueado temporariamente para senha.');
       } else if (result.status === 'LOCKED') {
         setPassword('');
-        setError('Senha administrativa bloqueada por excesso de tentativas. Aguarde alguns minutos.');
+        setError('Senha Gerente bloqueada por excesso de tentativas. Aguarde alguns minutos.');
       } else if (result.status === 'PASSWORD_REQUIRED') {
-        setError('Digite a senha administrativa para pagar em dinheiro ou Pix.');
+        setError('Digite a senha Gerente para pagar em dinheiro ou Pix.');
       } else if (result.status === 'CUSTOMER_REQUIRED') {
         setError('Cliente não encontrado no cadastro. Selecione ou cadastre o cliente.');
       } else if (result.status === 'INVALID_SELLER') {
@@ -211,7 +211,7 @@ export function TradeInPanel({ seller, sellerSlot, loadStore, onPaidCash, onDone
       </div>
       {needsPassword && (
         <label>
-          Senha administrativa
+          Senha Gerente
           <input type="password" autoComplete="off" value={password} onChange={(event) => setPassword(event.target.value)} />
         </label>
       )}

@@ -57,7 +57,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
         { action: 'open-cash', label: 'Abrir caixa', description: 'Imprime o relatório gerencial de abertura', disabled: cashOpen ? 'O caixa já está aberto' : offline ? OFFLINE_BLOCK : null },
         { action: 'close-cash', label: 'Fechar caixa', description: 'Contagem, diferença e relatório de fechamento', disabled: !cashOpen ? 'Nenhum caixa aberto' : offline ? OFFLINE_BLOCK : null },
         { action: 'reprint-opening', label: 'Reimprimir abertura', description: 'Relatório gerencial de abertura deste caixa', disabled: !cashOpen ? 'Nenhum caixa aberto' : null },
-        { action: 'lock', label: 'Bloquear terminal', description: 'Pede a senha administrativa para voltar' },
+        { action: 'lock', label: 'Bloquear terminal', description: 'Pede a senha Gerente para voltar' },
       ],
     },
     consultas: {
