@@ -14,7 +14,7 @@
 -- process_pos_terminal_sale: mesma assinatura, copiada da versao viva (20261026) so com os
 -- trechos dos juros. Venda offline nao repassa taxa (o PDV bloqueia), mas a taxa da
 -- maquininha tambem e gravada pela trigger.
--- ANTES DE APLICAR (md5 vivo):
+-- ANTES DE APLICAR (md5 vivo; os da devolucao estao no fim do arquivo):
 --   process_pos_terminal_sale  eb8d149053dd195d4f005b1268eee0a5 (LF) / 02dd01a2c635d125d52d58aa2c6d8e3f (CRLF)
 -- =========================================================================
 
@@ -625,5 +625,349 @@ BEGIN
   END IF;
 
   RETURN jsonb_build_object('status', 'OK');
+END;
+$$;
+
+-- ---- Devolucao (2.9): devolve o preco SEM os juros do cartao (pedido do usuario) ----
+-- get_pos_sale_returnable e process_pos_sale_return: mesmas assinaturas, copiadas da versao
+-- viva (20261030) trocando so o valor unitario (lineTotal - cardSurcharge).
+-- md5 vivo esperado:
+--   get_pos_sale_returnable  fd5fcc213d38c161e7579d9507ee7234 (LF) / a8723a00d2540c4b63f70fe9c26acfb0 (CRLF)
+--   process_pos_sale_return  d93891d2adc6bf1071257d951aaf0b9d (LF) / c7ef26fac63a1cd609f6473e31b34789 (CRLF)
+CREATE OR REPLACE FUNCTION public.get_pos_sale_returnable(p_sale_id TEXT)
+RETURNS JSONB
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_terminal public.pos_terminals%ROWTYPE;
+  v_sale public.sales%ROWTYPE;
+  v_days INTEGER;
+  v_cpf TEXT;
+  v_address_ok BOOLEAN := false;
+BEGIN
+  SELECT * INTO v_terminal FROM public.pos_terminals WHERE device_auth_uid = auth.uid() AND is_active;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Active terminal session required';
+  END IF;
+  SELECT * INTO v_sale FROM public.sales
+  WHERE tenant_id = v_terminal.tenant_id AND unit_id = v_terminal.unit_id AND id = p_sale_id;
+  IF NOT FOUND THEN
+    RETURN NULL;
+  END IF;
+  SELECT exchange_days INTO v_days FROM public.store_configs
+  WHERE tenant_id = v_terminal.tenant_id AND unit_id = v_terminal.unit_id;
+  v_cpf := NULLIF(regexp_replace(COALESCE(v_sale.client_cpf, ''), '\D', '', 'g'), '');
+  IF v_cpf IS NOT NULL THEN
+    SELECT (NULLIF(BTRIM(customer.address), '') IS NOT NULL AND NULLIF(BTRIM(customer.address_number), '') IS NOT NULL
+      AND NULLIF(BTRIM(customer.district), '') IS NOT NULL AND NULLIF(BTRIM(customer.city), '') IS NOT NULL
+      AND NULLIF(BTRIM(customer.state), '') IS NOT NULL AND NULLIF(BTRIM(customer.cep), '') IS NOT NULL)
+    INTO v_address_ok
+    FROM public.customers AS customer
+    WHERE customer.tenant_id = v_terminal.tenant_id AND customer.cpf = v_cpf;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'saleId', v_sale.id,
+    'receiptNumber', v_sale.receipt_number,
+    'timestamp', v_sale."timestamp",
+    'status', v_sale.status,
+    'fiscalStatus', v_sale.fiscal_status,
+    'nfceNumber', v_sale.nfce_number,
+    'clientCpf', v_cpf,
+    'clientName', v_sale.client_name,
+    'customerAddressComplete', COALESCE(v_address_ok, false),
+    'exchangeDays', COALESCE(v_days, 7),
+    'deadline', v_sale."timestamp" + make_interval(days => COALESCE(v_days, 7)),
+    'withinPeriod', NOW() <= v_sale."timestamp" + make_interval(days => COALESCE(v_days, 7)),
+    'items', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'index', entry.idx - 1,
+        'itemType', UPPER(COALESCE(entry.item->>'itemType', 'PRODUCT')),
+        'productId', entry.item->>'productId',
+        'name', entry.item->>'itemName',
+        'sku', entry.item->>'itemSku',
+        'quantity', COALESCE((entry.item->>'quantity')::INTEGER, 0),
+        'unitAmount', ROUND((COALESCE((entry.item->>'lineTotal')::NUMERIC, 0) - COALESCE(NULLIF(entry.item->>'cardSurcharge', '')::NUMERIC, 0)) / NULLIF((entry.item->>'quantity')::NUMERIC, 0), 4),
+        'serials', COALESCE(entry.item->'serials', '[]'::JSONB),
+        'returnedQuantity', COALESCE((
+          SELECT SUM(returned.quantity) FROM public.sale_return_items AS returned
+          WHERE returned.tenant_id = v_sale.tenant_id AND returned.sale_id = v_sale.id AND returned.item_index = entry.idx - 1
+        ), 0),
+        'returnedSerials', COALESCE((
+          SELECT jsonb_agg(serial) FROM public.sale_return_items AS returned,
+            jsonb_array_elements_text(returned.serials) AS serial
+          WHERE returned.tenant_id = v_sale.tenant_id AND returned.sale_id = v_sale.id AND returned.item_index = entry.idx - 1
+        ), '[]'::JSONB)
+      ) ORDER BY entry.idx)
+      FROM jsonb_array_elements(COALESCE(v_sale.items, '[]'::JSONB)) WITH ORDINALITY AS entry(item, idx)
+    ), '[]'::JSONB),
+    'returns', COALESCE((
+      SELECT jsonb_agg(jsonb_build_object(
+        'returnId', sale_return.id, 'returnNumber', sale_return.return_number, 'createdAt', sale_return.created_at,
+        'refundMethod', sale_return.refund_method, 'totalAmount', sale_return.total_amount,
+        'fiscalStatus', sale_return.fiscal_status, 'nfeNumber', sale_return.nfe_number
+      ) ORDER BY sale_return.created_at)
+      FROM public.sale_returns AS sale_return
+      WHERE sale_return.tenant_id = v_sale.tenant_id AND sale_return.sale_id = v_sale.id
+    ), '[]'::JSONB)
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.process_pos_sale_return(
+  p_sale_id TEXT,
+  p_items JSONB,
+  p_reason TEXT,
+  p_refund_method TEXT,
+  p_customer_cpf TEXT DEFAULT NULL,
+  p_admin_password TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_terminal public.pos_terminals%ROWTYPE;
+  v_cash public.cash_register_sessions%ROWTYPE;
+  v_sale public.sales%ROWTYPE;
+  v_days INTEGER;
+  v_out_of_period BOOLEAN;
+  v_method TEXT := UPPER(COALESCE(p_refund_method, ''));
+  v_needs_password BOOLEAN;
+  v_password_check JSONB;
+  v_cpf TEXT;
+  v_customer public.customers%ROWTYPE;
+  v_return_id UUID := gen_random_uuid();
+  v_return_number INTEGER;
+  v_total NUMERIC(12, 2) := 0;
+  v_credit_id UUID;
+  v_entry JSONB;
+  v_item JSONB;
+  v_index INTEGER;
+  v_quantity INTEGER;
+  v_destination TEXT;
+  v_serials JSONB;
+  v_sold_serials JSONB;
+  v_already INTEGER;
+  v_product_id TEXT;
+  v_is_serialized BOOLEAN;
+  v_unit_amount NUMERIC;
+  v_line_amount NUMERIC(12, 2);
+  v_unit_cost NUMERIC;
+  v_updated INTEGER;
+  v_inv public.inventory%ROWTYPE;
+  v_current_qty INTEGER;
+  v_serial TEXT;
+BEGIN
+  SELECT * INTO v_terminal FROM public.pos_terminals WHERE device_auth_uid = auth.uid() AND is_active;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Active terminal session required';
+  END IF;
+  SELECT * INTO v_cash FROM public.cash_register_sessions
+  WHERE terminal_id = v_terminal.id AND status = 'ABERTO'
+  ORDER BY opened_at DESC LIMIT 1;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Abra o caixa para registrar a devolução';
+  END IF;
+  IF v_method NOT IN ('TROCA', 'VALE', 'DINHEIRO', 'PIX', 'CREDITO', 'DEBITO') THEN
+    RAISE EXCEPTION 'Forma de devolução inválida';
+  END IF;
+  IF NULLIF(BTRIM(COALESCE(p_reason, '')), '') IS NULL THEN
+    RAISE EXCEPTION 'Informe o motivo da troca/devolução';
+  END IF;
+  IF p_items IS NULL OR jsonb_typeof(p_items) <> 'array' OR jsonb_array_length(p_items) = 0 THEN
+    RAISE EXCEPTION 'Selecione os itens devolvidos';
+  END IF;
+
+  -- Troca so na loja da venda.
+  SELECT * INTO v_sale FROM public.sales
+  WHERE tenant_id = v_terminal.tenant_id AND unit_id = v_terminal.unit_id AND id = p_sale_id
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Venda não encontrada nesta loja';
+  END IF;
+  IF v_sale.status <> 'CONCLUIDA' THEN
+    RAISE EXCEPTION 'Só vendas concluídas podem ter troca/devolução';
+  END IF;
+
+  SELECT exchange_days INTO v_days FROM public.store_configs
+  WHERE tenant_id = v_terminal.tenant_id AND unit_id = v_terminal.unit_id;
+  v_out_of_period := NOW() > v_sale."timestamp" + make_interval(days => COALESCE(v_days, 7));
+
+  -- Cliente: obrigatorio no vale/troca e quando a venda teve NFC-e (a NF-e de devolucao
+  -- precisa do CPF e do endereco completo do consumidor).
+  v_cpf := NULLIF(regexp_replace(COALESCE(p_customer_cpf, v_sale.client_cpf, ''), '\D', '', 'g'), '');
+  IF v_cpf IS NOT NULL THEN
+    SELECT * INTO v_customer FROM public.customers WHERE tenant_id = v_terminal.tenant_id AND cpf = v_cpf;
+  END IF;
+  IF (v_method IN ('TROCA', 'VALE') OR v_sale.fiscal_status = 'AUTORIZADA')
+     AND (v_cpf IS NULL OR NOT public.is_valid_cpf(v_cpf)) THEN
+    RETURN jsonb_build_object('status', 'CUSTOMER_REQUIRED');
+  END IF;
+  IF v_sale.fiscal_status = 'AUTORIZADA' AND (
+    v_customer.id IS NULL OR NULLIF(BTRIM(v_customer.address), '') IS NULL OR NULLIF(BTRIM(v_customer.address_number), '') IS NULL
+    OR NULLIF(BTRIM(v_customer.district), '') IS NULL OR NULLIF(BTRIM(v_customer.city), '') IS NULL
+    OR NULLIF(BTRIM(v_customer.state), '') IS NULL OR NULLIF(BTRIM(v_customer.cep), '') IS NULL
+  ) THEN
+    RETURN jsonb_build_object('status', 'CUSTOMER_ADDRESS_REQUIRED');
+  END IF;
+
+  -- Senha: dinheiro saindo (dinheiro, PIX, cartao) ou fora do prazo.
+  v_needs_password := v_method IN ('DINHEIRO', 'PIX', 'CREDITO', 'DEBITO') OR v_out_of_period;
+  IF v_needs_password THEN
+    IF p_admin_password IS NULL OR p_admin_password = '' THEN
+      RETURN jsonb_build_object('status', 'PASSWORD_REQUIRED', 'outOfPeriod', v_out_of_period);
+    END IF;
+    v_password_check := public.check_pos_admin_password(v_terminal.id, p_admin_password, 'SALE_RETURN');
+    IF v_password_check->>'status' = 'LOCKED' THEN
+      RETURN jsonb_build_object('status', 'LOCKED', 'lockedUntil', v_password_check->'lockedUntil');
+    ELSIF v_password_check->>'status' <> 'OK' THEN
+      RETURN jsonb_build_object('status', 'INVALID_PASSWORD', 'remainingAttempts', v_password_check->'remainingAttempts');
+    END IF;
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtext('sale_return:' || v_terminal.tenant_id::TEXT || ':' || v_terminal.unit_id));
+  SELECT COALESCE(MAX(return_number), 0) + 1 INTO v_return_number
+  FROM public.sale_returns WHERE tenant_id = v_terminal.tenant_id AND unit_id = v_terminal.unit_id;
+
+  INSERT INTO public.sale_returns (
+    id, tenant_id, unit_id, terminal_id, cash_session_id, sale_id, return_number, reason, refund_method,
+    total_amount, customer_cpf, customer_name, out_of_period, password_approved, operator_name, fiscal_status
+  ) VALUES (
+    v_return_id, v_terminal.tenant_id, v_terminal.unit_id, v_terminal.id, v_cash.id, v_sale.id, v_return_number,
+    BTRIM(p_reason), v_method, 0.01, v_cpf, COALESCE(v_customer.name, v_sale.client_name), v_out_of_period,
+    v_needs_password, v_terminal.display_name,
+    CASE WHEN v_sale.fiscal_status = 'AUTORIZADA' THEN 'PENDENTE' ELSE NULL END
+  );
+
+  FOR v_entry IN SELECT value FROM jsonb_array_elements(p_items) LOOP
+    v_index := (v_entry->>'index')::INTEGER;
+    v_quantity := (v_entry->>'quantity')::INTEGER;
+    v_destination := UPPER(COALESCE(v_entry->>'destination', 'ESTOQUE'));
+    v_serials := COALESCE(v_entry->'serials', '[]'::JSONB);
+    IF v_destination NOT IN ('ESTOQUE', 'AVARIADO') THEN
+      RAISE EXCEPTION 'Destino inválido para o item devolvido';
+    END IF;
+    IF v_index IS NULL OR v_index < 0 OR v_index >= jsonb_array_length(COALESCE(v_sale.items, '[]'::JSONB)) THEN
+      RAISE EXCEPTION 'Item inválido na devolução';
+    END IF;
+    IF v_quantity IS NULL OR v_quantity <= 0 THEN
+      RAISE EXCEPTION 'Quantidade inválida na devolução';
+    END IF;
+    v_item := v_sale.items -> v_index;
+    IF UPPER(COALESCE(v_item->>'itemType', 'PRODUCT')) <> 'PRODUCT' THEN
+      RAISE EXCEPTION 'Serviços não podem ser devolvidos';
+    END IF;
+    v_product_id := v_item->>'productId';
+    SELECT COALESCE(SUM(quantity), 0) INTO v_already FROM public.sale_return_items
+    WHERE tenant_id = v_sale.tenant_id AND sale_id = v_sale.id AND item_index = v_index;
+    IF v_already + v_quantity > COALESCE((v_item->>'quantity')::INTEGER, 0) THEN
+      RAISE EXCEPTION 'Quantidade devolvida maior que a vendida (%)', v_item->>'itemName';
+    END IF;
+
+    SELECT COALESCE(product.is_serialized, false) INTO v_is_serialized
+    FROM public.products AS product WHERE product.tenant_id = v_sale.tenant_id AND product.id = v_product_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'Produto % não encontrado', v_product_id;
+    END IF;
+
+    -- Juros do cartao repassados (20261111) nao voltam ao cliente: devolve o preco sem juros.
+    v_unit_amount := (COALESCE((v_item->>'lineTotal')::NUMERIC, 0) - COALESCE(NULLIF(v_item->>'cardSurcharge', '')::NUMERIC, 0)) / NULLIF((v_item->>'quantity')::NUMERIC, 0);
+    v_line_amount := ROUND(v_unit_amount * v_quantity, 2);
+    -- Custo congelado na venda (o mesmo do estorno); venda antiga sem custo usa a media atual.
+    v_unit_cost := COALESCE(
+      NULLIF(v_item->>'costTotal', '')::NUMERIC / NULLIF((v_item->>'quantity')::NUMERIC, 0),
+      public.get_store_avg_cost(v_sale.tenant_id, v_product_id, v_sale.unit_id)
+    );
+
+    IF v_is_serialized THEN
+      IF jsonb_typeof(v_serials) <> 'array' OR jsonb_array_length(v_serials) <> v_quantity THEN
+        RAISE EXCEPTION 'Informe o serial de cada unidade devolvida (%)', v_item->>'itemName';
+      END IF;
+      v_sold_serials := COALESCE(v_item->'serials', '[]'::JSONB);
+      FOR v_serial IN SELECT value FROM jsonb_array_elements_text(v_serials) LOOP
+        IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements_text(v_sold_serials) AS sold WHERE LOWER(sold) = LOWER(v_serial)) THEN
+          RAISE EXCEPTION 'Serial % não pertence a esta venda', v_serial;
+        END IF;
+      END LOOP;
+      UPDATE public.product_serial_units
+      SET status = CASE WHEN v_destination = 'AVARIADO' THEN 'AVARIADO' ELSE 'DISPONIVEL' END,
+          sale_id = NULL, updated_at = NOW()
+      WHERE tenant_id = v_sale.tenant_id AND product_id = v_product_id AND sale_id = v_sale.id
+        AND status = 'VENDIDO'
+        AND LOWER(serial_number) IN (SELECT LOWER(value) FROM jsonb_array_elements_text(v_serials));
+      GET DIAGNOSTICS v_updated = ROW_COUNT;
+      IF v_updated <> v_quantity THEN
+        RAISE EXCEPTION 'Uma ou mais unidades já foram devolvidas (%)', v_item->>'itemName';
+      END IF;
+    ELSIF v_destination = 'ESTOQUE' THEN
+      SELECT * INTO v_inv FROM public.inventory
+      WHERE tenant_id = v_sale.tenant_id AND product_id = v_product_id FOR UPDATE;
+      IF NOT FOUND THEN
+        INSERT INTO public.inventory (tenant_id, product_id, quantities, updated_at)
+        VALUES (v_sale.tenant_id, v_product_id, '{}'::JSONB, NOW());
+        SELECT * INTO v_inv FROM public.inventory
+        WHERE tenant_id = v_sale.tenant_id AND product_id = v_product_id FOR UPDATE;
+      END IF;
+      v_inv.quantities := public.inventory_with_unit(v_inv.quantities, v_sale.unit_id);
+      v_current_qty := COALESCE((v_inv.quantities -> v_sale.unit_id ->> 'qty')::INTEGER, 0);
+      PERFORM public.apply_store_cost_entry(v_sale.tenant_id, v_product_id, v_sale.unit_id, v_current_qty, v_quantity, v_unit_cost);
+      UPDATE public.inventory
+      SET quantities = jsonb_set(v_inv.quantities, ARRAY[v_sale.unit_id, 'qty'], to_jsonb(v_current_qty + v_quantity), true),
+          updated_at = NOW()
+      WHERE tenant_id = v_sale.tenant_id AND product_id = v_product_id;
+    ELSE
+      INSERT INTO public.product_damaged_stock (tenant_id, unit_id, product_id, quantity)
+      VALUES (v_sale.tenant_id, v_sale.unit_id, v_product_id, v_quantity)
+      ON CONFLICT (tenant_id, unit_id, product_id)
+      DO UPDATE SET quantity = public.product_damaged_stock.quantity + EXCLUDED.quantity, updated_at = NOW();
+    END IF;
+
+    INSERT INTO public.movements (
+      id, tenant_id, product_id, variation_id, from_unit_id, to_unit_id, type, quantity,
+      serials, card_condition, operator_id, operator_name, timestamp, reason, unit_cost
+    ) VALUES (
+      gen_random_uuid()::TEXT, v_sale.tenant_id, v_product_id, NULL, 'CLIENTE',
+      CASE WHEN v_destination = 'AVARIADO' THEN 'AVARIADOS' ELSE v_sale.unit_id END,
+      'ENTRADA', v_quantity, CASE WHEN jsonb_array_length(v_serials) > 0 THEN v_serials ELSE NULL END, NULL,
+      v_terminal.id::TEXT, v_terminal.display_name, NOW(),
+      'Devolução nº ' || v_return_number || ' da venda (cupom ' || COALESCE(v_sale.receipt_number::TEXT, v_sale.id) || ')'
+        || CASE WHEN v_destination = 'AVARIADO' THEN ' - avariado' ELSE '' END,
+      ROUND(v_unit_cost, 4)
+    );
+
+    INSERT INTO public.sale_return_items (
+      tenant_id, return_id, sale_id, item_index, product_id, item_name, item_sku, quantity, serials,
+      unit_amount, line_amount, unit_cost, destination
+    ) VALUES (
+      v_sale.tenant_id, v_return_id, v_sale.id, v_index, v_product_id, COALESCE(v_item->>'itemName', ''),
+      v_item->>'itemSku', v_quantity, v_serials, ROUND(v_unit_amount, 4), v_line_amount, ROUND(v_unit_cost, 4), v_destination
+    );
+    v_total := v_total + v_line_amount;
+  END LOOP;
+
+  IF v_total <= 0 THEN
+    RAISE EXCEPTION 'Valor da devolução inválido';
+  END IF;
+  UPDATE public.sale_returns SET total_amount = v_total WHERE id = v_return_id;
+
+  IF v_method IN ('TROCA', 'VALE') THEN
+    INSERT INTO public.customer_credits (tenant_id, unit_id, customer_cpf, amount, balance, origin_return_id)
+    VALUES (v_terminal.tenant_id, v_terminal.unit_id, v_cpf, v_total, v_total, v_return_id)
+    RETURNING id INTO v_credit_id;
+    INSERT INTO public.customer_credit_movements (tenant_id, credit_id, kind, amount, return_id)
+    VALUES (v_terminal.tenant_id, v_credit_id, 'EMISSAO', v_total, v_return_id);
+    UPDATE public.sale_returns SET customer_credit_id = v_credit_id WHERE id = v_return_id;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'status', 'OK', 'returnId', v_return_id, 'returnNumber', v_return_number,
+    'totalAmount', v_total, 'creditId', v_credit_id, 'outOfPeriod', v_out_of_period,
+    'needsFiscalNote', v_sale.fiscal_status = 'AUTORIZADA'
+  );
 END;
 $$;
