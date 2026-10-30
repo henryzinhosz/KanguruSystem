@@ -73,18 +73,8 @@ interface EstoqueViewProps {
     initialQty?: number,
     initialSerials?: string[]
   ) => Promise<Product>;
-  editProduct: (product: Product) => void;
+  editProduct: (product: Product) => Promise<void>;
   saveProduct: (product: Product) => Promise<void>;
-  registerMovement: (
-    productId: string,
-    fromUnitId: string,
-    toUnitId: string,
-    type: 'TRANSFERENCIA' | 'ENTRADA' | 'PERDA',
-    qty: number,
-    serials?: string[],
-    cardCondition?: CardCondition,
-    reason?: string
-  ) => void;
   registerSerializedStockEntry: (
     productId: string,
     unitId: string,
@@ -122,7 +112,6 @@ export default function EstoqueView({
   addProduct,
   editProduct,
   saveProduct,
-  registerMovement,
   registerSerializedStockEntry,
   registerTransfer,
   registerStockEntry,
@@ -587,6 +576,13 @@ export default function EstoqueView({
     }
   };
 
+  // Edicao direto na lista: erro do banco aparece acima dos produtos.
+  const [inlineError, setInlineError] = useState('');
+  const saveInline = (product: Product) => {
+    setInlineError('');
+    editProduct(product).catch(error => setInlineError(`Não foi possível salvar ${product.name}: ${error instanceof Error ? error.message : (error as { message?: string })?.message || 'erro no banco'}`));
+  };
+
   const saveMinStock = (product: Product) => {
     const draft = minStockDrafts[product.id];
     if (draft === undefined) return;
@@ -602,7 +598,7 @@ export default function EstoqueView({
       return;
     }
     if (value !== (product.minStock ?? null)) {
-      editProduct({ ...product, minStock: value });
+      saveInline({ ...product, minStock: value });
     }
     clearDraft();
   };
@@ -618,7 +614,7 @@ export default function EstoqueView({
     });
     if (value !== null && (value < 0 || value > 100)) return;
     if (value !== (product.maxDiscountPercent ?? null)) {
-      editProduct({ ...product, maxDiscountPercent: value });
+      saveInline({ ...product, maxDiscountPercent: value });
     }
   };
 
@@ -799,6 +795,7 @@ export default function EstoqueView({
             </div>
           </div>
 
+          {inlineError && <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{inlineError}</p>}
           {/* Grid Catalog Display */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {filteredProducts.map(p => {

@@ -338,7 +338,7 @@ export function useErpStore() {
     setProducts(prev => prev.map(p => p.id === saved.id ? saved : p));
   };
 
-  const editProduct = (updatedProduct: Product) => {
+  const editProduct = async (updatedProduct: Product) => {
     const sanitizedProduct: Product = {
       ...updatedProduct,
       sku: updatedProduct.sku.trim(),
@@ -347,10 +347,8 @@ export function useErpStore() {
       ncm: updatedProduct.ncm.trim()
     };
 
+    if (useSupabase) await supabaseService.upsertProduct(sanitizedProduct);
     setProducts(prev => prev.map(p => p.id === sanitizedProduct.id ? sanitizedProduct : p));
-    if (useSupabase) {
-      supabaseService.upsertProduct(sanitizedProduct).catch(err => console.error('Erro ao editar produto no Supabase:', err));
-    }
   };
 
   const saveService = async (service: Service) => {
@@ -370,117 +368,6 @@ export function useErpStore() {
   const deleteService = async (id: string) => {
     await supabaseService.deleteService(id);
     setServices(previous => previous.filter(service => service.id !== id));
-  };
-
-  // Log raw movement & update quantity atomically
-  const registerMovement = (
-    productId: string,
-    fromUnitId: string | 'FORNECEDOR',
-    toUnitId: string | 'CLIENTE' | 'PERDA',
-    type: MovementType,
-    quantity: number,
-    serials: string[] = [],
-    cardCondition?: CardCondition,
-    reason: string = '',
-    syncToSupabase: boolean = true
-  ) => {
-    const createEmptyInventory = (): StockInventory => ({
-      productId,
-      quantities: Object.fromEntries(
-        storeConfigs.map(store => [store.unitId, { unitId: store.unitId, qty: 0, serials: [], cardConditions: {} }])
-      )
-    });
-
-    // Generate movement log
-    const moveLog: StockMovement = {
-      id: 'm_' + Math.random().toString(36).substring(2, 9),
-      productId,
-      fromUnitId,
-      toUnitId,
-      type,
-      quantity,
-      serials,
-      cardCondition,
-      operatorId: currentUser.id,
-      operatorName: currentUser.name,
-      timestamp: new Date().toISOString(),
-      reason
-    };
-
-    setMovements(prev => [moveLog, ...prev]);
-    if (useSupabase && syncToSupabase) {
-      supabaseService.processInventoryMovement(moveLog).catch(err => console.error('Erro ao salvar movimentação no Supabase:', err));
-    }
-
-    // Update quantities atomically inside the stock state
-    setInventory(prevInv => {
-      const existing = prevInv.find(inv => inv.productId === productId);
-      const baseInventory = existing || createEmptyInventory();
-      const updatedQuantities = { ...baseInventory.quantities };
-
-      if (!existing && fromUnitId === 'FORNECEDOR' && toUnitId !== 'CLIENTE' && toUnitId !== 'PERDA') {
-        updatedQuantities[toUnitId] = {
-          unitId: toUnitId,
-          qty: 0,
-          serials: [],
-          cardConditions: {}
-        };
-      }
-
-      // Subtract from source if it is a real warehouse/store unit
-      if (fromUnitId !== 'FORNECEDOR') {
-        const srcUnit = updatedQuantities[fromUnitId] || { unitId: fromUnitId, qty: 0, serials: [], cardConditions: {} };
-        const newQty = Math.max(0, srcUnit.qty - quantity);
-        let newSerials = [...(srcUnit.serials || [])];
-        if (serials.length > 0) {
-          newSerials = newSerials.filter(s => !serials.includes(s));
-        }
-
-        const newConditions = { ...(srcUnit.cardConditions || {}) };
-        if (cardCondition && newConditions[cardCondition] !== undefined) {
-          newConditions[cardCondition] = Math.max(0, (newConditions[cardCondition] || 0) - quantity);
-        }
-
-        updatedQuantities[fromUnitId] = {
-          ...srcUnit,
-          qty: newQty,
-          serials: newSerials,
-          cardConditions: newConditions
-        };
-      }
-
-      // Add to target if it is a real warehouse/store unit
-      if (toUnitId !== 'CLIENTE' && toUnitId !== 'PERDA') {
-        const destUnit = updatedQuantities[toUnitId] || { unitId: toUnitId, qty: 0, serials: [], cardConditions: {} };
-        const newQty = destUnit.qty + quantity;
-        const newSerials = [...(destUnit.serials || []), ...serials];
-
-        const newConditions = { ...(destUnit.cardConditions || {}) };
-        if (cardCondition) {
-          newConditions[cardCondition] = (newConditions[cardCondition] || 0) + quantity;
-        }
-
-        updatedQuantities[toUnitId] = {
-          ...destUnit,
-          qty: newQty,
-          serials: newSerials,
-          cardConditions: newConditions
-        };
-      }
-
-      const updatedRecord = {
-        ...baseInventory,
-        quantities: updatedQuantities
-      };
-
-      if (useSupabase) {
-        supabaseService.upsertInventory(updatedRecord).catch(err => console.error('Erro ao atualizar estoque no Supabase:', err));
-      }
-
-      return existing
-        ? prevInv.map(inv => inv.productId === productId ? updatedRecord : inv)
-        : [...prevInv, updatedRecord];
-    });
   };
 
   const registerStockEntry = async (
@@ -513,10 +400,6 @@ export function useErpStore() {
     cardCondition: CardCondition | undefined,
     reason: string
   ) => {
-    if (!useSupabase) {
-      registerMovement(productId, fromUnitId, toUnitId, 'TRANSFERENCIA', quantity, serials, cardCondition, reason, false);
-      return;
-    }
     await supabaseService.processInventoryMovement({
       id: 'm_' + Math.random().toString(36).substring(2, 9),
       productId,
@@ -534,141 +417,29 @@ export function useErpStore() {
     await loadAllFromSupabase();
   };
 
-  // Register a point-of-sale Venda
-  const registerSale = (
-    unitId: string,
-    items: { productId: string; variationId?: string; quantity: number; unitPrice: number; serials?: string[]; cardCondition?: CardCondition }[],
-    paymentMethod: PaymentMethod,
-    clientCpf?: string,
-    clientName?: string,
-    customAmount?: number,
-    customDate?: string
-  ) => {
-    const grossAmount = customAmount !== undefined ? customAmount : items.reduce((acc, item) => acc + (item.unitPrice * item.quantity), 0);
-    
-    // Get store configs to calculate fees
-    const config = storeConfigs.find(c => c.unitId === unitId) || {
-      unitId,
-      fixedCost: 10000,
-      maxItemDiscountPercent: 0,
-      paymentFees: { DINHEIRO: 0.0, PIX: 0.005, CREDITO: 0.035, DEBITO: 0.015 }
-    };
-
-    const feeRate = config.paymentFees[paymentMethod];
-    const feeAmount = grossAmount * feeRate;
-    const netAmount = grossAmount - feeAmount;
-
-    const saleId = 's_' + Math.random().toString(36).substring(2, 9);
-    const invoiceNumber = 'VD-' + (1000 + sales.length + 1);
-
-    const isHighValue = grossAmount > 2000; // Trigger demo pending approval status for high value (optional, wait, prompt requested: "Toda venda cancelada ou estornada acima de um valor configurável (ex: R$300) deve exigir aprovação de um Administrador")
-    // Wait, let's keep sales completed immediately, but allow cancellation with Admin approval if > R$300!
-    
-    const newSale: Sale = {
-      id: saleId,
-      invoiceNumber,
-      unitId,
-      items,
-      paymentMethod,
-      grossAmount,
-      feeAmount,
-      netAmount,
-      operatorId: currentUser.id,
-      operatorName: currentUser.name,
-      clientCpf,
-      clientName,
-      timestamp: customDate ? new Date(customDate).toISOString() : new Date().toISOString(),
-      status: 'CONCLUIDA',
-      requiresApproval: false
-    };
-
-    // Commit changes to state
-    setSales(prev => [newSale, ...prev]);
-    if (useSupabase) {
-      // Recarrega as vendas depois de gravar: o servidor congela o custo de cada item.
-      supabaseService.processSaleTransaction(newSale)
-        .then(() => supabaseService.getSales())
-        .then(setSales)
-        .catch(err => console.error('Erro ao salvar venda no Supabase:', err));
-    }
-
-    // Update local inventory/movement state only
-    items.forEach(item => {
-      registerMovement(
-        item.productId,
-        unitId,
-        'CLIENTE',
-        'SAIDA',
-        item.quantity,
-        item.serials || [],
-        item.cardCondition,
-        `Venda ${invoiceNumber}`,
-        false
-      );
-    });
-
-    return newSale;
-  };
-
   // Cancel / Return a Sale
-  const cancelSale = (saleId: string, approvedByAdminName?: string) => {
+  const cancelSale = async (saleId: string, approvedByAdminName?: string): Promise<'PENDENTE_APROVACAO' | 'CANCELADA' | undefined> => {
     const sale = sales.find(s => s.id === saleId);
-    if (!sale) return;
+    if (!sale) return undefined;
 
     const needsAdminApproval = sale.grossAmount > 300;
 
     if (needsAdminApproval && currentUser.role !== UserRole.ADMIN && !approvedByAdminName) {
-      // Mark as pending cancellation approval
-      setSales(prev => prev.map(s => {
-        if (s.id === saleId) {
-          const updated = { ...s, status: 'PENDENTE_APROVACAO' as const };
-          if (useSupabase) {
-            supabaseService.updateSaleStatus(saleId, 'PENDENTE_APROVACAO').catch(err => console.error('Erro ao atualizar venda no Supabase:', err));
-          }
-          return updated;
-        }
-        return s;
-      }));
+      // Pedido de estorno: aguarda a aprovacao de um administrador.
+      if (useSupabase) await supabaseService.updateSaleStatus(saleId, 'PENDENTE_APROVACAO');
+      setSales(prev => prev.map(s => (s.id === saleId ? { ...s, status: 'PENDENTE_APROVACAO' as const } : s)));
       return 'PENDENTE_APROVACAO';
     }
 
-    // Process actual cancellation: return items to store inventory!
-    setSales(prev => prev.map(s => {
-      if (s.id === saleId) {
-        return {
-          ...s,
-          status: 'CANCELADA' as const,
-          approvedBy: approvedByAdminName || currentUser.name
-        };
-      }
-      return s;
-    }));
-
     if (useSupabase) {
-      supabaseService.processSaleCancellation(saleId, approvedByAdminName || currentUser.name)
-        .catch(err => console.error('Erro ao cancelar venda no Supabase:', err));
+      await supabaseService.processSaleCancellation(saleId, approvedByAdminName || currentUser.name);
+      await loadAllFromSupabase();
     }
-
-    sale.items.forEach(item => {
-      if (item.itemType === 'SERVICE' || !item.productId) return;
-      registerMovement(
-        item.productId,
-        'CLIENTE',
-        sale.unitId,
-        'ENTRADA',
-        item.quantity,
-        item.serials || [],
-        item.cardCondition,
-        `Cancelamento da Venda ${sale.invoiceNumber}`,
-        false
-      );
-    });
-
     return 'CANCELADA';
   };
 
   // Register Expenses
-  const addExpense = (expense: Omit<Expense, 'id' | 'operatorId' | 'operatorName' | 'timestamp'>) => {
+  const addExpense = async (expense: Omit<Expense, 'id' | 'operatorId' | 'operatorName' | 'timestamp'>) => {
     const newExpense: Expense = {
       ...expense,
       id: 'e_' + Math.random().toString(36).substring(2, 9),
@@ -676,27 +447,8 @@ export function useErpStore() {
       operatorName: currentUser.name,
       timestamp: new Date().toISOString()
     };
+    if (useSupabase) await supabaseService.upsertExpense(newExpense);
     setExpenses(prev => [newExpense, ...prev]);
-    if (useSupabase) {
-      supabaseService.upsertExpense(newExpense).catch(err => console.error('Erro ao salvar despesa no Supabase:', err));
-    }
-  };
-
-  // Register Trade-in evaluation
-  const registerTradeIn = (trade: Omit<TradeIn, 'id' | 'operatorId' | 'operatorName' | 'timestamp' | 'status'>) => {
-    const newTrade: TradeIn = {
-      ...trade,
-      id: 't_' + Math.random().toString(36).substring(2, 9),
-      operatorId: currentUser.id,
-      operatorName: currentUser.name,
-      timestamp: new Date().toISOString(),
-      status: 'AVALIADO'
-    };
-    setTradeIns(prev => [newTrade, ...prev]);
-    if (useSupabase) {
-      supabaseService.upsertTradeIn(newTrade).catch(err => console.error('Erro ao salvar troca no Supabase:', err));
-    }
-    return newTrade;
   };
 
   // Troca Gamer: cadastra o videogame usado e da entrada da unidade com o serial real.
@@ -748,17 +500,12 @@ export function useErpStore() {
     setTradeIns(prev => prev.map(t => t.id === tradeId ? approved : t));
   };
 
-  const cancelTradeIn = (tradeId: string) => {
-    setTradeIns(prev => prev.map(t => {
-      if (t.id === tradeId) {
-        const updated = { ...t, status: 'CANCELADO' as const };
-        if (useSupabase) {
-          supabaseService.upsertTradeIn(updated).catch(err => console.error('Erro ao cancelar troca no Supabase:', err));
-        }
-        return updated;
-      }
-      return t;
-    }));
+  const cancelTradeIn = async (tradeId: string) => {
+    const trade = tradeIns.find(t => t.id === tradeId);
+    if (!trade) return;
+    const updated = { ...trade, status: 'CANCELADO' as const };
+    if (useSupabase) await supabaseService.upsertTradeIn(updated);
+    setTradeIns(prev => prev.map(t => (t.id === tradeId ? updated : t)));
   };
 
   // Ordens de servico: abertas, cobradas e entregues no PDV; o ERP acompanha e muda a situacao.
@@ -868,32 +615,26 @@ export function useErpStore() {
     return importedCount;
   };
 
-  const addSupplier = (supplier: Omit<Supplier, 'id' | 'historyCount'>) => {
+  const addSupplier = async (supplier: Omit<Supplier, 'id' | 'historyCount'>) => {
     const newId = 's_' + Math.random().toString(36).substring(2, 9);
     const newSupplier: Supplier = { 
       ...supplier, 
       id: newId, 
       historyCount: 0 
     };
+    if (useSupabase) await supabaseService.upsertSupplier(newSupplier);
     setSuppliers(prev => [newSupplier, ...prev]);
-    if (useSupabase) {
-      supabaseService.upsertSupplier(newSupplier).catch(err => console.error('Erro ao criar fornecedor no Supabase:', err));
-    }
     return newSupplier;
   };
 
-  const editSupplier = (updatedSupplier: Supplier) => {
+  const editSupplier = async (updatedSupplier: Supplier) => {
+    if (useSupabase) await supabaseService.upsertSupplier(updatedSupplier);
     setSuppliers(prev => prev.map(s => s.id === updatedSupplier.id ? updatedSupplier : s));
-    if (useSupabase) {
-      supabaseService.upsertSupplier(updatedSupplier).catch(err => console.error('Erro ao editar fornecedor no Supabase:', err));
-    }
   };
 
-  const deleteSupplier = (id: string) => {
+  const deleteSupplier = async (id: string) => {
+    if (useSupabase) await supabaseService.deleteSupplier(id);
     setSuppliers(prev => prev.filter(s => s.id !== id));
-    if (useSupabase) {
-      supabaseService.deleteSupplier(id).catch(err => console.error('Erro ao deletar fornecedor no Supabase:', err));
-    }
   };
 
   return {
@@ -926,14 +667,11 @@ export function useErpStore() {
     saveProduct,
     saveService,
     deleteService,
-    registerMovement,
     registerStockEntry,
     registerSerializedStockEntry,
     registerTransfer,
-    registerSale,
     cancelSale,
     addExpense,
-    registerTradeIn,
     approveTradeIn,
     cancelTradeIn,
     updateWorkOrderStatus,

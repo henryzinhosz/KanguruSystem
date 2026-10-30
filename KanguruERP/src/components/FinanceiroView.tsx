@@ -96,9 +96,9 @@ interface FinanceiroViewProps {
   sales: Sale[];
   products: Product[];
   inventory: StockInventory[];
-  addExpense: (expense: Omit<Expense, 'id' | 'operatorId' | 'operatorName' | 'timestamp'>) => void;
+  addExpense: (expense: Omit<Expense, 'id' | 'operatorId' | 'operatorName' | 'timestamp'>) => Promise<void>;
   updateStoreConfig: (unitId: string, updated: Partial<StoreConfig>) => void;
-  cancelSale: (saleId: string, approvedByAdminName?: string) => string | undefined;
+  cancelSale: (saleId: string, approvedByAdminName?: string) => Promise<'PENDENTE_APROVACAO' | 'CANCELADA' | undefined>;
 }
 
 export default function FinanceiroView({
@@ -211,7 +211,14 @@ export default function FinanceiroView({
     }
     const goesToApproval = sale.grossAmount > 300 && !isAdmin;
     if (!goesToApproval && !(await cancelNfceBeforeRefund(sale))) return;
-    const res = cancelSale(saleId);
+    let res: Awaited<ReturnType<typeof cancelSale>>;
+    try {
+      res = await cancelSale(saleId);
+    } catch (error) {
+      setSaleError(`Não foi possível estornar a venda: ${error instanceof Error ? error.message : (error as { message?: string })?.message || 'erro no banco'}`);
+      return;
+    }
+    if (!res) return;
     if (res === 'PENDENTE_APROVACAO') {
       setSaleSuccess(sale.fiscalStatus === 'AUTORIZADA'
         ? 'O estorno foi encaminhado para aprovação do administrador. Atenção: a NFC-e só pode ser cancelada até 30 minutos depois da venda.'
@@ -231,7 +238,12 @@ export default function FinanceiroView({
       return;
     }
     if (!(await cancelNfceBeforeRefund(sale))) return;
-    cancelSale(saleId, currentUser.name);
+    try {
+      await cancelSale(saleId, currentUser.name);
+    } catch (error) {
+      setSaleError(`Não foi possível estornar a venda: ${error instanceof Error ? error.message : (error as { message?: string })?.message || 'erro no banco'}`);
+      return;
+    }
     setSaleSuccess('Estorno aprovado com sucesso.');
   };
 
@@ -282,7 +294,7 @@ export default function FinanceiroView({
   };
 
   // Submit Expense
-  const handleExpenseSubmit = (e: React.FormEvent) => {
+  const handleExpenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setExpenseError('');
     setExpenseSuccess('');
@@ -292,12 +304,17 @@ export default function FinanceiroView({
       return;
     }
 
-    addExpense({
-      description: expenseDesc,
-      category: expenseCat,
-      amount: expenseAmount,
-      unitId: expenseStore
-    });
+    try {
+      await addExpense({
+        description: expenseDesc,
+        category: expenseCat,
+        amount: expenseAmount,
+        unitId: expenseStore
+      });
+    } catch (error) {
+      setExpenseError(`Não foi possível salvar a despesa: ${error instanceof Error ? error.message : (error as { message?: string })?.message || 'erro no banco'}`);
+      return;
+    }
 
     setExpenseDesc('');
     setExpenseAmount(0);

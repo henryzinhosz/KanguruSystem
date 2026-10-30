@@ -29,7 +29,7 @@ interface VendasViewProps {
   tradeIns: TradeIn[];
   storeConfigs: StoreConfig[];
   approveTradeIn: (tradeId: string, details: TradeInApproval) => Promise<void>;
-  cancelTradeIn: (tradeId: string) => void;
+  cancelTradeIn: (tradeId: string) => Promise<void>;
 }
 
 export default function VendasView({
@@ -65,6 +65,7 @@ export default function VendasView({
   const [approveIcmsReduction, setApproveIcmsReduction] = useState<number | null>(TRADE_FISCAL_DEFAULTS.icmsReduction);
   const [approveTaxBurden, setApproveTaxBurden] = useState<number | null>(TRADE_FISCAL_DEFAULTS.taxBurden);
   const [approveError, setApproveError] = useState('');
+  const [listError, setListError] = useState('');
   const [approveSaving, setApproveSaving] = useState(false);
 
   // Open Approval details
@@ -180,6 +181,7 @@ export default function VendasView({
             <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Trocas registradas</h3>
             <p className="text-xs text-slate-400">"Aguardando" = já paga ao cliente no PDV, falta conferir e estocar.</p>
           </div>
+          {listError && <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-[11px] font-medium">{listError}</div>}
 
           <div className="overflow-x-auto">
             <table className="w-full text-xs text-left text-slate-500">
@@ -250,7 +252,9 @@ export default function VendasView({
                             id={`btn-cancel-trade-${trade.id}`}
                             onClick={() => {
                               const paid = trade.paymentMethod ? ' O valor já foi pago ao cliente no PDV; dispensar só tira a troca da lista e NÃO devolve o dinheiro nem cancela o vale.' : '';
-                              if (window.confirm(`Dispensar esta troca?${paid}`)) cancelTradeIn(trade.id);
+                              if (!window.confirm(`Dispensar esta troca?${paid}`)) return;
+                              setListError('');
+                              cancelTradeIn(trade.id).catch(error => setListError(`Não foi possível dispensar a troca: ${error instanceof Error ? error.message : (error as { message?: string })?.message || 'erro no banco'}`));
                             }}
                             className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[10px] transition border border-slate-200"
                           >
