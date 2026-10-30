@@ -799,7 +799,7 @@ export default function EstoqueView({
 
           {inlineError && <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{inlineError}</p>}
           {/* Lista do catalogo: um produto por linha */}
-          <div className="grid grid-cols-1 gap-5">
+          <div className="grid grid-cols-1 gap-5 bg-slate-200/60 p-4 rounded-2xl">
             {filteredProducts.map(p => {
               const prodInv = inventory.find(i => i.productId === p.id);
               
