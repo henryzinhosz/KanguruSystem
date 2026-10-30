@@ -70,7 +70,7 @@ export async function getManagerPasswordStatus(): Promise<ManagerPasswordStatus>
   };
 }
 
-export type ManagerAction = 'CASH_DRAWER' | 'CASH_WITHDRAWAL' | 'CASH_CLOSE' | 'RESERVATION_CANCEL';
+export type ManagerAction = 'CASH_DRAWER' | 'CASH_WITHDRAWAL' | 'CASH_SUPPLY' | 'CASH_CLOSE' | 'RESERVATION_CANCEL' | 'PDV_SETTINGS';
 
 export type ManagerAuthorization =
   | { status: 'OK' }

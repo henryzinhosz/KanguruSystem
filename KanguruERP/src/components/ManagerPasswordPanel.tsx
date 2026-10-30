@@ -67,7 +67,7 @@ export default function ManagerPasswordPanel({ storeConfigs }: ManagerPasswordPa
           <h3 className="text-sm font-bold text-slate-900">Senha Gerente do PDV</h3>
           <p className="text-xs text-slate-500">
             Uma senha por loja, para todos os PDVs dela. Pedida para desbloquear o terminal, desconto acima do limite, devolução,
-            Troca Gamer em dinheiro/Pix, abrir a gaveta, sangria, cancelar reserva com sinal e fechar o caixa.
+            Troca Gamer em dinheiro/Pix, abrir a gaveta, sangria, suprimento, Configurações do PDV, cancelar reserva com sinal e fechar o caixa.
             Enquanto a loja não tiver senha Gerente, o PDV continua usando a senha administrativa antiga.
           </p>
         </div>

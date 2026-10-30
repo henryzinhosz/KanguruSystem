@@ -349,7 +349,8 @@ export function App() {
   const [password, setPassword] = useState('');
   // Senha Gerente digitada na sangria, no cancelamento de reserva com sinal e na gaveta.
   const [managerPassword, setManagerPassword] = useState('');
-  const [drawerAuthOpen, setDrawerAuthOpen] = useState(false);
+  // Janela da senha Gerente para acoes do menu (gaveta, Configuracoes).
+  const [managerPrompt, setManagerPrompt] = useState<{ action: ManagerAction; title: string; confirm: string; onAuthorized: () => void } | null>(null);
   const [cashNumber, setCashNumber] = useState('Caixa 01');
   const [responsibleName, setResponsibleName] = useState('');
   const [openingFloat, setOpeningFloat] = useState('');
@@ -626,13 +627,11 @@ export function App() {
     setMessage(null);
     try {
       const operator = responsibleName.trim() || cashSession?.openedByName || '';
-      if (movementType === 'SANGRIA') {
-        const denied = await authorizeAction('CASH_WITHDRAWAL', managerPassword, true);
-        if (denied) {
-          setMessage(denied);
-          setManagerPassword('');
-          return;
-        }
+      const denied = await authorizeAction(movementType === 'SANGRIA' ? 'CASH_WITHDRAWAL' : 'CASH_SUPPLY', managerPassword, true);
+      if (denied) {
+        setMessage(denied);
+        setManagerPassword('');
+        return;
       }
       setManagerPassword('');
       if (isOffline()) {
@@ -1245,7 +1244,12 @@ export function App() {
       case 'printer': setPrinterOpen(true); break;
       case 'drawer':
         setManagerPassword('');
-        setDrawerAuthOpen(true);
+        setManagerPrompt({
+          action: 'CASH_DRAWER',
+          title: 'Abrir gaveta',
+          confirm: 'Abrir gaveta',
+          onAuthorized: () => void openCashDrawer().then((ok) => setMessage(ok ? 'Gaveta aberta.' : 'Não foi possível abrir a gaveta. Confira a impressora em Configurações › Impressora.')),
+        });
         break;
       default:
         break;
@@ -2013,18 +2017,16 @@ export function App() {
               required
             />
           </label>
-          {movementType === 'SANGRIA' && (
-            <label>
-              Senha Gerente
-              <input
-                type="password"
-                value={managerPassword}
-                onChange={(event) => setManagerPassword(event.target.value)}
-                autoComplete="off"
-                required
-              />
-            </label>
-          )}
+          <label>
+            Senha Gerente
+            <input
+              type="password"
+              value={managerPassword}
+              onChange={(event) => setManagerPassword(event.target.value)}
+              autoComplete="off"
+              required
+            />
+          </label>
           <button className="primary-action" disabled={busy}>
             {busy ? 'Registrando...' : 'Confirmar'}
           </button>
@@ -2434,8 +2436,19 @@ export function App() {
       <main className="sale-shell menu-shell">
         <TopBar {...topBarProps} subtitle="Kanguru PDV" />
         {message && <div className="menu-notice"><Notice message={message} /></div>}
-        <HomeMenu offline={offlineNow} drawerAvailable={Boolean(directPrinter)} cashOpen={Boolean(cashSession)} version={appVersion} onAction={handleMenuAction} />
-        {drawerAuthOpen && (
+        <HomeMenu
+          offline={offlineNow}
+          drawerAvailable={Boolean(directPrinter)}
+          cashOpen={Boolean(cashSession)}
+          version={appVersion}
+          onAction={handleMenuAction}
+          onRequestSettings={(open) => {
+            setMessage(null);
+            setManagerPassword('');
+            setManagerPrompt({ action: 'PDV_SETTINGS', title: 'Configurações', confirm: 'Abrir Configurações', onAuthorized: open });
+          }}
+        />
+        {managerPrompt && (
           <div className="modal-backdrop" role="presentation">
             <form
               className="serial-unit-modal"
@@ -2446,25 +2459,25 @@ export function App() {
                 event.preventDefault();
                 void (async () => {
                   setBusy(true);
-                  const denied = await authorizeAction('CASH_DRAWER', managerPassword, true);
+                  const denied = await authorizeAction(managerPrompt.action, managerPassword, true);
                   setBusy(false);
                   setManagerPassword('');
                   if (denied) {
                     setMessage(denied);
                     return;
                   }
-                  setDrawerAuthOpen(false);
-                  const ok = await openCashDrawer();
-                  setMessage(ok ? 'Gaveta aberta.' : 'Não foi possível abrir a gaveta. Confira a impressora em Configurações › Impressora.');
+                  const { onAuthorized } = managerPrompt;
+                  setManagerPrompt(null);
+                  onAuthorized();
                 })();
               }}
             >
               <div className="modal-heading">
                 <div>
-                  <p className="eyebrow">Abrir gaveta</p>
+                  <p className="eyebrow">{managerPrompt.title}</p>
                   <h2 id="drawer-auth-title">Senha Gerente</h2>
                 </div>
-                <button className="icon-button" type="button" title="Fechar" onClick={() => { setDrawerAuthOpen(false); setManagerPassword(''); }}><X size={20} /></button>
+                <button className="icon-button" type="button" title="Fechar" onClick={() => { setManagerPrompt(null); setManagerPassword(''); }}><X size={20} /></button>
               </div>
               <label>
                 Senha Gerente
@@ -2472,8 +2485,8 @@ export function App() {
               </label>
               <Notice message={message} />
               <div className="modal-actions">
-                <button className="text-action" type="button" onClick={() => { setDrawerAuthOpen(false); setManagerPassword(''); }}>Cancelar</button>
-                <button className="primary-action modal-confirm" type="submit" disabled={busy || !managerPassword}>Abrir gaveta</button>
+                <button className="text-action" type="button" onClick={() => { setManagerPrompt(null); setManagerPassword(''); }}>Cancelar</button>
+                <button className="primary-action modal-confirm" type="submit" disabled={busy || !managerPassword}>{managerPrompt.confirm}</button>
               </div>
             </form>
           </div>
