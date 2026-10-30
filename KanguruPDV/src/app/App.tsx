@@ -2790,7 +2790,8 @@ export function App() {
                   />
                   <div className="total-row">
                     <span>Total</span>
-                    <strong>{currency.format(grossAmount)}</strong>
+                    {/* Com "Repassar taxa" o total ja mostra o valor com os juros do cartao. */}
+                    <strong>{currency.format(grossAmount + surchargeTotal(withCardSurcharge(paymentLines, cardFees)))}</strong>
                   </div>
                 </div>
 
@@ -3079,7 +3080,11 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
               </select>
               <ValueInput
                 aria-label={`Valor da forma ${index + 1}`}
-                value={Number.isFinite(line.amount) && line.amount ? line.amount : null}
+                // Com "Repassar taxa" mostra o valor com juros (o que passa na maquininha);
+                // para mudar o valor, desliga o repasse.
+                value={line.passFee && juros > 0 ? charged : Number.isFinite(line.amount) && line.amount ? line.amount : null}
+                disabled={busy || (line.passFee && juros > 0)}
+                title={line.passFee && juros > 0 ? 'Valor com a taxa. Para mudar, desligue "Repassar taxa".' : undefined}
                 onValueChange={(value) => updateLine(index, { amount: value ?? 0 })}
                 onFocus={() => {
                   // Pre-preenche com o saldo restante quando o campo esta zerado.
@@ -3131,12 +3136,11 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
                   <small>Taxa não cadastrada no ERP</small>
                 )}
                 {line.passFee && juros > 0 ? (
-                  <small className="payment-card-charge">
-                    Cobrar na maquininha: <strong>{currency.format(charged)}</strong>
-                    {line.paymentMethod === 'CREDITO' && installments > 1
-                      ? ` (${installments}x de ${currency.format(charged / installments)})`
-                      : ''}
-                  </small>
+                  line.paymentMethod === 'CREDITO' && installments > 1 ? (
+                    <small className="payment-card-charge">
+                      <strong>{installments}x de {currency.format(charged / installments)}</strong>
+                    </small>
+                  ) : null
                 ) : rate > 0 ? (
                   <small>A taxa de {percentText(rate)}% fica com a loja</small>
                 ) : null}
@@ -3148,19 +3152,13 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
       )}
       <div className="payment-lines-summary">
         <span>{totalLabel}</span>
-        <strong>{currency.format(totalCents / 100)}</strong>
+        <strong>{currency.format((totalCents + jurosCents) / 100)}</strong>
         <span>Soma das formas</span>
-        <strong className={balanced ? '' : 'negative'}>{currency.format(resolution.sumCents / 100)}</strong>
+        <strong className={balanced ? '' : 'negative'}>{currency.format((resolution.sumCents + jurosCents) / 100)}</strong>
         {resolution.missingCents > 0 && (
           <>
             <span>Falta</span>
             <strong className="negative">{currency.format(resolution.missingCents / 100)}</strong>
-          </>
-        )}
-        {jurosCents > 0 && (
-          <>
-            <span>Total com juros do cartão</span>
-            <strong>{currency.format((totalCents + jurosCents) / 100)}</strong>
           </>
         )}
         {resolution.changeCents > 0 && (
