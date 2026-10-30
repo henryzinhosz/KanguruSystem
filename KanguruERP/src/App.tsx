@@ -17,6 +17,7 @@ import ConfiguracoesView from './components/ConfiguracoesView';
 import ServicosView from './components/ServicosView';
 import ClientesView from './components/ClientesView';
 import UcpView from './components/UcpView';
+import BalancoPanel from './components/BalancoPanel';
 import { DEFAULT_MANAGER_PERMISSIONS, ErpArea, UserRole } from './types';
 import { 
   LayoutDashboard, 
@@ -29,7 +30,8 @@ import {
   ArrowUpRight,
   Coins,
   Settings,
-  Users
+  Users,
+  ClipboardCheck
 } from 'lucide-react';
 
 export default function App() {
@@ -74,7 +76,7 @@ export default function App() {
   } = useErpStore();
 
   // Active Main View Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'servicos' | 'clientes' | 'vendas' | 'financeiro' | 'admin' | 'configuracoes'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'balanco' | 'servicos' | 'clientes' | 'vendas' | 'financeiro' | 'admin' | 'configuracoes'>('dashboard');
 
   if (!currentUser) {
     return <LoginScreen accessError={authProfileError} />;
@@ -110,6 +112,7 @@ export default function App() {
   const navigationItems = [
     { id: 'dashboard', name: 'Relatórios Gerais', icon: LayoutDashboard },
     { id: 'estoque', name: 'Catálogo & Estoque', icon: Package },
+    { id: 'balanco', name: 'Balanço', icon: ClipboardCheck },
     { id: 'servicos', name: 'Serviços / OS', icon: Wrench },
     { id: 'clientes', name: 'Clientes', icon: Users },
     { id: 'vendas', name: 'Troca Gamer', icon: Coins },
@@ -122,6 +125,7 @@ export default function App() {
   const AREA_BY_TAB: Partial<Record<(typeof navigationItems)[number]['id'], ErpArea>> = {
     dashboard: 'relatorios',
     estoque: 'estoque',
+    balanco: 'estoque',
     servicos: 'servicos',
     clientes: 'clientes',
     vendas: 'troca_gamer',
@@ -231,6 +235,17 @@ export default function App() {
               registerSerializedStockEntry={registerSerializedStockEntry}
               registerTransfer={registerTransfer}
               registerStockEntry={registerStockEntry}
+              productStoreCosts={productStoreCosts}
+              onStockChanged={loadAllFromSupabase}
+            />
+          )}
+
+          {tab === 'balanco' && (
+            <BalancoPanel
+              currentUser={currentUser}
+              products={products}
+              inventory={inventory}
+              storeConfigs={storeConfigs}
               productStoreCosts={productStoreCosts}
               onStockChanged={loadAllFromSupabase}
             />

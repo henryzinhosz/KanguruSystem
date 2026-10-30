@@ -22,7 +22,6 @@ import { supabaseService } from '../db/supabaseService';
 import { sanitizeItemCode } from '../db/itemCode';
 import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fiscal';
 import ValueInput from './ValueInput';
-import BalancoPanel from './BalancoPanel';
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
 const DEFAULT_MIN_STOCK = 2;
@@ -58,8 +57,7 @@ import {
   Calendar,
   Layers,
   ArrowRight,
-  Pencil,
-  ClipboardCheck
+  Pencil
 } from 'lucide-react';
 
 interface EstoqueViewProps {
@@ -132,7 +130,7 @@ export default function EstoqueView({
   const [categoryFilter, setCategoryFilter] = useState('Todas');
   
   // UI Tabs inside Estoque
-  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'avariados' | 'balanco'>('catalogo');
+  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'avariados'>('catalogo');
   // Avariados (2.9): produtos devolvidos com defeito, fora da venda.
   const [damaged, setDamaged] = useState<{ unitId: string; productId: string; quantity: number; serials: string[] }[] | null>(null);
   const [damagedError, setDamagedError] = useState('');
@@ -751,18 +749,6 @@ export default function EstoqueView({
           >
             <Package className="w-4 h-4 mr-1.5" />
             Avariados
-          </button>
-          <button
-            id="tab-estoque-balanco"
-            onClick={() => setActiveSubTab('balanco')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
-              activeSubTab === 'balanco'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <ClipboardCheck className="w-4 h-4 mr-1.5" />
-            Balanço
           </button>
         </div>
 
@@ -1560,16 +1546,6 @@ export default function EstoqueView({
       )}
 
       {/* 3. VIEW: Avariados */}
-      {activeSubTab === 'balanco' && (
-        <BalancoPanel
-          currentUser={currentUser}
-          products={products}
-          inventory={inventory}
-          storeConfigs={storeConfigs}
-          productStoreCosts={productStoreCosts}
-          onStockChanged={onStockChanged}
-        />
-      )}
 
       {activeSubTab === 'avariados' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
