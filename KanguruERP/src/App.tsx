@@ -294,6 +294,10 @@ export default function App() {
 
           {tab === 'admin' && (
             <AdminToolsView 
+              currentUser={currentUser}
+              products={products}
+              inventory={inventory}
+              storeConfigs={storeConfigs}
               suppliers={suppliers}
               addSupplier={addSupplier}
               editSupplier={editSupplier}
