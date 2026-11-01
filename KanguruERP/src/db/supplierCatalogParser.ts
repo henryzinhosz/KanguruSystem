@@ -275,8 +275,9 @@ function readSheet(name: string, rows: unknown[][], config: SheetReadingConfig, 
     if (!rawType) {
       // 1a palavra do nome (sem o modelo na frente, ex.: "AB001 - ABAFADOR"); se for modelo
       // (tem numero, ex.: CR2025), usa o titulo da secao.
-      const firstWord = split.title.replace(/^[A-Z0-9]{2,}[\w./]*\s+-\s+/i, '').split(' ')[0] || '';
-      rawType = /\d/.test(firstWord) && section ? section : firstWord;
+      const words = split.title.replace(/^[A-Z0-9]{2,}[\w./]*\s+-\s+/i, '').split(' ').filter(Boolean);
+      const firstWord = words[0] || '';
+      rawType = !/\d/.test(firstWord) ? firstWord : section || words.find(word => /^[A-Za-zÀ-ú]{3,}$/.test(word)) || 'Outros';
     }
     const typeKey = normalizeText(rawType).replace(/\.$/, '');
     items.push({

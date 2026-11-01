@@ -142,8 +142,10 @@ export default function SupplierCatalogPanel({ currentUser, suppliers, products,
   };
 
   // ---- Catalogo ----
-  const brands = useMemo(() => [...new Set(items.map(item => item.brand).filter(Boolean))].sort(), [items]);
-  const types = useMemo(() => [...new Set(items.filter(item => !brand || item.brand === brand).map(item => item.productType).filter(Boolean))].sort(), [items, brand]);
+  // Opcoes dos filtros: so itens da lista atual (os que sairam da lista entram com "Fora da lista").
+  const listed = useMemo(() => items.filter(item => showRemoved || item.isActive), [items, showRemoved]);
+  const brands = useMemo(() => [...new Set(listed.map(item => item.brand).filter(Boolean))].sort(), [listed]);
+  const types = useMemo(() => [...new Set(listed.filter(item => !brand || item.brand === brand).map(item => item.productType).filter(Boolean))].sort(), [listed, brand]);
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
     return items.filter(item =>
