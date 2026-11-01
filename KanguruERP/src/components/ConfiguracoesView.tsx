@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Building2, Check, Pencil, Plus, Save, Store, Trash2, UserRound, Users, X } from 'lucide-react';
+import { Building2, Check, ChevronDown, Pencil, Plus, Save, Store, Trash2, UserRound, Users, X } from 'lucide-react';
 import { PdvOperator, PdvOperatorPermissions, StoreConfig, StoreNfceStatus, User, UserRole } from '../types';
 import { supabaseService } from '../db/supabaseService';
 import ValueInput from './ValueInput';
@@ -517,11 +517,22 @@ const STORE_SECTIONS: [StoreSection, string][] = [
   ['textos', 'Textos dos impressos'],
 ];
 
+type StoreTextField = 'reservationVoucherTerms' | 'tradeInTerms' | 'workOrderTerms' | 'workOrderDeliveryTerms';
+
+// Textos dos impressos da loja (cada um abre ao clicar no titulo).
+const STORE_TEXTS: { field: StoreTextField; title: string; hint: string; placeholder: string; rows: number }[] = [
+  { field: 'reservationVoucherTerms', title: 'Regras do voucher de reserva', hint: 'Impressas nos vouchers de reserva do PDV desta loja. Em branco usa o texto padrão.', placeholder: DEFAULT_VOUCHER_TERMS, rows: 4 },
+  { field: 'tradeInTerms', title: 'Declarações do termo da Troca Gamer', hint: 'Impressas no termo de compra de videogame usado. Uma linha em branco separa os parágrafos. Em branco usa o texto padrão.', placeholder: DEFAULT_TRADE_IN_TERMS, rows: 8 },
+  { field: 'workOrderTerms', title: 'Condições do comprovante de entrada da OS', hint: 'Impressas quando o cliente deixa o aparelho. Uma linha em branco separa os parágrafos. Em branco usa o texto padrão.', placeholder: DEFAULT_WORK_ORDER_TERMS, rows: 8 },
+  { field: 'workOrderDeliveryTerms', title: 'Declaração do comprovante de entrega da OS', hint: 'Impressa quando o cliente retira o aparelho. Em branco usa o texto padrão.', placeholder: DEFAULT_WORK_ORDER_DELIVERY_TERMS, rows: 6 },
+];
+
 function StoreFields({ form, onChange, section }: {
   section: StoreSection;
   form: Omit<StoreConfig, 'unitId'>;
   onChange: <K extends keyof Omit<StoreConfig, 'unitId'>>(field: K, value: Omit<StoreConfig, 'unitId'>[K]) => void;
 }) {
+  const [openText, setOpenText] = useState<StoreTextField | null>(null);
   const fields: { field: keyof Omit<StoreConfig, 'unitId'>; label: string; type?: string; section: StoreSection }[] = [
     { field: 'tradeName', label: 'Nome fantasia', section: 'dados' },
     { field: 'legalName', label: 'Razão social', section: 'dados' },
@@ -592,48 +603,43 @@ function StoreFields({ form, onChange, section }: {
         />
       </label>
       </>}
-      {section === 'textos' && <>
-      <label className="block text-xs font-bold text-slate-700">
-        Regras do voucher de reserva desta loja <span className="font-normal text-slate-400">(impressas nos vouchers do PDV desta loja; cada loja tem o seu texto; em branco usa o texto padrão)</span>
-        <textarea
-          rows={4}
-          value={form.reservationVoucherTerms || ''}
-          placeholder={DEFAULT_VOUCHER_TERMS}
-          onChange={event => onChange('reservationVoucherTerms', event.target.value)}
-          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
-        />
-      </label>
-      <label className="block text-xs font-bold text-slate-700">
-        Declarações do termo da Troca Gamer desta loja <span className="font-normal text-slate-400">(impressas no termo de compra de videogame usado; uma linha em branco separa os parágrafos; em branco usa o texto padrão)</span>
-        <textarea
-          rows={6}
-          value={form.tradeInTerms || ''}
-          placeholder={DEFAULT_TRADE_IN_TERMS}
-          onChange={event => onChange('tradeInTerms', event.target.value)}
-          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
-        />
-      </label>
-      <label className="block text-xs font-bold text-slate-700">
-        Condições do comprovante de entrada da OS desta loja <span className="font-normal text-slate-400">(impressas quando o cliente deixa o aparelho; uma linha em branco separa os parágrafos; em branco usa o texto padrão)</span>
-        <textarea
-          rows={6}
-          value={form.workOrderTerms || ''}
-          placeholder={DEFAULT_WORK_ORDER_TERMS}
-          onChange={event => onChange('workOrderTerms', event.target.value)}
-          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
-        />
-      </label>
-      <label className="block text-xs font-bold text-slate-700">
-        Declaração do comprovante de entrega da OS desta loja <span className="font-normal text-slate-400">(impressa quando o cliente retira o aparelho consertado; em branco usa o texto padrão)</span>
-        <textarea
-          rows={5}
-          value={form.workOrderDeliveryTerms || ''}
-          placeholder={DEFAULT_WORK_ORDER_DELIVERY_TERMS}
-          onChange={event => onChange('workOrderDeliveryTerms', event.target.value)}
-          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
-        />
-      </label>
-      </>}
+      {section === 'textos' && (
+        <div className="divide-y divide-slate-200 border border-slate-200 rounded-lg overflow-hidden">
+          {STORE_TEXTS.map(({ field, title, hint, placeholder, rows }) => {
+            const open = openText === field;
+            const filled = Boolean((form[field] as string | undefined)?.trim());
+            return (
+              <div key={field}>
+                <button
+                  type="button"
+                  onClick={() => setOpenText(open ? null : field)}
+                  aria-expanded={open}
+                  className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left text-xs font-bold ${open ? 'bg-blue-50 text-blue-800' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                >
+                  <span>
+                    {title}
+                    <span className={`ml-2 text-[10px] font-semibold ${filled ? 'text-emerald-700' : 'text-slate-400'}`}>{filled ? 'texto próprio' : 'texto padrão'}</span>
+                  </span>
+                  <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                </button>
+                {open && (
+                  <div className="px-3 pb-3 pt-1 bg-white space-y-1">
+                    <p className="text-[11px] text-slate-500">{hint}</p>
+                    <textarea
+                      rows={rows}
+                      autoFocus
+                      value={(form[field] as string) || ''}
+                      placeholder={placeholder}
+                      onChange={event => onChange(field, event.target.value as never)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
