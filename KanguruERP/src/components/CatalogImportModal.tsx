@@ -8,6 +8,7 @@ import {
   SheetReadingConfig,
   normalizeText,
   parseCatalog,
+  splitCatalogName,
 } from '../db/supplierCatalogParser';
 import type { SupplierCatalogItem } from '../db/supplierCatalogs';
 import { formatMoney } from '../db/finance';
@@ -125,7 +126,14 @@ export default function CatalogImportModal({ supplierName, fileName, workbook, s
 
           {/* Abas */}
           <div className="space-y-3">
-            <h3 className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">Abas da planilha</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="font-bold text-slate-800 uppercase tracking-wider text-[10px]">Abas da planilha</h3>
+              {savedConfig && (
+                <button type="button" onClick={() => setConfig(parseCatalog(workbook, null).config)} className="flex items-center gap-1 text-blue-700 font-bold hover:underline" title="Descarta a configuração guardada e lê a planilha do zero">
+                  <RefreshCw className="w-3.5 h-3.5" />Ler tudo de novo (ignorar configuração salva)
+                </button>
+              )}
+            </div>
             {parsed.sheets.map(sheet => (
               <div key={sheet.name} className={`border rounded-lg p-3 space-y-2 ${sheet.config.include ? 'border-slate-200' : 'border-slate-100 bg-slate-50 opacity-70'}`}>
                 <div className="flex flex-wrap items-center gap-3 justify-between">
@@ -213,7 +221,7 @@ export default function CatalogImportModal({ supplierName, fileName, workbook, s
                         <td className="p-2 text-slate-400 whitespace-nowrap">{item.sheet} · {item.row}</td>
                         <td className="p-2 font-mono">{item.code}</td>
                         <td className="p-2">
-                          {item.name}
+                          <span title={item.name}>{splitCatalogName(item.name).title}</span>
                           {isNew(item) && existingItems.length > 0 && <span className="ml-1 text-[9px] font-bold text-emerald-700 bg-emerald-50 px-1 rounded">NOVO</span>}
                           {item.warnings.map(warning => <span key={warning} className="block text-[10px] text-amber-700 flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{warning}</span>)}
                         </td>

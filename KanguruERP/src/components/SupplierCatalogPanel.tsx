@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, FileSpreadsheet, Link2, Minus, Plus, Printer, Search, ShoppingCart, Trash2, Upload, X } from 'lucide-react';
 import type { Product, StockInventory, StoreConfig, Supplier, User } from '../types';
-import { readWorkbook, suggestProducts, type CatalogReadingConfig, type ParsedCatalogItem } from '../db/supplierCatalogParser';
+import { readWorkbook, splitCatalogName, suggestProducts, type CatalogReadingConfig, type ParsedCatalogItem } from '../db/supplierCatalogParser';
 import {
   importSupplierCatalog,
   linkSupplierCatalogItem,
@@ -312,8 +312,16 @@ export default function SupplierCatalogPanel({ currentUser, suppliers, products,
             ) : filtered.length === 0 ? (
               <p className="p-6 text-slate-400">{items.length ? 'Nenhum item neste filtro.' : 'Sem itens. Importe a planilha do fornecedor.'}</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
+              <div>
+                <table className="w-full table-fixed">
+                  <colgroup>
+                    <col className="w-[84px]" />
+                    <col />
+                    <col className="w-[110px]" />
+                    <col className="w-[88px]" />
+                    <col className="w-[104px]" />
+                    <col className="w-[96px]" />
+                  </colgroup>
                   <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 text-left">
                     <tr><th className="p-2">Código</th><th className="p-2">Produto</th><th className="p-2">Marca / tipo</th><th className="p-2 text-right">Custo</th><th className="p-2">Seu estoque</th><th className="p-2 text-right">Pedir</th></tr>
                   </thead>
@@ -324,16 +332,19 @@ export default function SupplierCatalogPanel({ currentUser, suppliers, products,
                       const zero = !(item.unitCost > 0);
                       return (
                         <tr key={item.id} className={`border-t border-slate-100 ${item.isActive ? '' : 'opacity-50'}`}>
-                          <td className="p-2 font-mono whitespace-nowrap">{item.supplierCode}</td>
-                          <td className="p-2">
-                            {item.name}
-                            <span className="ml-1 inline-flex gap-1">
+                          <td className="p-2 font-mono truncate" title={item.supplierCode}>{item.supplierCode}</td>
+                          <td className="p-2 min-w-0">
+                            <span className="block font-semibold text-slate-800 line-clamp-2" title={item.name}>{splitCatalogName(item.name).title}</span>
+                            {splitCatalogName(item.name).details && (
+                              <span className="block text-[10px] text-slate-500 truncate" title={splitCatalogName(item.name).details}>{splitCatalogName(item.name).details}</span>
+                            )}
+                            <span className="inline-flex flex-wrap gap-1">
                               {isLaunch(item.status) && <span className="text-[9px] font-bold text-blue-700 bg-blue-50 px-1 rounded">LANÇAMENTO</span>}
                               {zero && <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1 rounded">PREÇO A CONFIRMAR</span>}
                               {!item.isActive && <span className="text-[9px] font-bold text-slate-600 bg-slate-100 px-1 rounded">SAIU DA LISTA</span>}
                             </span>
                           </td>
-                          <td className="p-2 whitespace-nowrap"><strong>{item.brand || '—'}</strong><span className="block text-slate-500">{item.productType}</span></td>
+                          <td className="p-2 min-w-0"><strong className="block truncate" title={item.brand}>{item.brand || '—'}</strong><span className="block text-slate-500 truncate" title={item.productType}>{item.productType}</span></td>
                           <td className="p-2 text-right font-mono whitespace-nowrap">
                             {zero ? '—' : formatMoney(item.unitCost)}
                             {item.previousCost != null && item.previousCost > 0 && (
@@ -342,11 +353,11 @@ export default function SupplierCatalogPanel({ currentUser, suppliers, products,
                               </span>
                             )}
                           </td>
-                          <td className="p-2 whitespace-nowrap">
+                          <td className="p-2 min-w-0">
                             {stock ? (
                               <button type="button" onClick={() => setLinking(item)} className="text-left" title={`${linked?.name || ''}\n${stock.perStore.map(entry => `${entry.store.tradeName || entry.store.unitId}: ${entry.qty}`).join('\n')}`}>
                                 <span className={`font-bold ${stock.total === 0 ? 'text-rose-600' : 'text-slate-800'}`}>{stock.total} un</span>
-                                <span className="block text-[10px] text-slate-500">{stock.perStore.map(entry => `${(entry.store.tradeName || entry.store.unitId).split(' ').slice(-2).join(' ')}: ${entry.qty}`).join(' · ')}</span>
+                                <span className="block text-[10px] text-slate-500 truncate">{stock.perStore.map(entry => `${(entry.store.tradeName || entry.store.unitId).split(' ').slice(-2).join(' ')}: ${entry.qty}`).join(' · ')}</span>
                               </button>
                             ) : (
                               <button type="button" onClick={() => setLinking(item)} className="text-blue-700 font-bold flex items-center gap-1 hover:underline"><Link2 className="w-3.5 h-3.5" />Ligar</button>
@@ -361,7 +372,7 @@ export default function SupplierCatalogPanel({ currentUser, suppliers, products,
                                 placeholder="1"
                                 onChange={event => setQuantities(previous => ({ ...previous, [item.id]: Math.max(0, Math.floor(Number(event.target.value) || 0)) }))}
                                 onKeyDown={event => event.key === 'Enter' && addToCart(item, quantities[item.id] || 1)}
-                                className="w-14 border border-slate-200 rounded p-1 text-right"
+                                className="w-12 border border-slate-200 rounded p-1 text-right"
                               />
                               <button type="button" disabled={!item.isActive} onClick={() => addToCart(item, quantities[item.id] || 1)} className="p-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded" title="Adicionar ao pedido"><Plus className="w-3.5 h-3.5" /></button>
                             </div>
@@ -398,7 +409,7 @@ export default function SupplierCatalogPanel({ currentUser, suppliers, products,
                       return (
                         <div key={line.item.id} className={`flex items-center gap-2 p-1.5 rounded ${zero ? 'bg-amber-50 border border-amber-200' : ''}`}>
                           <div className="flex-1 min-w-0">
-                            <span className="block truncate" title={line.item.name}>{line.item.name}</span>
+                            <span className="block truncate" title={line.item.name}>{splitCatalogName(line.item.name).title}</span>
                             <span className={`text-[10px] ${zero ? 'text-amber-700 font-bold' : 'text-slate-500'}`}>{zero ? 'Preço a confirmar' : `${formatMoney(line.item.unitCost)} · ${formatMoney(line.item.unitCost * line.quantity)}`}</span>
                           </div>
                           <div className="flex items-center gap-1">
@@ -517,7 +528,7 @@ function LinkProductModal({ item, products, currentProductId, onClose, onLink }:
   onLink: (productId: string | null) => void;
 }) {
   const [term, setTerm] = useState('');
-  const suggestions = useMemo(() => suggestProducts(item.name, products), [item, products]);
+  const suggestions = useMemo(() => suggestProducts(splitCatalogName(item.name).title, products), [item, products]);
   const results = term.trim()
     ? products.filter(product => product.name.toLowerCase().includes(term.trim().toLowerCase()) || product.sku.toLowerCase().includes(term.trim().toLowerCase())).slice(0, 20)
     : suggestions;
@@ -528,7 +539,7 @@ function LinkProductModal({ item, products, currentProductId, onClose, onLink }:
         <div className="p-4 border-b border-slate-100 flex justify-between gap-2">
           <div>
             <h2 className="text-sm font-bold text-slate-900">Ligar ao seu produto</h2>
-            <p className="text-slate-500">{item.name}</p>
+            <p className="text-slate-500">{splitCatalogName(item.name).title}</p>
             <p className="text-slate-400 mt-1">A ligação só mostra o seu estoque ao lado do item. Não muda nada no pedido nem no cadastro.</p>
           </div>
           <button type="button" onClick={onClose} aria-label="Fechar"><X className="w-5 h-5 text-slate-400" /></button>

@@ -1,6 +1,7 @@
 import type { StoreConfig, Supplier } from '../types';
 import type { PurchaseOrder } from '../db/supplierCatalogs';
 import { formatMoney } from '../db/finance';
+import { splitCatalogName } from '../db/supplierCatalogParser';
 
 // PDF do pedido de compra: pagina limpa (A4) com loja, fornecedor e itens separados por
 // marca. Abre a janela de impressao do navegador ("Salvar como PDF" para enviar).
@@ -26,7 +27,7 @@ function buildHtml(order: PurchaseOrder, supplier: Supplier | undefined, store: 
     const rows = items.map(item => `
       <tr class="${item.pricePending ? 'pending' : ''}">
         <td class="mono">${escapeHtml(item.supplierCode || '-')}</td>
-        <td>${escapeHtml(item.name)}${item.pricePending ? ' <strong>(preço a confirmar)</strong>' : ''}</td>
+        <td>${escapeHtml(splitCatalogName(item.name).title)}${item.pricePending ? ' <strong>(preço a confirmar)</strong>' : ''}</td>
         <td class="num">${item.quantity}</td>
         <td class="num">${item.pricePending ? 'a confirmar' : money4(item.unitCost)}</td>
         <td class="num">${item.pricePending ? '-' : formatMoney(item.unitCost * item.quantity)}</td>

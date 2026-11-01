@@ -15,7 +15,8 @@ export type ColumnRole =
   | 'priceIpi'
   | 'ipi'
   | 'discount'
-  | 'finalPrice';
+  | 'finalPrice'
+  | 'color';
 
 export const COLUMN_ROLE_LABELS: Record<ColumnRole, string> = {
   code: 'Código',
@@ -28,6 +29,7 @@ export const COLUMN_ROLE_LABELS: Record<ColumnRole, string> = {
   ipi: 'IPI',
   discount: 'Desconto',
   finalPrice: 'Preço final',
+  color: 'Cor',
 };
 
 export interface SheetReadingConfig {
@@ -117,8 +119,11 @@ function headerRole(header: string): ColumnRole | 'ignore' | null {
   if (/^(MARCA|FABRICANTE)\b/.test(h)) return 'brand';
   if (/^(FAMILIA|TIPO|CATEGORIA|GRUPO|SEGMENTO|LINHA DE PRODUTO|SUBGRUPO)\b/.test(h)) return 'type';
   if (/^(STATUS|SITUACAO)\b/.test(h)) return 'status';
+  if (/^(COR|CORES)\b/.test(h)) return 'color';
   if (/DESC/.test(h)) return 'discount';
   if (/SEM IPI/.test(h)) return 'priceNoIpi';
+  // "Preco tabela"/"lista" sem falar de IPI: preco antes do IPI.
+  if (/TABELA|LISTA/.test(h) && /PRECO|VALOR/.test(h) && !/IPI/.test(h)) return 'priceNoIpi';
   if (/(COM|C\/) ?IPI/.test(h) && /PRECO|VALOR|R\$/.test(h)) return 'priceIpi';
   if (/^IPI\b/.test(h)) return 'ipi';
   if (/PRECO|VALOR|CUSTO|UNITARIO|R\$/.test(h)) return 'finalPrice';
@@ -159,7 +164,22 @@ function detectHeader(rows: unknown[][]): { headerRow: number; columns: Partial<
   return best && best.score >= 2 ? { headerRow: best.headerRow, columns: best.columns } : null;
 }
 
-const GENERIC_SHEET = /^(TABELA|PLANILHA|SHEET|PLAN|LISTA|PRECO|PRECOS|INFORMATICA|PAPELARIA|GAMER|GERAL|PRODUTOS)\b/;
+const GENERIC_SHEET = /^(TABELA|PLANILHA|SHEET|PLAN|LISTA|PRECO|PRECOS|INFORMATICA|PAPELARIA|GAMER|GERAL|PRODUTOS|LANCAMENTOS?|PROMO|PROMOCAO|PROMOCOES|OFERTAS?|OUTLET|NOVIDADES|DESTAQUES?|TOP ?\d*)\b/;
+const CONTROL_SHEET = /\b(GESTAO|SALDO|BANCO|TALAO|PEDIDO|RESUMO|INICIO|MKT|ESTOQUE|CADASTRO|INSTRUC)/;
+
+// Nome do produto: o que vem antes de ":" e o nome; o resto e descricao (so para mostrar).
+export function splitCatalogName(name: string): { title: string; details: string } {
+  const text = name.replace(/\s+/g, ' ').trim();
+  const colon = text.indexOf(':');
+  if (colon >= 3 && colon <= 70 && text.length - colon > 10) {
+    return { title: text.slice(0, colon).trim(), details: text.slice(colon + 1).trim() };
+  }
+  const dash = text.indexOf(' - ');
+  if (text.length > 90 && dash >= 3 && dash <= 70) {
+    return { title: text.slice(0, dash).trim(), details: text.slice(dash + 3).trim() };
+  }
+  return { title: text, details: '' };
+}
 
 // Abreviacoes comuns de tipo nas listas de fornecedor.
 const TYPE_ABBREVIATIONS: Record<string, string> = {
@@ -185,6 +205,10 @@ function readSheet(name: string, rows: unknown[][], config: SheetReadingConfig, 
   let section = '';
   let costMismatch = 0;
   let usedMethod = '';
+  let previousName = '';
+  // Aba com nome de marca (OEX, LOGITECH): titulos de secao sao categorias, nao marca.
+  const sheetKey = normalizeText(name);
+  const sheetIsBrand = Boolean(sheetKey) && !GENERIC_SHEET.test(sheetKey);
   for (let r = config.headerRow + 1; r < rows.length; r += 1) {
     const row = rows[r] || [];
     const filled = row.filter(cell => cell != null && String(cell).trim() !== '');
@@ -197,7 +221,22 @@ function readSheet(name: string, rows: unknown[][], config: SheetReadingConfig, 
       section = String(filled[0]).trim();
       continue;
     }
-    if (!productName || (!code && prices.every(price => price == null))) continue;
+    // Variacao (mesma referencia em outra cor) sem nome: usa o nome da linha de cima.
+    let baseName = productName;
+    if (!baseName && code && previousName && prices.some(price => price != null)) baseName = previousName;
+    if (!baseName || (!code && prices.every(price => price == null))) continue;
+    previousName = baseName;
+    // Marcadores do fornecedor (***LANCAMENTO***) saem do nome e viram situacao.
+    let status = cellText(row, columns.status).toUpperCase();
+    const marker = baseName.match(/\*{2,}\s*([^*]+?)\s*\*{2,}/);
+    if (marker) {
+      if (!status && /LAN[CÇ]AMENTO|NOVO|NOVIDADE/i.test(marker[1])) status = 'LANÇAMENTO';
+      baseName = baseName.replace(/\*{2,}\s*[^*]+?\s*\*{2,}/g, '').trim();
+    }
+    const color = cellText(row, columns.color);
+    const split = splitCatalogName(baseName);
+    const title = color && color !== '-' ? `${split.title} (${color})` : split.title;
+    const itemName = split.details ? `${title}: ${split.details}` : title;
 
     const noIpi = toNumber(columns.priceNoIpi === undefined ? null : row[columns.priceNoIpi]);
     const withIpiRaw = toNumber(columns.priceIpi === undefined ? null : row[columns.priceIpi]);
@@ -231,22 +270,27 @@ function readSheet(name: string, rows: unknown[][], config: SheetReadingConfig, 
     cost = Math.round(cost * 10000) / 10000;
     if (!(cost > 0)) warnings.push('Preço zerado na planilha: confirme com o fornecedor');
 
-    const rawBrand = cellText(row, columns.brand) || config.fixedBrand || section;
+    const rawBrand = cellText(row, columns.brand) || config.fixedBrand || (sheetIsBrand ? '' : section);
     let rawType = config.typeSource === 'column' ? cellText(row, columns.type) : '';
-    if (!rawType) rawType = productName.split(' ')[0] || '';
+    if (!rawType) {
+      // 1a palavra do nome (sem o modelo na frente, ex.: "AB001 - ABAFADOR"); se for modelo
+      // (tem numero, ex.: CR2025), usa o titulo da secao.
+      const firstWord = split.title.replace(/^[A-Z0-9]{2,}[\w./]*\s+-\s+/i, '').split(' ')[0] || '';
+      rawType = /\d/.test(firstWord) && section ? section : firstWord;
+    }
     const typeKey = normalizeText(rawType).replace(/\.$/, '');
     items.push({
       // Chave anti-duplicidade: codigo sem espacos/pontos/hifens ("75 8590" = "758590"); sem codigo, o nome.
-      key: normalizeText(code).replace(/[^A-Z0-9]/g, '') || `NOME:${normalizeText(productName).replace(/[^A-Z0-9]/g, '')}`,
+      key: normalizeText(code).replace(/[^A-Z0-9]/g, '') || `NOME:${normalizeText(itemName).replace(/[^A-Z0-9]/g, '')}`,
       sheet: name,
       row: r + 1,
       code,
-      name: productName,
+      name: itemName,
       rawBrand,
       brand: '',
       rawType,
       type: titleCase(typeAliases[typeKey] || TYPE_ABBREVIATIONS[typeKey] || typeKey),
-      status: cellText(row, columns.status).toUpperCase(),
+      status,
       cost,
       priceDetails: {
         ...(noIpi != null ? { noIpi } : {}),
@@ -296,8 +340,7 @@ function resolveBrands(sheets: ParsedSheet[], aliases: Record<string, string>) {
   const known = new Set(raws.map(raw => normalizeText(brandOf(raw))));
   sheets.forEach(sheet => {
     const sheetKey = normalizeText(sheet.name);
-    const sheetIsBrand = sheetKey && !GENERIC_SHEET.test(sheetKey)
-      && sheet.items.filter(item => normalizeText(item.name).includes(sheetKey)).length >= sheet.items.length * 0.5;
+    const sheetIsBrand = Boolean(sheetKey) && !GENERIC_SHEET.test(sheetKey);
     sheet.items.forEach(item => {
       let brand = brandOf(item.rawBrand);
       if (!brand && sheetIsBrand) brand = aliases[sheetKey] || titleCase(sheetKey);
@@ -325,12 +368,13 @@ function mergeTypePrefixes(items: ParsedCatalogItem[], aliases: Record<string, s
     }
     if (key.length < 3) return;
     // Plural (ETIQUETAS, MARCADORES) vira o singular quando ele existe na lista.
-    const singular = [key.replace(/ES$/, ''), key.replace(/S$/, '')].find(other => other !== key && counts.has(other));
+    const singular = [key.replace(/ES$/, ''), key.replace(/S$/, ''), key.replace(/S(?= )/g, '')].find(other => other !== key && counts.has(other));
     if (singular) {
       item.type = titleCase(singular);
       return;
     }
-    const target = keys.find(other => other !== key && other.startsWith(key) && (counts.get(other) || 0) >= (counts.get(key) || 0));
+    // Abreviacao (ETIQ -> ETIQUETA); o plural da propria palavra nao conta (PILHA nao vira PILHAS).
+    const target = keys.find(other => other !== key && other.startsWith(key) && other !== key + 'S' && other !== key + 'ES' && !other.slice(key.length).includes(' ') && (counts.get(other) || 0) >= (counts.get(key) || 0));
     if (target) item.type = titleCase(target);
   });
 }
@@ -376,13 +420,26 @@ export function parseCatalog(workbook: Record<string, unknown[][]>, saved: Catal
     }
     config.sheets[name] = sheetConfig;
     const headers = (rows[sheetConfig.headerRow] || []).map(cell => (cell == null ? '' : String(cell).trim()));
-    const read = sheetConfig.include && sheetConfig.columns.name !== undefined
+    let read = sheetConfig.include && sheetConfig.columns.name !== undefined
       ? readSheet(name, rows, sheetConfig, config.typeAliases)
       : { items: [], costMismatch: 0, costMethod: '' };
+    if (autoDetected && sheetConfig.include) {
+      const priced = read.items.filter(item => item.cost > 0).length;
+      if (CONTROL_SHEET.test(normalizeText(name)) || read.items.length === 0 || priced < read.items.length * 0.3) {
+        sheetConfig = { ...sheetConfig, include: false };
+        config.sheets[name] = sheetConfig;
+        read = { items: [], costMismatch: 0, costMethod: '' };
+      }
+    }
     sheets.push({ name, rows, config: sheetConfig, headers, autoDetected, ...read });
   });
   resolveBrands(sheets, config.brandAliases);
-  const items = sheets.flatMap(sheet => sheet.items);
+  const byKey = new Map<string, ParsedCatalogItem>();
+  sheets.flatMap(sheet => sheet.items).forEach(item => {
+    const kept = byKey.get(item.key);
+    if (!kept || (!(kept.cost > 0) && item.cost > 0)) byKey.set(item.key, item);
+  });
+  const items = [...byKey.values()];
   mergeTypePrefixes(items, config.typeAliases);
   // Nomes corrigidos na conferencia (marca ou tipo ja resolvido -> nome escolhido).
   items.forEach(item => {
