@@ -236,7 +236,8 @@ function readSheet(name: string, rows: unknown[][], config: SheetReadingConfig, 
     if (!rawType) rawType = productName.split(' ')[0] || '';
     const typeKey = normalizeText(rawType).replace(/\.$/, '');
     items.push({
-      key: normalizeText(code) || `NOME:${normalizeText(productName)}`,
+      // Chave anti-duplicidade: codigo sem espacos/pontos/hifens ("75 8590" = "758590"); sem codigo, o nome.
+      key: normalizeText(code).replace(/[^A-Z0-9]/g, '') || `NOME:${normalizeText(productName).replace(/[^A-Z0-9]/g, '')}`,
       sheet: name,
       row: r + 1,
       code,
