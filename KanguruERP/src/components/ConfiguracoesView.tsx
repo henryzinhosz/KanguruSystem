@@ -5,6 +5,7 @@ import { supabaseService } from '../db/supabaseService';
 import ValueInput from './ValueInput';
 import ManagerPasswordPanel from './ManagerPasswordPanel';
 import TenantUsersPanel from './TenantUsersPanel';
+import FranchiseeContactPanel from './FranchiseeContactPanel';
 
 interface ConfiguracoesViewProps {
   currentUser: User;
@@ -326,9 +327,6 @@ export default function ConfiguracoesView({
               <p className="text-xs text-slate-500">Este nome aparece no cabeçalho e nos novos registros criados por você.</p>
             </div>
           </div>
-          <button type="button" onClick={openNewStore} className="px-4 py-2.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 shrink-0">
-            <Building2 className="w-4 h-4" />Criar loja
-          </button>
         </div>
 
         {profileError && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{profileError}</p>}
@@ -351,17 +349,24 @@ export default function ConfiguracoesView({
       </section>
       )}
 
+      {settingsTab === 'conta' && currentUser.role === UserRole.ADMIN && <FranchiseeContactPanel />}
+
       {settingsTab === 'lojas' && (
       <section>
         <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-4">
           {storeMessage && <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-2"><Check className="w-4 h-4" />{storeMessage}</p>}
           {storeError && !storeModalOpen && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{storeError}</p>}
+          <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <Store className="w-5 h-5 text-blue-600" />
             <div>
               <h3 className="text-sm font-bold text-slate-900">Lojas cadastradas</h3>
               <p className="text-xs text-slate-500">Unidades são entidades da empresa, sem vínculo direto a um usuário específico.</p>
             </div>
+          </div>
+          <button type="button" onClick={openNewStore} className="px-4 py-2.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 shrink-0">
+            <Building2 className="w-4 h-4" />Criar loja
+          </button>
           </div>
 
           <div className="overflow-x-auto border border-slate-200 rounded-lg">

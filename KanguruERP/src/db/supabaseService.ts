@@ -1626,6 +1626,22 @@ export const supabaseService = {
     }));
   },
 
+  // Contato do franqueado (migration 20261114): le qualquer usuario da empresa, salva so o dono.
+  async getTenantContact(): Promise<{ ownerName: string | null; ownerPhone: string | null; ownerEmail: string | null } | null> {
+    const { data, error } = await supabase.rpc('get_my_tenant_contact');
+    if (error) throw error;
+    return data;
+  },
+
+  async saveTenantContact(contact: { ownerName: string; ownerPhone: string; ownerEmail: string }): Promise<void> {
+    const { error } = await supabase.rpc('save_my_tenant_contact', {
+      p_owner_name: contact.ownerName,
+      p_owner_phone: contact.ownerPhone,
+      p_owner_email: contact.ownerEmail
+    });
+    if (error) throw error;
+  },
+
   // Cancela as NFS-e autorizadas da venda (prazo da prefeitura). Lanca o motivo se recusado.
   async cancelSaleNfse(saleId: string, justification: string): Promise<void> {
     const { data, error } = await supabase.functions.invoke('nfse-cancel', { body: { saleId, justification } });
