@@ -59,6 +59,8 @@ import { HomeMenu, type MenuAction } from './HomeMenu';
 import { ProductLookupModal } from './ProductLookupModal';
 import { PrinterSettingsModal } from './PrinterSettingsModal';
 import { getDirectPrinter, openCashDrawer } from '../printing/directPrint';
+import { printPdfBase64 } from '../printing/pdfPrint';
+import { emitPosNfse, fetchDanfsePdf, getPosNfseStatus, type PosNfseConfig } from '../services/supabase/nfse';
 import {
   cacheTerminal,
   enqueueOfflineMovement,
@@ -439,6 +441,8 @@ export function App() {
   // NFC-e (2.8b): loja configurada no UCP? Escolha do vendedor (NFC-e / Nao Fiscal) da venda em curso.
   const [nfceConfig, setNfceConfig] = useState<PosNfceStatus | null>(null);
   const [nfceEmitting, setNfceEmitting] = useState(false);
+  // NFS-e Nacional dos servicos (mesma chave da Focus; precisa do municipio da loja no ERP).
+  const [nfseConfig, setNfseConfig] = useState<PosNfseConfig | null>(null);
   const [nfceProblem, setNfceProblem] = useState<{ saleId: string; change: number; status: NfceStatus; message: string | null } | null>(null);
   const fiscalChoiceRef = useRef<FiscalChoice>('NAO_FISCAL');
   // Troca/devolucao (2.9): venda aberta no modal e saldo de vale-troca do cliente da venda.
@@ -1037,6 +1041,10 @@ export function App() {
         return;
       }
       const charge = cart.some((item) => item.workOrderId) ? workOrderCharge : null;
+      const saleKinds = {
+        products: cart.some((item) => item.itemType === 'PRODUCT'),
+        services: cart.some((item) => item.itemType === 'SERVICE'),
+      };
       const sellerCode = saleSeller.code;
       setCart([]);
       setCatalogItems([]);
@@ -1054,7 +1062,7 @@ export function App() {
           : 'Venda registrada com sucesso.')
           + (juros > 0 ? ` Total com juros do cartão: ${currency.format(grossAmount + juros)}.` : '')
       );
-      void deliverReceipt(saleId, resolution.changeCents / 100);
+      void deliverReceipt(saleId, resolution.changeCents / 100, saleKinds);
       if (charge) void finishWorkOrderSale(charge, sellerCode, resolution.changeCents / 100);
       // Venda com dinheiro: abre a gaveta (impressao direta configurada).
       if (resolution.applied.some((line) => line.paymentMethod === 'DINHEIRO')) void openCashDrawer();
@@ -1128,6 +1136,9 @@ export function App() {
         if (local.ok) payload.nfce = local.nfce;
         else fiscalNote = ` NFC-e não emitida (${local.message}). Saiu como Não Fiscal.`;
       }
+    }
+    if (fiscalChoiceRef.current === 'NFCE' && cart.some((item) => item.itemType === 'SERVICE')) {
+      fiscalNote += ' NFS-e dos serviços: emita em Cupons e notas quando a internet voltar.';
     }
     await enqueueOfflineSale(payload);
     const receipt: PosSaleReceipt = {
@@ -1329,9 +1340,39 @@ export function App() {
   }
 
   // Depois da venda: Nao Fiscal imprime o cupom; NFC-e emite a nota e imprime o DANFE.
-  async function deliverReceipt(saleId: string, changeAmount: number) {
-    if (fiscalChoiceRef.current === 'NFCE') await emitNfce(saleId, changeAmount);
+  // "Nota fiscal": produtos em NFC-e e servicos em NFS-e (com o DANFSe impresso em A4).
+  async function deliverReceipt(saleId: string, changeAmount: number, kinds = { products: true, services: false }) {
+    if (fiscalChoiceRef.current !== 'NFCE') {
+      await printReceipt(saleId, changeAmount);
+      return;
+    }
+    if (kinds.products) await emitNfce(saleId, changeAmount);
     else await printReceipt(saleId, changeAmount);
+    if (kinds.services) await emitNfse(saleId);
+  }
+
+  const appendMessage = (text: string) => setMessage((current) => (current ? `${current} ${text}` : text));
+
+  async function emitNfse(saleId: string) {
+    setNfceEmitting(true);
+    try {
+      const result = await emitPosNfse(saleId);
+      const authorized = result.invoices.filter((invoice) => invoice.status === 'AUTORIZADA' && invoice.id);
+      if (result.status === 'AUTORIZADA') appendMessage(authorized.length > 1 ? `${authorized.length} NFS-e autorizadas.` : 'NFS-e autorizada.');
+      else if (result.status === 'PENDENTE') appendMessage(`NFS-e pendente: ${result.message ?? 'aguarde e confira em Cupons e notas.'}`);
+      else appendMessage(`NFS-e não emitida: ${result.message ?? 'erro.'} Corrija e emita de novo em Cupons e notas.`);
+      for (const invoice of authorized) await printDanfse(invoice.id!);
+    } finally {
+      setNfceEmitting(false);
+    }
+  }
+
+  async function printDanfse(invoiceId: string) {
+    try {
+      await printPdfBase64(await fetchDanfsePdf(invoiceId));
+    } catch (error) {
+      appendMessage(`O DANFSe não pôde ser impresso (${errorMessage(error)}): reimprima em Cupons e notas.`);
+    }
   }
 
   async function emitNfce(saleId: string, changeAmount: number) {
@@ -1761,6 +1802,7 @@ export function App() {
     if (screen !== 'sale' && screen !== 'receipts') return;
     // Sem internet vale a configuracao guardada (NFC-e pelo Comunicador Offline).
     getPosNfceStatus().then(setNfceConfig).catch(async () => setNfceConfig((await getSnapshot())?.nfce ?? null));
+    getPosNfseStatus().then(setNfseConfig).catch(() => setNfseConfig(null));
   }, [screen]);
 
   useEffect(() => {
@@ -1888,8 +1930,11 @@ export function App() {
 
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
   const cartHasBackorder = cart.some((item) => item.backorder);
-  // Servicos ficam fora da NFC-e: venda so com servicos sai como Nao Fiscal.
+  // Servicos ficam fora da NFC-e: com "Nota fiscal" eles saem em NFS-e.
   const cartHasProduct = cart.some((item) => item.itemType === 'PRODUCT');
+  const cartHasService = cart.some((item) => item.itemType === 'SERVICE');
+  // Produto exige NFC-e configurada; venda so com servicos exige a NFS-e pronta.
+  const fiscalReady = cartHasProduct ? nfceConfig?.configured === true : cart.length > 0 && nfseConfig?.ready === true;
   const reservationDepositAmount = valueAsNumber(reservationDeposit);
 
   useEffect(() => {
@@ -2300,6 +2345,9 @@ export function App() {
           busy={busy || nfceEmitting}
           onReprint={(saleId) => printReceipt(saleId)}
           onEmitNfce={(saleId) => emitNfce(saleId, 0)}
+          nfseReady={nfseConfig?.ready === true}
+          onEmitNfse={(saleId) => emitNfse(saleId)}
+          onPrintDanfse={(invoiceId) => printDanfse(invoiceId)}
           onReturn={(saleId) => { setMessage(null); setReturnSaleId(saleId); }}
         />
         {returnSaleId && (
@@ -2814,17 +2862,17 @@ export function App() {
                   <button
                     className="primary-action finish-button finish-nfce"
                     type="button"
-                    disabled={!nfceConfig?.configured || busy || nfceEmitting || cart.length === 0 || !saleSeller || cartHasBackorder || !cartHasProduct}
-                    title={!nfceConfig?.configured ? 'NFC-e não configurada para esta loja.' : !cartHasProduct && cart.length > 0 ? 'Venda só com serviços não gera NFC-e: use Não Fiscal.' : 'Finalizar com NFC-e'}
+                    disabled={!fiscalReady || busy || nfceEmitting || cart.length === 0 || !saleSeller || cartHasBackorder}
+                    title={fiscalReady
+                      ? `Finalizar com nota fiscal${cartHasProduct ? ' (NFC-e dos produtos)' : ''}${cartHasService ? ' (NFS-e dos serviços)' : ''}`
+                      : cartHasProduct ? 'NFC-e não configurada para esta loja.' : `NFS-e não configurada: ${nfseConfig?.missing.join(', ') || 'confira o ERP'}.`}
                     onClick={() => void finalizeSale('NFCE')}
                   >
                     <CreditCard size={20} />
-                    {nfceEmitting ? 'Emitindo...' : 'NFC-e'}
-                    {!nfceConfig?.configured
+                    {nfceEmitting ? 'Emitindo...' : 'Nota fiscal'}
+                    {!fiscalReady
                       ? <small>não configurada</small>
-                      : !cartHasProduct && cart.length > 0
-                        ? <small>só serviços</small>
-                        : nfceConfig.environment === 'homologacao' && <small>teste</small>}
+                      : (cartHasProduct ? nfceConfig?.environment : nfseConfig?.environment) === 'homologacao' && <small>teste</small>}
                   </button>
                   <button
                     className="primary-action finish-button"

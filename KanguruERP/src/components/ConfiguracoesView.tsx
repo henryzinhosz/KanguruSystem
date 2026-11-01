@@ -41,6 +41,9 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   workOrderTerms: '',
   workOrderDeliveryTerms: '',
   instagram: '',
+  municipalRegistration: '',
+  cityIbgeCode: '',
+  simplesNacionalOption: '3',
   exchangeDays: 7,
   fixedCost: 0,
   maxItemDiscountPercent: 0,
@@ -184,6 +187,9 @@ export default function ConfiguracoesView({
       workOrderTerms: store.workOrderTerms || '',
       workOrderDeliveryTerms: store.workOrderDeliveryTerms || '',
       instagram: store.instagram || '',
+      municipalRegistration: store.municipalRegistration || '',
+      cityIbgeCode: store.cityIbgeCode || '',
+      simplesNacionalOption: store.simplesNacionalOption || '3',
       exchangeDays: store.exchangeDays ?? 7,
       fixedCost: store.fixedCost,
       maxItemDiscountPercent: store.maxItemDiscountPercent,
@@ -479,6 +485,7 @@ function StoreFields({ form, onChange }: {
     { field: 'legalName', label: 'Razão social' },
     { field: 'cnpj', label: 'CNPJ' },
     { field: 'stateRegistration', label: 'Inscrição estadual' },
+    { field: 'municipalRegistration', label: 'Inscrição municipal (NFS-e dos serviços)' },
     { field: 'address', label: 'Endereço completo' },
     { field: 'phone', label: 'Telefone' },
     { field: 'contactEmail', label: 'E-mail de contato', type: 'email' },
@@ -498,6 +505,32 @@ function StoreFields({ form, onChange }: {
           />
         </label>
       ))}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="block text-xs font-bold text-slate-700">
+          Município da loja (código IBGE) <span className="font-normal text-slate-400">(NFS-e)</span>
+          <div className="mt-1 flex gap-1.5">
+            <input
+              value={form.cityIbgeCode || ''}
+              placeholder="3304557"
+              onChange={event => onChange('cityIbgeCode', event.target.value.replace(/\D/g, '').slice(0, 7))}
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+            />
+            <button type="button" onClick={() => onChange('cityIbgeCode', '3304557')} className="shrink-0 px-2 text-[10px] font-bold border border-slate-200 rounded-lg hover:bg-slate-50" title="Rio de Janeiro">Rio (RJ)</button>
+          </div>
+        </label>
+        <label className="block text-xs font-bold text-slate-700">
+          Simples Nacional <span className="font-normal text-slate-400">(NFS-e)</span>
+          <select
+            value={form.simplesNacionalOption || '3'}
+            onChange={event => onChange('simplesNacionalOption', event.target.value as '1' | '2' | '3')}
+            className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+          >
+            <option value="3">Optante — ME/EPP</option>
+            <option value="2">Optante — MEI</option>
+            <option value="1">Não optante</option>
+          </select>
+        </label>
+      </div>
       <label className="block text-xs font-bold text-slate-700">
         Limite de desconto padrão (%) <span className="font-normal text-slate-400">(usado quando o produto não tem limite próprio; vale também para serviços)</span>
         <ValueInput

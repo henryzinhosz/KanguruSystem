@@ -12,6 +12,7 @@ import {
   TradeIn, 
   WorkOrder, 
   WorkOrderStatus,
+  SaleServiceInvoice,
   ErpPermissions,
   TenantUser,
   StockCount,
@@ -1156,7 +1157,11 @@ export const supabaseService = {
       name: service.name,
       category: service.category,
       sellPrice: Number(service.sell_price),
-      isActive: service.is_active
+      isActive: service.is_active,
+      nfseServiceCode: service.nfse_service_code ?? undefined,
+      nfseNbsCode: service.nfse_nbs_code ?? undefined,
+      nfseMunicipalCode: service.nfse_municipal_code ?? undefined,
+      nfseDescription: service.nfse_description ?? undefined
     }));
   },
 
@@ -1167,7 +1172,14 @@ export const supabaseService = {
       name: service.name.trim(),
       category: service.category.trim(),
       sell_price: service.sellPrice,
-      is_active: service.isActive
+      is_active: service.isActive,
+      // Dados da NFS-e (migration 20261113): so envia quando a tela trabalhou com eles.
+      ...(service.nfseServiceCode !== undefined ? {
+        nfse_service_code: service.nfseServiceCode.replace(/\D/g, '') || null,
+        nfse_nbs_code: (service.nfseNbsCode || '').replace(/\D/g, '') || null,
+        nfse_municipal_code: (service.nfseMunicipalCode || '').trim() || null,
+        nfse_description: (service.nfseDescription || '').trim() || null
+      } : {})
     }).select('sku').single();
     if (error) throw error;
     return data.sku;
@@ -1593,6 +1605,38 @@ export const supabaseService = {
     }));
   },
 
+  // NFS-e dos servicos das vendas visiveis (RLS por loja). Antes da migration 20261113: lista vazia.
+  async listSaleServiceInvoices(): Promise<SaleServiceInvoice[]> {
+    const { data, error } = await supabase
+      .from('sale_service_invoices')
+      .select('id, sale_id, status, number, danfse_url, xml_url, message, environment, amount')
+      .order('created_at', { ascending: false })
+      .limit(5000);
+    if (error) return [];
+    return (data || []).map(row => ({
+      id: row.id,
+      saleId: row.sale_id,
+      status: row.status,
+      number: row.number,
+      danfseUrl: row.danfse_url,
+      xmlUrl: row.xml_url,
+      message: row.message,
+      environment: row.environment,
+      amount: Number(row.amount)
+    }));
+  },
+
+  // Cancela as NFS-e autorizadas da venda (prazo da prefeitura). Lanca o motivo se recusado.
+  async cancelSaleNfse(saleId: string, justification: string): Promise<void> {
+    const { data, error } = await supabase.functions.invoke('nfse-cancel', { body: { saleId, justification } });
+    if (error) {
+      const context = (error as { context?: Response }).context;
+      const body = context && typeof context.json === 'function' ? await context.json().catch(() => null) : null;
+      throw new Error(body?.error || 'Não foi possível cancelar a NFS-e.');
+    }
+    if (data?.status !== 'CANCELADA' && data?.status !== 'SEM_NFSE') throw new Error(data?.error || 'Não foi possível cancelar a NFS-e.');
+  },
+
   // Cancela a NFC-e na Sefaz (ate 30 min depois da autorizacao). Lanca o motivo se recusado.
   async cancelSaleNfce(saleId: string, justification: string): Promise<void> {
     const { data, error } = await supabase.functions.invoke('nfce-cancel', {
@@ -1815,6 +1859,9 @@ export const supabaseService = {
       maxItemDiscountPercent: Number(c.max_item_discount_percent ?? 0),
       paymentFees: c.payment_fees,
       cardFeeTable: c.card_fee_table ?? null,
+      municipalRegistration: c.municipal_registration ?? undefined,
+      cityIbgeCode: c.city_ibge_code ?? undefined,
+      simplesNacionalOption: c.simples_nacional_option ?? undefined,
       tradeName: c.trade_name || undefined,
       legalName: c.legal_name || undefined,
       cnpj: c.cnpj || undefined,
@@ -1851,7 +1898,11 @@ export const supabaseService = {
       instagram: c.instagram?.trim() || null,
       ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {}),
       // Antes da migration 20261111 a coluna nao existe: so envia quando foi lida do banco.
-      ...(c.cardFeeTable !== undefined ? { card_fee_table: c.cardFeeTable } : {})
+      ...(c.cardFeeTable !== undefined ? { card_fee_table: c.cardFeeTable } : {}),
+      // NFS-e (migration 20261113): so envia quando a coluna ja foi lida ou a tela preencheu.
+      ...(c.municipalRegistration !== undefined ? { municipal_registration: c.municipalRegistration.trim() || null } : {}),
+      ...(c.cityIbgeCode !== undefined ? { city_ibge_code: c.cityIbgeCode.replace(/\D/g, '') || null } : {}),
+      ...(c.simplesNacionalOption !== undefined ? { simples_nacional_option: c.simplesNacionalOption } : {})
     };
 
     const { error } = await supabase.from('store_configs').upsert(payload);

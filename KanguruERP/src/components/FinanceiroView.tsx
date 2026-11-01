@@ -15,8 +15,7 @@ import {
   SALE_PAYMENT_METHOD_LABELS,
   Product,
   StockInventory,
-  CardCondition
-} from '../types';
+  CardCondition, SaleServiceInvoice } from '../types';
 import { 
   Plus, 
   DollarSign, 
@@ -122,6 +121,11 @@ export default function FinanceiroView({
 
   // Vendas sao registradas somente pelo PDV; aqui ficam o historico e o estorno.
   const [saleError, setSaleError] = useState('');
+  // NFS-e dos servicos (migration 20261113): carregadas a parte, por venda.
+  const [serviceInvoices, setServiceInvoices] = useState<SaleServiceInvoice[]>([]);
+  useEffect(() => {
+    void supabaseService.listSaleServiceInvoices().then(setServiceInvoices);
+  }, [sales]);
   const [saleSuccess, setSaleSuccess] = useState('');
   const [configSuccess, setConfigSuccess] = useState('');
 
@@ -200,6 +204,21 @@ export default function FinanceiroView({
     }
   };
 
+  // NFS-e autorizadas da venda: canceladas na prefeitura antes do estorno (prazo da prefeitura).
+  const cancelNfseBeforeRefund = async (sale: Sale): Promise<boolean> => {
+    const invoices = serviceInvoices.filter(invoice => invoice.saleId === sale.id && invoice.status === 'AUTORIZADA');
+    if (invoices.length === 0) return true;
+    const justification = window.prompt('Motivo do cancelamento da NFS-e (mínimo 15 caracteres):', 'Cancelamento do serviço a pedido do cliente');
+    if (justification == null) return false;
+    try {
+      await supabaseService.cancelSaleNfse(sale.id, justification.trim());
+      return true;
+    } catch (error) {
+      setSaleError(error instanceof Error ? error.message : 'Não foi possível cancelar a NFS-e.');
+      return false;
+    }
+  };
+
   const handleCancelSale = async (saleId: string) => {
     setSaleError('');
     setSaleSuccess('');
@@ -211,6 +230,7 @@ export default function FinanceiroView({
     }
     const goesToApproval = sale.grossAmount > 300 && !isAdmin;
     if (!goesToApproval && !(await cancelNfceBeforeRefund(sale))) return;
+    if (!goesToApproval && !(await cancelNfseBeforeRefund(sale))) return;
     let res: Awaited<ReturnType<typeof cancelSale>>;
     try {
       res = await cancelSale(saleId);
@@ -238,6 +258,7 @@ export default function FinanceiroView({
       return;
     }
     if (!(await cancelNfceBeforeRefund(sale))) return;
+    if (!(await cancelNfseBeforeRefund(sale))) return;
     try {
       await cancelSale(saleId, currentUser.name);
     } catch (error) {
@@ -656,6 +677,16 @@ export default function FinanceiroView({
                                 {s.nfceDanfeUrl && <a href={s.nfceDanfeUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-700 hover:underline">DANFE</a>}
                               </span>
                             )}
+                            {serviceInvoices.filter(invoice => invoice.saleId === s.id).map(invoice => (
+                              <span key={invoice.id} className="mt-0.5 block text-[10px] font-normal">
+                                <span className={`rounded border px-1 font-bold ${NFCE_STATUS_STYLES[invoice.status]}`} title={invoice.message || undefined}>
+                                  NFS-e {invoice.number ? `nº ${invoice.number} ` : ''}{NFCE_STATUS_LABELS[invoice.status]}
+                                </span>
+                                {invoice.environment === 'homologacao' && <span className="ml-1 text-slate-400">(teste)</span>}
+                                {invoice.xmlUrl && <a href={invoice.xmlUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-700 hover:underline">XML</a>}
+                                {invoice.danfseUrl && <a href={invoice.danfseUrl} target="_blank" rel="noreferrer" className="ml-1 text-blue-700 hover:underline">DANFSe</a>}
+                              </span>
+                            ))}
                             {(s.returns || []).map(item => (
                               <span key={item.id} className="mt-0.5 block text-[10px] font-normal text-rose-700" title={item.reason}>
                                 Devolução nº {item.returnNumber}: -{formatMoney(item.totalAmount)} ({RETURN_METHOD_LABELS[item.refundMethod]})

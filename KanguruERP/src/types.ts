@@ -201,6 +201,23 @@ export interface Service {
   category: string;
   sellPrice: number;
   isActive: boolean;
+  // NFS-e Nacional: codigo de tributacao nacional (6 digitos), NBS (9), codigo municipal e texto da nota.
+  nfseServiceCode?: string;
+  nfseNbsCode?: string;
+  nfseMunicipalCode?: string;
+  nfseDescription?: string;
+}
+
+export interface SaleServiceInvoice {
+  id: string;
+  saleId: string;
+  status: 'PENDENTE' | 'AUTORIZADA' | 'ERRO' | 'CANCELADA';
+  number: string | null;
+  danfseUrl: string | null;
+  xmlUrl: string | null;
+  message: string | null;
+  environment: string | null;
+  amount: number;
 }
 
 export interface StockQuantity {
@@ -492,6 +509,10 @@ export interface StoreConfig {
   workOrderDeliveryTerms?: string;
   instagram?: string; // perfil da loja (QR code do cupom)
   exchangeDays?: number; // prazo de troca em dias (2.9; padrao 7)
+  // NFS-e Nacional: inscricao municipal, municipio (IBGE) e opcao do Simples (1 nao optante, 2 MEI, 3 ME/EPP).
+  municipalRegistration?: string;
+  cityIbgeCode?: string;
+  simplesNacionalOption?: '1' | '2' | '3';
   // Taxas do cartao em % (calculadora de juros do PDV): debito e credito de 1x a 12x.
   cardFeeTable?: CardFeeTable | null;
   paymentFees: {
