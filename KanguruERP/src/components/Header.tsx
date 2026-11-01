@@ -53,7 +53,7 @@ export default function Header({ currentUser, onLogout, isUcpActive = false, onT
               <div className="text-right hidden sm:block">
                 <div className="text-sm font-bold text-slate-900">{currentUser.name}</div>
                 <div className="text-xs text-slate-400 font-medium leading-none">
-                  {currentUser.role === UserRole.SUPER_ADMIN ? 'Administração da Plataforma' : 'Gestor Comercial'}
+                  {currentUser.role === UserRole.SUPER_ADMIN ? 'Administração da Plataforma' : currentUser.role === UserRole.NETWORK_OWNER ? 'Dono da rede' : currentUser.role === UserRole.NETWORK_MANAGER ? 'Gerente da rede' : 'Gestor Comercial'}
                 </div>
               </div>
               <button

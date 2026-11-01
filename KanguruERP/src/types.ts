@@ -8,8 +8,14 @@ export enum UserRole {
   ADMIN = 'ADMIN',
   MANAGER = 'MANAGER',
   SELLER = 'SELLER',
-  OPERATOR = 'OPERATOR'
+  OPERATOR = 'OPERATOR',
+  // Painel da Rede (franqueadora): so leitura das franquias da rede.
+  NETWORK_OWNER = 'NETWORK_OWNER',
+  NETWORK_MANAGER = 'NETWORK_MANAGER'
 }
+
+export const isNetworkRole = (role: UserRole | string | undefined) =>
+  role === UserRole.NETWORK_OWNER || role === UserRole.NETWORK_MANAGER;
 
 export interface User {
   id: string;
@@ -22,6 +28,9 @@ export interface User {
   // Gerente de loja: areas liberadas e lojas que acessa (nulo = administrador, tudo).
   permissions?: ErpPermissions | null;
   storeIds?: string[] | null;
+  // Login da rede (franqueadora).
+  networkId?: string | null;
+  networkName?: string | null;
 }
 
 // Areas do ERP que o dono libera para cada gerente (Configuracoes fica sempre so com o dono).

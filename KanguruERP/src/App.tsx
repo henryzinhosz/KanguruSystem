@@ -17,8 +17,9 @@ import ConfiguracoesView from './components/ConfiguracoesView';
 import ServicosView from './components/ServicosView';
 import ClientesView from './components/ClientesView';
 import UcpView from './components/UcpView';
+import NetworkView from './components/NetworkView';
 import BalancoPanel from './components/BalancoPanel';
-import { DEFAULT_MANAGER_PERMISSIONS, ErpArea, UserRole } from './types';
+import { DEFAULT_MANAGER_PERMISSIONS, ErpArea, UserRole, isNetworkRole } from './types';
 import { 
   LayoutDashboard, 
   Package, 
@@ -83,6 +84,23 @@ export default function App() {
   }
 
   const isPlatformAdmin = currentUser.role === UserRole.SUPER_ADMIN;
+
+  if (isNetworkRole(currentUser.role)) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+        <Header
+          currentUser={currentUser}
+          onLogout={() => {
+            void supabase.auth.signOut();
+            setCurrentUser(null);
+          }}
+        />
+        <main className="erp-workspace flex-1 w-full overflow-y-auto p-3 sm:p-4 lg:p-5">
+          <NetworkView currentUser={currentUser} />
+        </main>
+      </div>
+    );
+  }
 
   if (isPlatformAdmin) {
     return (

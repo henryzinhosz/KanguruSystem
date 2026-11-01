@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { PdvOperator, PlatformTenant, PlatformTenantDetails, PosTerminalActivation, PosTerminalActivationStatus, StoreNfceStatus, SubscriptionStatus } from '../types';
 import { supabaseService } from '../db/supabaseService';
+import NetworkAdminPanel from './NetworkAdminPanel';
 
 interface UcpViewProps {
   onBackToErp?: () => void;
@@ -567,6 +568,8 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
           </div>
         )}
       </section>
+
+      <NetworkAdminPanel tenants={tenants} />
     </div>
   );
 }

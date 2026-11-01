@@ -1,0 +1,411 @@
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { ArrowDownRight, ArrowUpRight, Building2, Check, KeyRound, Network, RefreshCw, Store, UserPlus, Users } from 'lucide-react';
+import type { User } from '../types';
+import { PERIOD_LABELS, PeriodPreset, formatMoney, monthLabel, resolvePeriod, shiftMonthKey, toLocalDateKey, type DateRange } from '../db/finance';
+import {
+  getNetworkMonthlyRevenue,
+  getNetworkStoreMetrics,
+  listNetworkFranchises,
+  listNetworkUsers,
+  manageNetworkUser,
+  type NetworkFranchise,
+  type NetworkMonthlyRow,
+  type NetworkStoreMetrics,
+  type NetworkUser,
+} from '../db/network';
+
+// Painel da Rede (etapa 1): a franqueadora acompanha as franquias, so leitura.
+// Mesmas regras de numeros dos Relatorios Gerais do ERP (calculadas no servidor).
+
+type Tab = 'geral' | 'franquias' | 'usuarios';
+
+const MONTH_SHORT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : (error as { message?: string })?.message || 'Erro ao carregar os dados.';
+
+// Periodo anterior para comparar: mes corrente -> mesmos dias do mes passado; demais -> mesmo tamanho logo antes.
+function previousRange(preset: PeriodPreset, range: DateRange): DateRange {
+  if (preset === 'mes') {
+    const start = new Date(range.start.getFullYear(), range.start.getMonth() - 1, 1);
+    const days = Math.round((range.end.getTime() - range.start.getTime()) / 86400000);
+    return { start, end: new Date(start.getFullYear(), start.getMonth(), 1 + days) };
+  }
+  if (preset === 'mes_passado') {
+    return { start: new Date(range.start.getFullYear(), range.start.getMonth() - 1, 1), end: range.start };
+  }
+  const length = range.end.getTime() - range.start.getTime();
+  return { start: new Date(range.start.getTime() - length), end: range.start };
+}
+
+interface Totals {
+  revenue: number;
+  cost: number;
+  grossProfit: number;
+  fees: number;
+  expenses: number;
+  operatingProfit: number;
+  salesCount: number;
+  ticket: number;
+}
+
+function totalsOf(rows: NetworkStoreMetrics[]): Totals {
+  const revenue = rows.reduce((sum, row) => sum + row.gross - row.returned, 0);
+  const cost = rows.reduce((sum, row) => sum + row.cost, 0);
+  const fees = rows.reduce((sum, row) => sum + row.fees, 0);
+  const expenses = rows.reduce((sum, row) => sum + row.expenses, 0);
+  const salesCount = rows.reduce((sum, row) => sum + row.salesCount, 0);
+  return {
+    revenue,
+    cost,
+    grossProfit: revenue - cost,
+    fees,
+    expenses,
+    operatingProfit: revenue - cost - fees - expenses,
+    salesCount,
+    ticket: salesCount > 0 ? revenue / salesCount : 0,
+  };
+}
+
+const variation = (current: number, previous: number) => (previous > 0 ? ((current - previous) / previous) * 100 : null);
+
+export default function NetworkView({ currentUser }: { currentUser: User }) {
+  const [tab, setTab] = useState<Tab>('geral');
+  const isOwner = currentUser.role === 'NETWORK_OWNER';
+  const tabs: [Tab, string][] = [['geral', 'Visão geral'], ['franquias', 'Franquias'], ['usuarios', 'Usuários da rede']];
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-wider text-blue-700 flex items-center gap-1.5"><Network className="w-3.5 h-3.5" />Painel da Rede</p>
+        <h2 className="text-xl font-bold text-slate-900">{currentUser.networkName || 'Rede'}</h2>
+        <p className="text-xs text-slate-500">Acompanhamento das franquias da rede (somente leitura).</p>
+      </div>
+      <div className="flex flex-wrap gap-1 border-b border-slate-200">
+        {tabs.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setTab(id)} className={`px-4 py-2 text-xs font-bold border-b-2 -mb-px ${tab === id ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{label}</button>
+        ))}
+      </div>
+      {tab === 'geral' && <NetworkOverview />}
+      {tab === 'franquias' && <NetworkFranchises />}
+      {tab === 'usuarios' && <NetworkUsers isOwner={isOwner} currentUserId={currentUser.id} />}
+    </div>
+  );
+}
+
+// ---------------- Visao geral ----------------
+
+function NetworkOverview() {
+  const [preset, setPreset] = useState<PeriodPreset>('mes');
+  const [customFrom, setCustomFrom] = useState(() => toLocalDateKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
+  const [customTo, setCustomTo] = useState(() => toLocalDateKey(new Date()));
+  const [current, setCurrent] = useState<NetworkStoreMetrics[]>([]);
+  const [previous, setPrevious] = useState<NetworkStoreMetrics[]>([]);
+  const [monthly, setMonthly] = useState<NetworkMonthlyRow[]>([]);
+  const [franchises, setFranchises] = useState<NetworkFranchise[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const range = useMemo(() => resolvePeriod(preset, customFrom, customTo), [preset, customFrom, customTo]);
+  const prevRange = useMemo(() => previousRange(preset, range), [preset, range]);
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const now = new Date();
+      const monthsFrom = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+      const monthsTo = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      const [currentRows, previousRows, monthlyRows, franchiseRows] = await Promise.all([
+        getNetworkStoreMetrics(range.start, range.end),
+        getNetworkStoreMetrics(prevRange.start, prevRange.end),
+        getNetworkMonthlyRevenue(monthsFrom, monthsTo),
+        listNetworkFranchises(),
+      ]);
+      setCurrent(currentRows);
+      setPrevious(previousRows);
+      setMonthly(monthlyRows);
+      setFranchises(franchiseRows);
+    } catch (loadError) {
+      setError(`Não foi possível carregar os números da rede: ${errorText(loadError)}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, [range.start.getTime(), range.end.getTime()]);
+
+  const totals = totalsOf(current);
+  const prevTotals = totalsOf(previous);
+  const franchiseName = (tenantId: string) => {
+    const franchise = franchises.find(entry => entry.tenantId === tenantId);
+    return franchise?.tradeName || franchise?.legalName || '—';
+  };
+  const previousByStore = new Map<string, NetworkStoreMetrics>(previous.map(row => [`${row.tenantId}|${row.unitId}`, row]));
+  const ranking = [...current]
+    .map(row => {
+      const revenue = row.gross - row.returned;
+      const prev = previousByStore.get(`${row.tenantId}|${row.unitId}`);
+      return {
+        row,
+        revenue,
+        grossProfit: revenue - row.cost,
+        operatingProfit: revenue - row.cost - row.fees - row.expenses,
+        ticket: row.salesCount > 0 ? revenue / row.salesCount : 0,
+        change: variation(revenue, prev ? prev.gross - prev.returned : 0),
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue);
+
+  // Ultimos 12 meses (total da rede), incluindo meses sem venda.
+  const monthKeys = Array.from({ length: 12 }, (_, index) => shiftMonthKey(toLocalDateKey(new Date()).slice(0, 7), index - 11));
+  const chartData = monthKeys.map(key => ({
+    month: key,
+    label: `${MONTH_SHORT[Number(key.slice(5, 7)) - 1]}/${key.slice(2, 4)}`,
+    revenue: monthly.filter(row => row.month === key).reduce((sum, row) => sum + row.revenue, 0),
+  }));
+  const missingCost = current.reduce((sum, row) => sum + row.salesMissingCost, 0);
+
+  const cards: { label: string; value: string; change: number | null; hint?: string }[] = [
+    { label: 'Faturamento', value: formatMoney(totals.revenue), change: variation(totals.revenue, prevTotals.revenue), hint: 'Vendas concluídas menos devoluções' },
+    { label: 'Lucro bruto', value: formatMoney(totals.grossProfit), change: variation(totals.grossProfit, prevTotals.grossProfit), hint: 'Faturamento menos custo das mercadorias' },
+    { label: 'Lucro real operacional', value: formatMoney(totals.operatingProfit), change: variation(totals.operatingProfit, prevTotals.operatingProfit), hint: 'Lucro bruto menos taxas de cartão e despesas lançadas' },
+    { label: 'Ticket médio', value: formatMoney(totals.ticket), change: variation(totals.ticket, prevTotals.ticket) },
+    { label: 'Vendas', value: totals.salesCount.toLocaleString('pt-BR'), change: variation(totals.salesCount, prevTotals.salesCount) },
+    { label: 'Margem bruta', value: totals.revenue > 0 ? `${((totals.grossProfit / totals.revenue) * 100).toFixed(1)}%` : '—', change: null },
+  ];
+
+  return (
+    <div className="space-y-5 text-xs">
+      <div className="bg-white border border-slate-200 rounded-lg p-3 flex flex-wrap items-end gap-2">
+        {(Object.keys(PERIOD_LABELS) as PeriodPreset[]).map(key => (
+          <button key={key} type="button" onClick={() => setPreset(key)} className={`px-3 py-1.5 rounded-lg border font-bold ${preset === key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{PERIOD_LABELS[key]}</button>
+        ))}
+        {preset === 'personalizado' && (
+          <>
+            <input type="date" value={customFrom} onChange={event => setCustomFrom(event.target.value)} className="border border-slate-200 rounded-lg p-1.5" />
+            <input type="date" value={customTo} onChange={event => setCustomTo(event.target.value)} className="border border-slate-200 rounded-lg p-1.5" />
+          </>
+        )}
+        <button type="button" onClick={() => void load()} disabled={loading} className="ml-auto p-2 text-slate-500 hover:text-slate-800 disabled:opacity-50" title="Atualizar" aria-label="Atualizar"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
+      </div>
+
+      {error && <p className="text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{error}</p>}
+
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        {cards.map(card => (
+          <div key={card.label} className="bg-white border border-slate-200 rounded-lg p-3" title={card.hint}>
+            <span className="text-[10px] font-bold uppercase text-slate-500 block">{card.label}</span>
+            <span className="text-lg font-black text-slate-900 block mt-0.5">{card.value}</span>
+            {card.change != null && (
+              <span className={`text-[11px] font-bold inline-flex items-center gap-0.5 ${card.change >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                {card.change >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
+                {Math.abs(card.change).toFixed(1)}% <span className="font-normal text-slate-400">vs. período anterior</span>
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      {missingCost > 0 && <p className="text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">{missingCost} venda(s) do período têm produto sem custo registrado: o lucro dessas vendas pode estar maior que o real.</p>}
+
+      <div className="bg-white border border-slate-200 rounded-lg p-4">
+        <h3 className="text-sm font-bold text-slate-900">Faturamento da rede — últimos 12 meses</h3>
+        <div className="h-64 mt-3">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+              <YAxis tickLine={false} axisLine={false} width={72} tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={value => `R$ ${(Number(value) / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} mil`} />
+              <Tooltip cursor={{ fill: 'rgba(37, 99, 235, 0.06)' }} formatter={value => [formatMoney(Number(value)), 'Faturamento']} labelFormatter={(_, payload) => (payload?.[0] ? monthLabel(String(payload[0].payload.month)) : '')} />
+              <Bar dataKey="revenue" fill="#2563eb" radius={[4, 4, 0, 0]} maxBarSize={36} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div className="p-4 border-b border-slate-100">
+          <h3 className="text-sm font-bold text-slate-900">Ranking das lojas</h3>
+          <p className="text-slate-500">{ranking.length} loja(s) na rede · ordenado por faturamento</p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[860px]">
+            <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 text-left">
+              <tr>
+                <th className="p-2">#</th><th className="p-2">Loja</th><th className="p-2">Franquia</th>
+                <th className="p-2 text-right">Faturamento</th><th className="p-2 text-right">% da rede</th>
+                <th className="p-2 text-right">Vendas</th><th className="p-2 text-right">Ticket</th>
+                <th className="p-2 text-right">Lucro bruto</th><th className="p-2 text-right">Margem</th>
+                <th className="p-2 text-right">Lucro real</th><th className="p-2 text-right">Variação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ranking.map((entry, index) => (
+                <tr key={`${entry.row.tenantId}-${entry.row.unitId}`} className="border-t border-slate-100">
+                  <td className="p-2 font-bold text-slate-400">{index + 1}</td>
+                  <td className="p-2 font-bold text-slate-900">{entry.row.storeName || entry.row.unitId}</td>
+                  <td className="p-2 text-slate-600">{franchiseName(entry.row.tenantId)}</td>
+                  <td className="p-2 text-right font-mono font-bold">{formatMoney(entry.revenue)}</td>
+                  <td className="p-2 text-right font-mono">{totals.revenue > 0 ? `${((entry.revenue / totals.revenue) * 100).toFixed(1)}%` : '—'}</td>
+                  <td className="p-2 text-right font-mono">{entry.row.salesCount}</td>
+                  <td className="p-2 text-right font-mono">{formatMoney(entry.ticket)}</td>
+                  <td className="p-2 text-right font-mono">{formatMoney(entry.grossProfit)}</td>
+                  <td className="p-2 text-right font-mono">{entry.revenue > 0 ? `${((entry.grossProfit / entry.revenue) * 100).toFixed(1)}%` : '—'}</td>
+                  <td className={`p-2 text-right font-mono ${entry.operatingProfit < 0 ? 'text-rose-700' : ''}`}>{formatMoney(entry.operatingProfit)}</td>
+                  <td className={`p-2 text-right font-bold ${entry.change == null ? 'text-slate-400' : entry.change >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                    {entry.change == null ? '—' : `${entry.change >= 0 ? '+' : ''}${entry.change.toFixed(1)}%`}
+                  </td>
+                </tr>
+              ))}
+              {ranking.length === 0 && !loading && <tr><td colSpan={11} className="p-6 text-center text-slate-400">Nenhuma loja ligada a esta rede ainda.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------- Franquias ----------------
+
+function NetworkFranchises() {
+  const [franchises, setFranchises] = useState<NetworkFranchise[]>([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    listNetworkFranchises()
+      .then(setFranchises)
+      .catch(loadError => setError(errorText(loadError)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) return <p className="text-xs text-slate-400">Carregando franquias...</p>;
+  return (
+    <div className="space-y-4 text-xs">
+      {error && <p className="text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{error}</p>}
+      {franchises.length === 0 && !error && <p className="text-slate-400">Nenhuma franquia ligada a esta rede ainda.</p>}
+      {franchises.map(franchise => (
+        <section key={franchise.tenantId} className="bg-white border border-slate-200 rounded-lg p-4 space-y-3">
+          <div className="flex flex-wrap justify-between gap-3">
+            <div className="flex items-start gap-2">
+              <Building2 className="w-5 h-5 text-blue-600 mt-0.5" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">{franchise.tradeName || franchise.legalName}</h3>
+                <p className="text-slate-500">{franchise.legalName} · CNPJ {franchise.cnpj}</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] font-bold uppercase text-slate-500 block">Franqueado</span>
+              <strong className="text-slate-800">{franchise.ownerName || 'não informado'}</strong>
+              <span className="block text-slate-500">{[franchise.ownerPhone, franchise.ownerEmail].filter(Boolean).join(' · ') || '—'}</span>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {franchise.stores.map(store => (
+              <div key={store.unitId} className="border border-slate-200 rounded-lg p-3 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-slate-800"><Store className="w-4 h-4 text-slate-400" />{store.tradeName || store.unitId}</div>
+                {store.address && <p className="text-slate-500">{store.address}</p>}
+                {store.phone && <p className="text-slate-500">Tel. {store.phone}</p>}
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${store.activeTerminals > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{store.activeTerminals} PDV ativo(s)</span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${store.openCash ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{store.openCash ? 'Caixa aberto' : 'Caixa fechado'}</span>
+                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Última venda: {store.lastSaleAt ? new Date(store.lastSaleAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</span>
+                </div>
+              </div>
+            ))}
+            {franchise.stores.length === 0 && <p className="text-slate-400">Sem lojas cadastradas.</p>}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
+// ---------------- Usuarios da rede ----------------
+
+function NetworkUsers({ isOwner, currentUserId }: { isOwner: boolean; currentUserId: string }) {
+  const [users, setUsers] = useState<NetworkUser[]>([]);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState({ name: '', email: '', password: '' });
+
+  const reload = () => listNetworkUsers().then(setUsers).catch(loadError => setError(errorText(loadError)));
+  useEffect(() => {
+    void reload();
+  }, []);
+
+  const run = async (action: () => Promise<void>, success: string) => {
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      await action();
+      setMessage(success);
+      await reload();
+    } catch (actionError) {
+      setError(errorText(actionError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createManager = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void run(async () => {
+      await manageNetworkUser({ action: 'create', role: 'MANAGER', ...form });
+      setForm({ name: '', email: '', password: '' });
+    }, 'Gerente da rede criado. Passe o e-mail e a senha para ele entrar.');
+  };
+
+  const input = 'mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500';
+  return (
+    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5 text-xs">
+      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div className="p-4 border-b border-slate-100 flex items-center gap-2"><Users className="w-5 h-5 text-blue-600" /><h3 className="text-sm font-bold text-slate-900">Usuários da rede</h3></div>
+        {error && <p className="m-3 text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2">{error}</p>}
+        {message && <p className="m-3 text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2 flex items-center gap-1.5"><Check className="w-4 h-4" />{message}</p>}
+        <table className="w-full">
+          <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 text-left"><tr><th className="p-2">Nome</th><th className="p-2">E-mail</th><th className="p-2">Perfil</th><th className="p-2">Situação</th>{isOwner && <th className="p-2 text-right">Ações</th>}</tr></thead>
+          <tbody>
+            {users.map(user => (
+              <tr key={user.authUid} className="border-t border-slate-100">
+                <td className="p-2 font-bold text-slate-900">{user.displayName}</td>
+                <td className="p-2 text-slate-600">{user.email}</td>
+                <td className="p-2">{user.role === 'OWNER' ? 'Dono da rede' : 'Gerente da rede'}</td>
+                <td className="p-2"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${user.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{user.isActive ? 'ATIVO' : 'DESATIVADO'}</span></td>
+                {isOwner && (
+                  <td className="p-2">
+                    {user.role === 'MANAGER' && user.authUid !== currentUserId && (
+                      <div className="flex justify-end gap-2">
+                        <button type="button" disabled={busy} onClick={() => {
+                          const password = window.prompt(`Nova senha para ${user.displayName} (mínimo 8 caracteres):`);
+                          if (password) void run(() => manageNetworkUser({ action: 'set_password', authUid: user.authUid, password }), 'Senha trocada.');
+                        }} className="text-blue-700 font-bold hover:underline flex items-center gap-1"><KeyRound className="w-3.5 h-3.5" />Senha</button>
+                        <button type="button" disabled={busy} onClick={() => void run(() => manageNetworkUser({ action: 'set_active', authUid: user.authUid, active: !user.isActive }), user.isActive ? 'Gerente desativado.' : 'Gerente reativado.')} className={`font-bold hover:underline ${user.isActive ? 'text-rose-600' : 'text-emerald-700'}`}>{user.isActive ? 'Desativar' : 'Reativar'}</button>
+                      </div>
+                    )}
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {isOwner && (
+        <form onSubmit={createManager} className="bg-white border border-slate-200 rounded-lg p-4 space-y-3 h-fit">
+          <div className="flex items-center gap-2"><UserPlus className="w-5 h-5 text-blue-600" /><h3 className="text-sm font-bold text-slate-900">Novo gerente da rede</h3></div>
+          <label className="block font-bold text-slate-700">Nome<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} className={input} /></label>
+          <label className="block font-bold text-slate-700">E-mail<input required type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} className={input} /></label>
+          <label className="block font-bold text-slate-700">Senha inicial<input required type="password" minLength={8} value={form.password} onChange={event => setForm({ ...form, password: event.target.value })} className={input} /></label>
+          <button type="submit" disabled={busy} className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg disabled:opacity-50">{busy ? 'Salvando...' : 'Criar gerente'}</button>
+          <p className="text-slate-500">O gerente vê os mesmos números da rede, mas não cria nem altera logins.</p>
+        </form>
+      )}
+    </div>
+  );
+}
