@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Check, ChevronDown, ChevronRight, ChevronUp, Mail, Phone, UserRound, DollarSign, KeyRound, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Check, ChevronDown, ChevronRight, ChevronUp, Mail, Phone, UserRound, DollarSign, KeyRound, Landmark, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { User } from '../types';
 import { Dropdown, PERIOD_ORDER, previousRange } from './NetworkFilters';
 import NetworkFranchiseDetail from './NetworkFranchiseDetail';
+import NetworkRoyalties from './NetworkRoyalties';
 import { PERIOD_LABELS, PeriodPreset, formatMoney, monthLabel, resolvePeriod, shiftMonthKey, toLocalDateKey, type DateRange } from '../db/finance';
 import {
   getNetworkMonthlyRevenue,
@@ -21,7 +22,7 @@ import {
 // Painel da Rede (etapa 1): a franqueadora acompanha as franquias, so leitura.
 // Mesmas regras de numeros dos Relatorios Gerais do ERP (calculadas no servidor).
 
-type Tab = 'geral' | 'franquias' | 'usuarios';
+type Tab = 'geral' | 'franquias' | 'repasse' | 'usuarios';
 
 const MONTH_SHORT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
@@ -70,6 +71,7 @@ const variation = (current: number, previous: number) => (previous > 0 ? ((curre
 const NAV_ITEMS: { id: Tab; name: string; icon: LucideIcon; description: string }[] = [
   { id: 'geral', name: 'Visão geral', icon: LayoutDashboard, description: 'Números da rede, evolução e ranking das lojas.' },
   { id: 'franquias', name: 'Franquias', icon: Building2, description: 'Franqueados, lojas e situação de cada operação.' },
+  { id: 'repasse', name: 'Repasse', icon: Landmark, description: 'Royalties de cada franquia por mês: regra, cálculo e pagamento.' },
   { id: 'usuarios', name: 'Usuários da rede', icon: Users, description: 'Quem da franqueadora acessa este painel.' },
 ];
 
@@ -139,6 +141,7 @@ export default function NetworkView({ currentUser }: { currentUser: User }) {
         </div>
         {tab === 'geral' && <NetworkOverview />}
         {tab === 'franquias' && <NetworkFranchises />}
+        {tab === 'repasse' && <NetworkRoyalties networkName={currentUser.networkName || 'Rede'} />}
         {tab === 'usuarios' && <NetworkUsers isOwner={isOwner} currentUserId={currentUser.id} />}
       </main>
     </div>

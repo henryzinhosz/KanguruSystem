@@ -258,3 +258,58 @@ export const getFranchiseOperations = (tenantId: string, unitId: string | null, 
   franchiseRpc<FranchiseOperations>('network_franchise_operations', range(tenantId, unitId, from, to));
 export const getFranchiseCustomers = (tenantId: string, unitId: string | null, from: Date, to: Date) =>
   franchiseRpc<FranchiseCustomers>('network_franchise_customers', range(tenantId, unitId, from, to));
+
+// ---- Repasse / royalties (etapa 3, migration 20261117) ----
+
+export type RoyaltyTier = { upTo: number | null; type: 'FIXED' | 'PERCENT'; value: number };
+export interface RoyaltyRule {
+  mode: 'PERCENT' | 'TIERS';
+  percent: number | null;
+  tiers: RoyaltyTier[] | null;
+  updatedAt?: string;
+  updatedByName?: string | null;
+}
+export interface RoyaltyReportRow {
+  tenantId: string;
+  name: string;
+  cnpj: string;
+  ownerName: string | null;
+  rule: RoyaltyRule | null;
+  base: number;
+  royalty: number;
+  paid: boolean;
+  paidAt: string | null;
+  notes: string | null;
+  markedByName: string | null;
+  paidRule: RoyaltyRule | null;
+}
+
+const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
+
+export async function getRoyaltyReport(month: string): Promise<RoyaltyReportRow[]> {
+  const { data, error } = await supabase.rpc('network_royalty_report', { p_month: month, p_tz: timeZone() });
+  if (error) throw error;
+  return ((data || []) as RoyaltyReportRow[]).map(row => ({ ...row, base: Number(row.base), royalty: Number(row.royalty) }));
+}
+
+export async function saveRoyaltyRule(tenantId: string, rule: RoyaltyRule): Promise<void> {
+  const { error } = await supabase.rpc('network_save_royalty_rule', {
+    p_tenant_id: tenantId,
+    p_mode: rule.mode,
+    p_percent: rule.mode === 'PERCENT' ? rule.percent : null,
+    p_tiers: rule.mode === 'TIERS' ? rule.tiers : null,
+  });
+  if (error) throw error;
+}
+
+export async function setRoyaltyPaid(tenantId: string, month: string, paid: boolean, paidAt?: string, notes?: string): Promise<void> {
+  const { error } = await supabase.rpc('network_set_royalty_paid', {
+    p_tenant_id: tenantId,
+    p_month: month,
+    p_paid: paid,
+    p_paid_at: paidAt || null,
+    p_notes: notes || null,
+    p_tz: timeZone(),
+  });
+  if (error) throw error;
+}
