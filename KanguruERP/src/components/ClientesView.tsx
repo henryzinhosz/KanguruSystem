@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Check, Pencil, Plus, Save, Search, ShieldAlert, ShieldCheck, UserRound } from 'lucide-react';
 import { Customer, Product, Sale, StoreConfig } from '../types';
 import { supabaseService } from '../db/supabaseService';
+import CustomerDetail from './CustomerDetail';
 import { formatMoney } from '../db/finance';
 
 interface ClientesViewProps {
@@ -114,21 +115,8 @@ export default function ClientesView({ sales, products, storeConfigs }: Clientes
   }, [customers, search]);
 
   const selected = customers.find(customer => customer.id === selectedId) || null;
+  const [detailOpen, setDetailOpen] = useState(false);
 
-  // Historico: vendas com o CPF do cliente (de qualquer loja), uma linha por item de produto.
-  const history = useMemo(() => {
-    if (!selected) return [];
-    return sales
-      .filter(sale => onlyDigits(sale.clientCpf ?? '') === selected.cpf)
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .flatMap(sale => (sale.items || [])
-        .filter(item => (item.itemType ?? 'PRODUCT') === 'PRODUCT')
-        .map(item => {
-          const product = products.find(p => p.id === item.productId);
-          const months = product?.warrantyMonths ?? 0;
-          return { sale, item, product, months, end: months > 0 ? warrantyEnd(sale.timestamp, months) : null };
-        }));
-  }, [selected, sales, products]);
 
   const openNew = () => {
     setForm(EMPTY_FORM);
@@ -237,6 +225,16 @@ export default function ClientesView({ sales, products, storeConfigs }: Clientes
     </label>
   );
 
+  if (detailOpen && selected) {
+    return (
+      <CustomerDetail
+        customer={selected}
+        onBack={() => setDetailOpen(false)}
+        onEdit={() => { setDetailOpen(false); openEdit(selected); }}
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -270,7 +268,7 @@ export default function ClientesView({ sales, products, storeConfigs }: Clientes
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.map(customer => (
-                  <tr key={customer.id} onClick={() => setSelectedId(customer.id)} className={`cursor-pointer ${customer.id === selectedId ? 'bg-blue-50/60' : 'hover:bg-slate-50'}`}>
+                  <tr key={customer.id} onClick={() => { setSelectedId(customer.id); setDetailOpen(true); }} className={`cursor-pointer ${customer.id === selectedId ? 'bg-blue-50/60' : 'hover:bg-slate-50'}`}>
                     <td className="p-3 font-mono text-slate-500">{customer.code}</td>
                     <td className="p-3 font-bold text-slate-900">
                       {customer.name}
@@ -342,59 +340,8 @@ export default function ClientesView({ sales, products, storeConfigs }: Clientes
             </div>
           </form>
         ) : (
-          <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-3 h-fit">
-            {!selected ? (
-              <p className="text-xs text-slate-400 text-center py-8">Selecione um cliente na lista para ver os dados e o histórico de compras.</p>
-            ) : (
-              <>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-wider text-slate-400 font-bold">Cliente código {selected.code}</p>
-                    <h3 className="text-base font-bold text-slate-900">{selected.name}</h3>
-                    <p className="text-xs text-slate-600">CPF {formatCpf(selected.cpf)} · {selected.phone}{selected.email ? ` · ${selected.email}` : ''}</p>
-                    {selected.address && (
-                      <p className="text-xs text-slate-500 mt-1">
-                        {selected.address}{selected.addressNumber ? `, ${selected.addressNumber}` : ''}{selected.complement ? ` - ${selected.complement}` : ''}
-                        {selected.district ? ` · ${selected.district}` : ''}{selected.city ? ` · ${selected.city}/${selected.state ?? ''}` : ''}
-                      </p>
-                    )}
-                    <p className="text-[11px] text-slate-500 mt-1">
-                      LGPD: {selected.lgpdConsent ? `autorizado${selected.lgpdConsentAt ? ` em ${new Date(selected.lgpdConsentAt).toLocaleDateString('pt-BR')}` : ''}` : 'não autorizado'}
-                    </p>
-                  </div>
-                  <button type="button" onClick={() => openEdit(selected)} className="p-2 text-blue-700 rounded-lg hover:bg-blue-50" title="Editar cliente"><Pencil className="w-4 h-4" /></button>
-                </div>
-                <div>
-                  <h4 className="text-[11px] font-bold text-slate-900 uppercase tracking-wider mb-2">Compras e garantia</h4>
-                  {history.length === 0 ? (
-                    <p className="text-xs text-slate-400">Nenhuma compra registrada com este CPF.</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {history.map(({ sale, item, product, months, end }, index) => {
-                        const canceled = sale.status === 'CANCELADA';
-                        const valid = !canceled && end !== null && end.getTime() >= Date.now();
-                        return (
-                          <li key={`${sale.id}-${index}`} className={`border rounded-lg p-3 text-xs ${canceled ? 'border-slate-200 bg-slate-50 text-slate-400' : 'border-slate-200'}`}>
-                            <div className="flex justify-between gap-2">
-                              <strong className="text-slate-900">{item.itemName || product?.name || 'Produto'}</strong>
-                              <span className="font-mono">{formatMoney(item.lineTotal ?? item.unitPrice * item.quantity)}</span>
-                            </div>
-                            <p className="text-slate-500">
-                              {new Date(sale.timestamp).toLocaleDateString('pt-BR')} · {storeName(sale.unitId)}{sale.sellerName ? ` · ${sale.sellerName}` : ''}
-                              {item.serials?.length ? ` · Série ${item.serials.join(', ')}` : ` · ${item.quantity} un.`}
-                            </p>
-                            <p className={`mt-1 font-bold flex items-center gap-1 ${canceled ? 'text-slate-400' : valid ? 'text-emerald-700' : 'text-rose-600'}`}>
-                              {valid ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />}
-                              {canceled ? 'Venda estornada' : end ? `${valid ? 'Em garantia' : 'Garantia vencida'} · até ${end.toLocaleDateString('pt-BR')} (${months} meses)` : 'Sem garantia'}
-                            </p>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
-                </div>
-              </>
-            )}
+          <div className="bg-white border border-slate-200 rounded-lg p-5 h-fit">
+            <p className="text-xs text-slate-400 text-center py-8">Clique num cliente para abrir a ficha completa: compras, garantias, ordens de serviço, vales, reservas e Troca Gamer.</p>
           </div>
         )}
       </section>

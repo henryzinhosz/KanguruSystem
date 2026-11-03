@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { ANNOUNCEMENT_BUCKET, type AnnouncementAttachment, type StoreGoalRow } from './insights';
 
 // Painel da Rede (migration 20261115): a franqueadora acompanha as franquias, so leitura.
 
@@ -311,5 +312,126 @@ export async function setRoyaltyPaid(tenantId: string, month: string, paid: bool
     p_notes: notes || null,
     p_tz: timeZone(),
   });
+  if (error) throw error;
+}
+
+// ---------------- Metas, alertas e comunicados da rede (migration 20261119) ----------------
+
+export async function getNetworkGoals(month: string): Promise<StoreGoalRow[]> {
+  const { data, error } = await supabase.rpc('network_goals_report', { p_month: month, p_tz: timeZone() });
+  if (error) throw error;
+  return ((data || []) as StoreGoalRow[]).map(row => ({
+    ...row,
+    goal: row.goal === null ? null : Number(row.goal),
+    previousGoal: row.previousGoal === null ? null : Number(row.previousGoal),
+    realized: Number(row.realized),
+    lastYearRealized: Number(row.lastYearRealized),
+  }));
+}
+
+export async function saveNetworkGoals(month: string, goals: { tenantId: string; unitId: string; amount: number | null }[]): Promise<void> {
+  const { error } = await supabase.rpc('network_save_store_goals', { p_month: month, p_goals: goals });
+  if (error) throw error;
+}
+
+export type NetworkAlertKind = 'SEM_VENDA' | 'CAIXA_DIFERENCA' | 'CAIXA_ABERTO' | 'NOTAS' | 'META' | 'ASSINATURA';
+
+export interface NetworkAlert {
+  kind: NetworkAlertKind;
+  tenantId: string;
+  franchiseName: string;
+  unitId: string | null;
+  storeName: string | null;
+  title: string;
+  detail: string | null;
+  date: string | null;
+}
+
+export async function getNetworkAlerts(): Promise<NetworkAlert[]> {
+  const { data, error } = await supabase.rpc('network_alerts', { p_tz: timeZone() });
+  if (error) throw error;
+  return (data || []) as NetworkAlert[];
+}
+
+export interface NetworkAlertSettings {
+  noSaleDays: number;
+  cashDifference: number;
+  cashOpenHours: number;
+  goalMinPercent: number;
+  updatedAt: string | null;
+  updatedByName: string | null;
+}
+
+export async function getNetworkAlertSettings(): Promise<NetworkAlertSettings> {
+  const { data, error } = await supabase.rpc('network_get_alert_settings');
+  if (error) throw error;
+  return data as NetworkAlertSettings;
+}
+
+export async function saveNetworkAlertSettings(settings: Omit<NetworkAlertSettings, 'updatedAt' | 'updatedByName'>): Promise<void> {
+  const { error } = await supabase.rpc('network_save_alert_settings', {
+    p_no_sale_days: settings.noSaleDays,
+    p_cash_difference: settings.cashDifference,
+    p_cash_open_hours: settings.cashOpenHours,
+    p_goal_min_percent: settings.goalMinPercent,
+  });
+  if (error) throw error;
+}
+
+export interface NetworkAnnouncement {
+  id: string;
+  title: string;
+  body: string;
+  priority: 'NORMAL' | 'IMPORTANTE';
+  audience: 'OWNERS' | 'ALL';
+  targetTenantIds: string[] | null;
+  expiresOn: string | null;
+  archived: boolean;
+  attachments: AnnouncementAttachment[];
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  franchises: { tenantId: string; name: string; recipients: number; reads: { displayName: string | null; email: string | null; readAt: string }[] }[];
+}
+
+export async function listNetworkAnnouncements(): Promise<NetworkAnnouncement[]> {
+  const { data, error } = await supabase.rpc('network_list_announcements');
+  if (error) throw error;
+  return (data || []) as NetworkAnnouncement[];
+}
+
+export async function saveNetworkAnnouncement(announcement: {
+  id: string; title: string; body: string; priority: 'NORMAL' | 'IMPORTANTE'; audience: 'OWNERS' | 'ALL';
+  targetTenantIds: string[] | null; expiresOn: string | null; attachments: AnnouncementAttachment[];
+}): Promise<void> {
+  const { error } = await supabase.rpc('network_save_announcement', {
+    p_id: announcement.id,
+    p_title: announcement.title,
+    p_body: announcement.body,
+    p_priority: announcement.priority,
+    p_audience: announcement.audience,
+    p_target_tenant_ids: announcement.targetTenantIds,
+    p_expires_on: announcement.expiresOn,
+    p_attachments: announcement.attachments,
+  });
+  if (error) throw error;
+}
+
+export async function setNetworkAnnouncementArchived(id: string, archived: boolean): Promise<void> {
+  const { error } = await supabase.rpc('network_set_announcement_archived', { p_id: id, p_archived: archived });
+  if (error) throw error;
+}
+
+// Envia um anexo para a pasta do comunicado (<rede>/<comunicado>/<arquivo>).
+export async function uploadAnnouncementAttachment(networkId: string, announcementId: string, file: File): Promise<AnnouncementAttachment> {
+  const safeName = file.name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(-80);
+  const path = `${networkId}/${announcementId}/${crypto.randomUUID().slice(0, 8)}-${safeName}`;
+  const { error } = await supabase.storage.from(ANNOUNCEMENT_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
+  if (error) throw error;
+  return { path, name: file.name, size: file.size, type: file.type };
+}
+
+export async function removeAnnouncementAttachment(path: string): Promise<void> {
+  const { error } = await supabase.storage.from(ANNOUNCEMENT_BUCKET).remove([path]);
   if (error) throw error;
 }

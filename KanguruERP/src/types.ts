@@ -86,6 +86,7 @@ export interface PdvOperator {
   name: string;
   permissions: PdvOperatorPermissions;
   isActive: boolean;
+  monthlyGoal?: number | null; // meta do mes em R$ (relatorio do PDV; migration 20261118)
   createdAt: string;
   updatedAt: string;
 }
@@ -524,6 +525,8 @@ export interface StoreConfig {
   simplesNacionalOption?: '1' | '2' | '3';
   // Taxas do cartao em % (calculadora de juros do PDV): debito e credito de 1x a 12x.
   cardFeeTable?: CardFeeTable | null;
+  // Diferenca de caixa (R$) a partir da qual o ERP mostra alerta (migration 20261118; padrao 10).
+  cashDifferenceAlert?: number;
   paymentFees: {
     DINHEIRO: number; // percentage (e.g. 0)
     PIX: number; // percentage (e.g. 0.005 = 0.5%)

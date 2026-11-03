@@ -4,16 +4,19 @@
  */
 
 import { User, UserRole, isNetworkRole } from '../types';
-import { LayoutPanelTop, LogOut } from 'lucide-react';
+import { Bell, LayoutPanelTop, LogOut } from 'lucide-react';
 
 interface HeaderProps {
   currentUser: User;
   onLogout: () => void;
   isUcpActive?: boolean;
   onToggleUcp?: () => void;
+  // Sino "Precisa de atenção" (so no ERP do franqueado).
+  alertCount?: number;
+  onAlertsClick?: () => void;
 }
 
-export default function Header({ currentUser, onLogout, isUcpActive = false, onToggleUcp }: HeaderProps) {
+export default function Header({ currentUser, onLogout, isUcpActive = false, onToggleUcp, alertCount, onAlertsClick }: HeaderProps) {
   // Nome ao lado da logo: UCP (plataforma), Redes (Painel da Rede) ou ERP.
   const productName = currentUser.role === UserRole.SUPER_ADMIN ? 'UCP' : isNetworkRole(currentUser.role) ? 'Redes' : 'ERP';
   return (
@@ -49,6 +52,22 @@ export default function Header({ currentUser, onLogout, isUcpActive = false, onT
               >
                 <LayoutPanelTop className="h-4 w-4" />
                 {isUcpActive ? 'ERP' : 'UCP'}
+              </button>
+            )}
+            {onAlertsClick && (
+              <button
+                type="button"
+                onClick={onAlertsClick}
+                className="relative p-2.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                title={alertCount ? `${alertCount} item(ns) precisam de atenção` : 'Nada precisa de atenção'}
+                aria-label="Precisa de atenção"
+              >
+                <Bell className="w-5 h-5" />
+                {Boolean(alertCount) && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center">
+                    {alertCount! > 99 ? '99+' : alertCount}
+                  </span>
+                )}
               </button>
             )}
             <div className="flex items-center space-x-2 pl-2 border-l border-slate-200">

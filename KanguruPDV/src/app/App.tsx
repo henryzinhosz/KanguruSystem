@@ -57,6 +57,8 @@ import { getVersion } from '@tauri-apps/api/app';
 import { TopBar } from './TopBar';
 import { HomeMenu, type MenuAction } from './HomeMenu';
 import { ProductLookupModal } from './ProductLookupModal';
+import { SellerReportModal } from './SellerReportModal';
+import { CustomerHistoryModal } from './CustomerHistoryModal';
 import { PrinterSettingsModal } from './PrinterSettingsModal';
 import { getDirectPrinter, openCashDrawer } from '../printing/directPrint';
 import { printPdfBase64 } from '../printing/pdfPrint';
@@ -452,6 +454,8 @@ export function App() {
   const [offlineCustomerOpen, setOfflineCustomerOpen] = useState(false);
   // Menu inicial (2.10): consulta de produto, versao do app e numero da abertura na barra.
   const [lookupOpen, setLookupOpen] = useState(false);
+  const [sellerReportOpen, setSellerReportOpen] = useState(false);
+  const [customerHistoryOpen, setCustomerHistoryOpen] = useState(false);
   // Impressao direta (2.8c): impressora termica escolhida neste PC.
   const [printerOpen, setPrinterOpen] = useState(false);
   const [directPrinter, setDirectPrinterState] = useState<string | null>(() => getDirectPrinter());
@@ -1278,6 +1282,7 @@ export function App() {
         setScreen('unlock');
         break;
       case 'product-lookup': setLookupOpen(true); break;
+      case 'seller-report': setSellerReportOpen(true); break;
       case 'comunicador': configureComunicador(); break;
       case 'version':
         setMessage(`Kanguru PDV versão ${appVersion ?? '-'}. O PDV procura atualizações sozinho ao abrir e a cada 4 horas.`);
@@ -1892,7 +1897,7 @@ export function App() {
     if (screen !== 'sale') return;
     function onKey(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
-      if (serialProduct || adminApprovalOpen || customerPickerOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
+      if (serialProduct || adminApprovalOpen || customerPickerOpen || customerHistoryOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
       if (catalogItems.length > 0 || query) {
         setCatalogItems([]);
         setQuery('');
@@ -2601,6 +2606,7 @@ export function App() {
           />
         )}
         {lookupOpen && <ProductLookupModal onClose={() => setLookupOpen(false)} />}
+        {sellerReportOpen && <SellerReportModal onClose={() => setSellerReportOpen(false)} loadStoreProfile={loadStoreProfile} />}
         {nfceModal}
       </main>
     );
@@ -2814,6 +2820,7 @@ export function App() {
                       <small>CPF {formatCpf(saleCustomer.cpf)} | {saleCustomer.phone}</small>
                     </div>
                     <div className="sale-customer-actions">
+                      {!offlineNow && <button className="text-action" type="button" onClick={() => setCustomerHistoryOpen(true)}>Histórico</button>}
                       <button className="text-action" type="button" onClick={() => setCustomerForm({ customer: saleCustomer, cpf: '' })}>Editar</button>
                       <button className="text-action" type="button" onClick={() => (offlineNow ? setOfflineCustomerOpen(true) : setCustomerPickerOpen(true))}>Trocar</button>
                       <button className="text-action" type="button" onClick={() => setSaleCustomer(null)}>Remover</button>
@@ -2927,6 +2934,9 @@ export function App() {
           }}
           onConfirm={() => void confirmDiscountApproval()}
         />
+      )}
+      {customerHistoryOpen && saleCustomer && (
+        <CustomerHistoryModal cpf={saleCustomer.cpf} name={saleCustomer.name} onClose={() => setCustomerHistoryOpen(false)} />
       )}
       {customerPickerOpen && (
         <CustomerPickerModal

@@ -72,6 +72,7 @@ function mapPdvOperator(operator: any): PdvOperator {
     name: operator.name,
     permissions: { ...defaultPdvOperatorPermissions, ...(operator.permissions || {}) },
     isActive: operator.is_active,
+    monthlyGoal: operator.monthly_goal === undefined ? undefined : operator.monthly_goal === null ? null : Number(operator.monthly_goal),
     createdAt: operator.created_at,
     updatedAt: operator.updated_at
   };
@@ -1875,6 +1876,7 @@ export const supabaseService = {
       maxItemDiscountPercent: Number(c.max_item_discount_percent ?? 0),
       paymentFees: c.payment_fees,
       cardFeeTable: c.card_fee_table ?? null,
+      cashDifferenceAlert: c.cash_difference_alert === undefined ? undefined : Number(c.cash_difference_alert),
       municipalRegistration: c.municipal_registration ?? undefined,
       cityIbgeCode: c.city_ibge_code ?? undefined,
       simplesNacionalOption: c.simples_nacional_option ?? undefined,
@@ -1915,6 +1917,7 @@ export const supabaseService = {
       ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {}),
       // Antes da migration 20261111 a coluna nao existe: so envia quando foi lida do banco.
       ...(c.cardFeeTable !== undefined ? { card_fee_table: c.cardFeeTable } : {}),
+      ...(c.cashDifferenceAlert !== undefined ? { cash_difference_alert: Math.max(0, c.cashDifferenceAlert) } : {}),
       // NFS-e (migration 20261113): so envia quando a coluna ja foi lida ou a tela preencheu.
       ...(c.municipalRegistration !== undefined ? { municipal_registration: c.municipalRegistration.trim() || null } : {}),
       ...(c.cityIbgeCode !== undefined ? { city_ibge_code: c.cityIbgeCode.replace(/\D/g, '') || null } : {}),
@@ -1953,7 +1956,9 @@ export const supabaseService = {
         code: operator.code,
         name: operator.name,
         permissions: operator.permissions,
-        is_active: operator.isActive
+        is_active: operator.isActive,
+        // Antes da migration 20261118 a coluna nao existe: so envia quando a tela preencheu.
+        ...(operator.monthlyGoal !== undefined ? { monthly_goal: operator.monthlyGoal } : {})
       })
       .select()
       .single();

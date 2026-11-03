@@ -24,7 +24,7 @@ export type MenuAction =
   | 'sale' | 'trade-in' | 'work-orders' | 'reservations' | 'returns' | 'warranty' | 'receipts' | 'new-reservation'
   | 'sangria' | 'suprimento' | 'partial' | 'drawer'
   | 'open-cash' | 'close-cash' | 'reprint-opening' | 'lock'
-  | 'product-lookup' | 'today-sales'
+  | 'product-lookup' | 'today-sales' | 'seller-report'
   | 'comunicador' | 'printer' | 'version';
 
 type Group = 'operacional' | 'consultas' | 'config';
@@ -68,6 +68,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
       options: [
         { action: 'product-lookup', label: 'Consultar produto e estoque', description: 'Preço, estoque desta loja e de outras lojas' },
         { action: 'today-sales', label: 'Vendas do dia', description: 'Lista, reimpressão e NFC-e das vendas de hoje', disabled: offline ? OFFLINE_BLOCK : null },
+        { action: 'seller-report', label: 'Vendas por vendedor', description: 'Hoje, no mês e quanto falta para a meta de cada vendedor', disabled: offline ? OFFLINE_BLOCK : null },
       ],
     },
     config: {
@@ -110,6 +111,8 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
         if (option && !option.disabled) run(option.action);
         return;
       }
+      // Janela aberta por cima do menu (ex.: Vendas por vendedor): atalhos do menu ficam parados.
+      if (document.querySelector('.modal-backdrop')) return;
       if (event.key === 'F1' && cashOpen) {
         event.preventDefault();
         run('sale');

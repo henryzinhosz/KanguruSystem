@@ -1,11 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Check, ChevronDown, ChevronRight, ChevronUp, Mail, Phone, UserRound, DollarSign, KeyRound, Landmark, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, Search, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Check, ChevronDown, ChevronRight, ChevronUp, Mail, Phone, UserRound, DollarSign, KeyRound, Landmark, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, Search, ShoppingCart, BellRing, Megaphone, Target, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { User } from '../types';
 import { Dropdown, PERIOD_ORDER, previousRange } from './NetworkFilters';
 import NetworkFranchiseDetail from './NetworkFranchiseDetail';
 import NetworkRoyalties from './NetworkRoyalties';
+import NetworkGoals from './NetworkGoals';
+import NetworkAlerts from './NetworkAlerts';
+import NetworkAnnouncements from './NetworkAnnouncements';
+import { getNetworkAlerts, getNetworkGoals } from '../db/network';
 import { PERIOD_LABELS, PeriodPreset, formatMoney, monthLabel, resolvePeriod, shiftMonthKey, toLocalDateKey, type DateRange } from '../db/finance';
 import {
   getNetworkMonthlyRevenue,
@@ -22,7 +26,7 @@ import {
 // Painel da Rede (etapa 1): a franqueadora acompanha as franquias, so leitura.
 // Mesmas regras de numeros dos Relatorios Gerais do ERP (calculadas no servidor).
 
-type Tab = 'geral' | 'franquias' | 'repasse' | 'usuarios';
+type Tab = 'geral' | 'franquias' | 'alertas' | 'metas' | 'repasse' | 'comunicados' | 'usuarios';
 
 const MONTH_SHORT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
@@ -71,7 +75,10 @@ const variation = (current: number, previous: number) => (previous > 0 ? ((curre
 const NAV_ITEMS: { id: Tab; name: string; icon: LucideIcon; description: string }[] = [
   { id: 'geral', name: 'Visão geral', icon: LayoutDashboard, description: 'Números da rede, evolução e ranking das lojas.' },
   { id: 'franquias', name: 'Franquias', icon: Building2, description: 'Franqueados, lojas e situação de cada operação.' },
+  { id: 'alertas', name: 'Alertas', icon: BellRing, description: 'Lojas sem vender, caixas com diferença, notas com problema e lojas abaixo da meta.' },
+  { id: 'metas', name: 'Metas', icon: Target, description: 'Meta de faturamento de cada loja por mês e o que já foi realizado.' },
   { id: 'repasse', name: 'Repasse', icon: Landmark, description: 'Royalties de cada franquia por mês: regra, cálculo e pagamento.' },
+  { id: 'comunicados', name: 'Comunicados', icon: Megaphone, description: 'Avisos para o ERP dos franqueados, com confirmação de leitura.' },
   { id: 'usuarios', name: 'Usuários da rede', icon: Users, description: 'Quem da franqueadora acessa este painel.' },
 ];
 
@@ -80,8 +87,21 @@ export default function NetworkView({ currentUser }: { currentUser: User }) {
   const [tab, setTab] = useState<Tab>('geral');
   const [summary, setSummary] = useState<{ franchises: number; stores: number } | null>(null);
   const [franchiseSearch, setFranchiseSearch] = useState('');
+  const [alertCount, setAlertCount] = useState<number | null>(null);
+  const [goalSummary, setGoalSummary] = useState<{ goal: number; realized: number } | null>(null);
   const isOwner = currentUser.role === 'NETWORK_OWNER';
   const active = NAV_ITEMS.find(item => item.id === tab)!;
+
+  // Contador de alertas na barra lateral e resumo da meta do mes na Visao geral.
+  useEffect(() => {
+    getNetworkAlerts().then(rows => setAlertCount(rows.length)).catch(() => setAlertCount(null));
+    getNetworkGoals(toLocalDateKey(new Date()).slice(0, 7))
+      .then(rows => {
+        const withGoal = rows.filter(row => row.goal);
+        setGoalSummary(withGoal.length ? { goal: withGoal.reduce((sum, row) => sum + (row.goal ?? 0), 0), realized: withGoal.reduce((sum, row) => sum + row.realized, 0) } : null);
+      })
+      .catch(() => setGoalSummary(null));
+  }, []);
 
   useEffect(() => {
     listNetworkFranchises()
@@ -124,6 +144,9 @@ export default function NetworkView({ currentUser }: { currentUser: User }) {
               >
                 <Icon className="w-[18px] h-[18px] mr-3 shrink-0" />
                 <span>{item.name}</span>
+                {item.id === 'alertas' && Boolean(alertCount) && (
+                  <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center">{alertCount}</span>
+                )}
               </button>
             );
           })}
@@ -154,7 +177,31 @@ export default function NetworkView({ currentUser }: { currentUser: User }) {
             </label>
           )}
         </div>
+        {tab === 'geral' && (alertCount || goalSummary) && (
+          <div className="grid gap-3 md:grid-cols-2 text-xs">
+            {Boolean(alertCount) && (
+              <button type="button" onClick={() => setTab('alertas')} className="text-left bg-white border border-rose-200 rounded-xl shadow-xs p-4 flex items-center gap-3 hover:bg-rose-50/40">
+                <span className="p-2.5 rounded-lg border bg-rose-50 text-rose-600 border-rose-100"><BellRing className="w-5 h-5" /></span>
+                <span className="flex-1"><strong className="block text-sm text-slate-900">{alertCount} alerta(s) na rede</strong><span className="text-slate-500">Lojas sem vender, caixas, notas e metas</span></span>
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              </button>
+            )}
+            {goalSummary && (
+              <button type="button" onClick={() => setTab('metas')} className="text-left bg-white border border-slate-200 rounded-xl shadow-xs p-4 flex items-center gap-3 hover:bg-slate-50">
+                <span className="p-2.5 rounded-lg border bg-blue-50 text-blue-600 border-blue-100"><Target className="w-5 h-5" /></span>
+                <span className="flex-1">
+                  <strong className="block text-sm text-slate-900">Meta do mês: {((goalSummary.realized / goalSummary.goal) * 100).toFixed(0)}% atingido</strong>
+                  <span className="text-slate-500">{formatMoney(goalSummary.realized)} de {formatMoney(goalSummary.goal)} (lojas com meta)</span>
+                </span>
+                <ChevronRight className="w-4 h-4 text-slate-400" />
+              </button>
+            )}
+          </div>
+        )}
         {tab === 'geral' && <NetworkOverview />}
+        {tab === 'alertas' && <NetworkAlerts isOwner={isOwner} onCountChange={setAlertCount} onOpenFranchise={name => { setFranchiseSearch(name); setTab('franquias'); }} />}
+        {tab === 'metas' && <NetworkGoals />}
+        {tab === 'comunicados' && <NetworkAnnouncements networkId={currentUser.networkId || ''} />}
         {tab === 'franquias' && <NetworkFranchises search={franchiseSearch} />}
         {tab === 'repasse' && <NetworkRoyalties networkName={currentUser.networkName || 'Rede'} />}
         {tab === 'usuarios' && <NetworkUsers isOwner={isOwner} currentUserId={currentUser.id} />}

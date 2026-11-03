@@ -1914,3 +1914,95 @@ small {
   .wo-summary { grid-template-columns: 1fr; }
   .wo-row { flex-wrap: wrap; }
 }
+
+/* ---------- Vendas por vendedor e historico do cliente ---------- */
+.report-modal {
+  width: min(100%, 760px);
+}
+
+.report-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.6rem;
+  margin: 1rem 0;
+}
+
+.report-summary div {
+  border: 1px solid #d0dacd;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  background: #fff;
+}
+
+.report-summary small {
+  display: block;
+  color: #667867;
+  font: 0.75rem 'Trebuchet MS', sans-serif;
+  text-transform: uppercase;
+}
+
+.report-summary strong {
+  font-size: 1.15rem;
+}
+
+.seller-row {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid #d0dacd;
+  border-radius: 6px;
+  padding: 0.7rem 0.8rem;
+  background: #fff;
+}
+
+.seller-row-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.seller-row small {
+  color: #526354;
+  font-family: 'Trebuchet MS', sans-serif;
+}
+
+.goal-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: #e3ebe0;
+  overflow: hidden;
+}
+
+.goal-bar span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #c0392b;
+}
+
+.goal-bar span.is-mid {
+  background: #e0a400;
+}
+
+.goal-bar span.is-done {
+  background: #1f8a4c;
+}
+
+.history-section h3 {
+  margin: 1rem 0 0.4rem;
+  font-size: 1rem;
+}
+
+.history-tag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border-radius: 4px;
+  font: bold 0.72rem 'Trebuchet MS', sans-serif;
+  background: #e3ebe0;
+  color: #2f4a33;
+}
+
+.history-tag.is-warn {
+  background: #fdecea;
+  color: #a5281b;
+}

@@ -46,6 +46,7 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   cityIbgeCode: '',
   simplesNacionalOption: '3',
   exchangeDays: 7,
+  cashDifferenceAlert: 10,
   fixedCost: 0,
   maxItemDiscountPercent: 0,
   paymentFees: { DINHEIRO: 0, PIX: 0, CREDITO: 0, DEBITO: 0 }
@@ -103,7 +104,7 @@ export default function ConfiguracoesView({
   const [storeMessage, setStoreMessage] = useState('');
   const [storeError, setStoreError] = useState('');
   const [editingOperatorId, setEditingOperatorId] = useState<string | null>(null);
-  const [operatorForm, setOperatorForm] = useState({ name: '', code: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true });
+  const [operatorForm, setOperatorForm] = useState<{ name: string; code: string; unitId: string; permissions: PdvOperatorPermissions; isActive: boolean; monthlyGoal: number | null }>({ name: '', code: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true, monthlyGoal: null });
   const [operatorMessage, setOperatorMessage] = useState('');
   const [operatorError, setOperatorError] = useState('');
   const canManageOperators = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
@@ -204,6 +205,7 @@ export default function ConfiguracoesView({
       cityIbgeCode: store.cityIbgeCode || '',
       simplesNacionalOption: store.simplesNacionalOption || '3',
       exchangeDays: store.exchangeDays ?? 7,
+      cashDifferenceAlert: store.cashDifferenceAlert ?? 10,
       fixedCost: store.fixedCost,
       maxItemDiscountPercent: store.maxItemDiscountPercent,
       paymentFees: store.paymentFees
@@ -230,7 +232,7 @@ export default function ConfiguracoesView({
 
   const resetOperatorForm = () => {
     setEditingOperatorId(null);
-    setOperatorForm({ name: '', code: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true });
+    setOperatorForm({ name: '', code: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true, monthlyGoal: null });
   };
 
   const handleOperatorSubmit = async (event: FormEvent) => {
@@ -269,7 +271,8 @@ export default function ConfiguracoesView({
         code,
         unitId: operatorForm.unitId,
         permissions: operatorForm.permissions,
-        isActive: operatorForm.isActive
+        isActive: operatorForm.isActive,
+        monthlyGoal: operatorForm.monthlyGoal && operatorForm.monthlyGoal > 0 ? operatorForm.monthlyGoal : null
       });
       setOperatorMessage(editingOperatorId ? 'Operador atualizado.' : 'Operador cadastrado.');
       resetOperatorForm();
@@ -285,7 +288,8 @@ export default function ConfiguracoesView({
       code: operator.code || '',
       unitId: operator.unitId || '',
       permissions: { ...EMPTY_OPERATOR_PERMISSIONS, ...operator.permissions },
-      isActive: operator.isActive
+      isActive: operator.isActive,
+      monthlyGoal: operator.monthlyGoal ?? null
     });
     setOperatorError('');
     setOperatorMessage('');
@@ -486,7 +490,7 @@ export default function ConfiguracoesView({
                     {pdvOperators.map(operator => {
                       const permissionCount = Object.values(operator.permissions).filter(Boolean).length;
                       const store = storeConfigs.find(item => item.unitId === operator.unitId);
-                      return <tr key={operator.id}><td className="p-3 font-mono font-bold text-slate-900">{operator.code || <span className="text-amber-700 font-sans font-normal">sem código</span>}</td><td className="p-3"><span className="block font-bold text-slate-900">{operator.name}</span><span className="text-slate-500">{permissionCount} permissões</span></td><td className="p-3 text-slate-600">{store?.tradeName || store?.legalName || (operator.unitId ? operator.unitId : 'Todas as lojas')}</td><td className="p-3"><span className={`rounded px-2 py-1 text-[10px] font-bold ${operator.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{operator.isActive ? 'ATIVO' : 'INATIVO'}</span></td><td className="p-3"><div className="flex justify-end gap-1"><button type="button" onClick={() => editOperator(operator)} title="Editar operador" className="p-2 text-blue-700 rounded-lg hover:bg-blue-50"><Pencil className="w-4 h-4" /></button><button type="button" onClick={() => void removeOperator(operator)} title="Excluir operador" className="p-2 text-rose-600 rounded-lg hover:bg-rose-50"><Trash2 className="w-4 h-4" /></button></div></td></tr>;
+                      return <tr key={operator.id}><td className="p-3 font-mono font-bold text-slate-900">{operator.code || <span className="text-amber-700 font-sans font-normal">sem código</span>}</td><td className="p-3"><span className="block font-bold text-slate-900">{operator.name}</span><span className="text-slate-500">{permissionCount} permissões{operator.monthlyGoal ? ` · meta ${operator.monthlyGoal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/mês` : ''}</span></td><td className="p-3 text-slate-600">{store?.tradeName || store?.legalName || (operator.unitId ? operator.unitId : 'Todas as lojas')}</td><td className="p-3"><span className={`rounded px-2 py-1 text-[10px] font-bold ${operator.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{operator.isActive ? 'ATIVO' : 'INATIVO'}</span></td><td className="p-3"><div className="flex justify-end gap-1"><button type="button" onClick={() => editOperator(operator)} title="Editar operador" className="p-2 text-blue-700 rounded-lg hover:bg-blue-50"><Pencil className="w-4 h-4" /></button><button type="button" onClick={() => void removeOperator(operator)} title="Excluir operador" className="p-2 text-rose-600 rounded-lg hover:bg-rose-50"><Trash2 className="w-4 h-4" /></button></div></td></tr>;
                     })}
                     {pdvOperators.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">Nenhum operador cadastrado.</td></tr>}
                   </tbody>
@@ -500,6 +504,7 @@ export default function ConfiguracoesView({
               <label className="block text-xs font-bold text-slate-700">Nome<input required value={operatorForm.name} onChange={event => setOperatorForm({ ...operatorForm, name: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500" /></label>
               <label className="block text-xs font-bold text-slate-700">Código do vendedor <span className="font-normal text-slate-400">(2 dígitos, usado para finalizar vendas no PDV)</span><input required inputMode="numeric" maxLength={2} placeholder="Ex: 07" value={operatorForm.code} onChange={event => setOperatorForm({ ...operatorForm, code: event.target.value.replace(/[^0-9]/g, '').slice(0, 2) })} className="mt-1.5 w-24 bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono font-bold text-center tracking-widest outline-none focus:ring-1 focus:ring-blue-500" /></label>
               <label className="block text-xs font-bold text-slate-700">Loja<select required value={operatorForm.unitId} onChange={event => setOperatorForm({ ...operatorForm, unitId: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500"><option value="">Selecione a loja</option>{storeConfigs.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.legalName || store.unitId}</option>)}</select></label>
+              <label className="block text-xs font-bold text-slate-700">Meta do mês (R$) <span className="font-normal text-slate-400">(opcional; só produtos, aparece no relatório "Vendas por vendedor" do PDV)</span><ValueInput value={operatorForm.monthlyGoal} onValueChange={value => setOperatorForm({ ...operatorForm, monthlyGoal: value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500" /></label>
               <fieldset className="space-y-2"><legend className="text-xs font-bold text-slate-700">Permissões</legend>{(Object.keys(operatorPermissionLabels) as Array<keyof PdvOperatorPermissions>).map(permission => <label key={permission} className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={operatorForm.permissions[permission]} onChange={event => setOperatorForm({ ...operatorForm, permissions: { ...operatorForm.permissions, [permission]: event.target.checked } })} />{operatorPermissionLabels[permission]}</label>)}</fieldset>
               <label className="flex items-center gap-2 text-xs font-bold text-slate-700"><input type="checkbox" checked={operatorForm.isActive} onChange={event => setOperatorForm({ ...operatorForm, isActive: event.target.checked })} />Operador ativo</label>
               <div className="flex gap-2 pt-1">{editingOperatorId && <button type="button" onClick={resetOperatorForm} className="px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg">Cancelar</button>}<button type="submit" className="ml-auto px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2">{editingOperatorId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}{editingOperatorId ? 'Salvar alterações' : 'Cadastrar operador'}</button></div>
@@ -604,6 +609,14 @@ function StoreFields({ form, onChange, section }: {
           decimals={0}
           value={form.exchangeDays ?? 7}
           onValueChange={value => onChange('exchangeDays', Math.min(365, Math.max(0, value ?? 0)))}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Alerta de diferença de caixa (R$) <span className="font-normal text-slate-400">(fechamento com diferença acima deste valor aparece em "Precisa de atenção")</span>
+        <ValueInput
+          value={form.cashDifferenceAlert ?? 10}
+          onValueChange={value => onChange('cashDifferenceAlert', Math.max(0, value ?? 0))}
           className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
         />
       </label>
