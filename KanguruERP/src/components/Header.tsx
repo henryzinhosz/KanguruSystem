@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { User, UserRole } from '../types';
+import { User, UserRole, isNetworkRole } from '../types';
 import { LayoutPanelTop, LogOut } from 'lucide-react';
 
 interface HeaderProps {
@@ -14,6 +14,8 @@ interface HeaderProps {
 }
 
 export default function Header({ currentUser, onLogout, isUcpActive = false, onToggleUcp }: HeaderProps) {
+  // Nome ao lado da logo: UCP (plataforma), Redes (Painel da Rede) ou ERP.
+  const productName = currentUser.role === UserRole.SUPER_ADMIN ? 'UCP' : isNetworkRole(currentUser.role) ? 'Redes' : 'ERP';
   return (
     <header className="bg-white text-slate-800 border-b border-slate-200 shadow-sm sticky top-0 z-50">
       <div className="w-full px-3 sm:px-4">
@@ -22,12 +24,12 @@ export default function Header({ currentUser, onLogout, isUcpActive = false, onT
           <div className="flex items-center space-x-3">
             <img
               src="/kanguru-erp-logo.png"
-              alt="Kanguru ERP"
+              alt={`Kanguru ${productName}`}
               className="h-12 w-12 rounded-lg object-cover shadow-sm"
             />
             <div>
               <h1 className="text-xl font-bold tracking-tight text-slate-900 flex items-center">
-                Kanguru <span className="text-blue-600 ml-1">ERP</span>
+                Kanguru <span className="text-blue-600 ml-1">{productName}</span>
               </h1>
             </div>
           </div>
