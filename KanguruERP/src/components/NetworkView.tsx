@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowDownRight, ArrowUpRight, Building2, Check, KeyRound, Network, RefreshCw, Store, UserPlus, Users } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Building2, Check, DollarSign, KeyRound, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { User } from '../types';
 import { PERIOD_LABELS, PeriodPreset, formatMoney, monthLabel, resolvePeriod, shiftMonthKey, toLocalDateKey, type DateRange } from '../db/finance';
 import {
@@ -70,26 +71,80 @@ function totalsOf(rows: NetworkStoreMetrics[]): Totals {
 
 const variation = (current: number, previous: number) => (previous > 0 ? ((current - previous) / previous) * 100 : null);
 
+const NAV_ITEMS: { id: Tab; name: string; icon: LucideIcon; description: string }[] = [
+  { id: 'geral', name: 'Visão geral', icon: LayoutDashboard, description: 'Números da rede, evolução e ranking das lojas.' },
+  { id: 'franquias', name: 'Franquias', icon: Building2, description: 'Franqueados, lojas e situação de cada operação.' },
+  { id: 'usuarios', name: 'Usuários da rede', icon: Users, description: 'Quem da franqueadora acessa este painel.' },
+];
+
+// Layout igual ao do ERP: barra lateral escura com as secoes e area de trabalho a direita.
 export default function NetworkView({ currentUser }: { currentUser: User }) {
   const [tab, setTab] = useState<Tab>('geral');
+  const [summary, setSummary] = useState<{ franchises: number; stores: number } | null>(null);
   const isOwner = currentUser.role === 'NETWORK_OWNER';
-  const tabs: [Tab, string][] = [['geral', 'Visão geral'], ['franquias', 'Franquias'], ['usuarios', 'Usuários da rede']];
+  const active = NAV_ITEMS.find(item => item.id === tab)!;
+
+  useEffect(() => {
+    listNetworkFranchises()
+      .then(rows => setSummary({ franchises: rows.length, stores: rows.reduce((sum, row) => sum + row.stores.length, 0) }))
+      .catch(() => setSummary(null));
+  }, []);
 
   return (
-    <div className="space-y-5">
-      <div>
-        <p className="text-[10px] font-bold uppercase tracking-wider text-blue-700 flex items-center gap-1.5"><Network className="w-3.5 h-3.5" />Painel da Rede</p>
-        <h2 className="text-xl font-bold text-slate-900">{currentUser.networkName || 'Rede'}</h2>
-        <p className="text-xs text-slate-500">Acompanhamento das franquias da rede (somente leitura).</p>
-      </div>
-      <div className="flex flex-wrap gap-1 border-b border-slate-200">
-        {tabs.map(([id, label]) => (
-          <button key={id} type="button" onClick={() => setTab(id)} className={`px-4 py-2 text-xs font-bold border-b-2 -mb-px ${tab === id ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{label}</button>
-        ))}
-      </div>
-      {tab === 'geral' && <NetworkOverview />}
-      {tab === 'franquias' && <NetworkFranchises />}
-      {tab === 'usuarios' && <NetworkUsers isOwner={isOwner} currentUserId={currentUser.id} />}
+    <div className="flex-1 flex flex-col md:flex-row min-h-0">
+      <aside className="w-full md:w-60 bg-slate-950 text-slate-300 flex flex-col border-r border-slate-900 shrink-0">
+        <div className="p-4 bg-slate-950/40 border-b border-slate-900/80 hidden md:block">
+          <span className="text-xs text-slate-500 font-bold uppercase tracking-widest font-mono flex items-center gap-1.5">
+            <Network className="w-3.5 h-3.5" />Rede
+          </span>
+          <p className="mt-1 text-sm font-bold text-white truncate" title={currentUser.networkName || ''}>{currentUser.networkName || 'Rede'}</p>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-xs text-slate-400 font-medium">Franquias:</span>
+            <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold font-mono text-xs px-2 py-0.5 rounded">{summary?.franchises ?? '—'}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-xs text-slate-400 font-medium">Lojas:</span>
+            <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold font-mono text-xs px-2 py-0.5 rounded">{summary?.stores ?? '—'}</span>
+          </div>
+        </div>
+
+        <nav className="py-4 space-y-1 flex-1 pr-3" aria-label="Menu do Painel da Rede">
+          {NAV_ITEMS.map(item => {
+            const Icon = item.icon;
+            const isActive = tab === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setTab(item.id)}
+                className={`w-full flex items-center px-4 py-3 text-sm font-semibold transition-all duration-150 rounded-r-lg ${
+                  isActive
+                    ? 'bg-blue-600/15 text-blue-400 border-l-4 border-blue-500 font-bold'
+                    : 'hover:bg-slate-900/60 hover:text-white text-slate-400 border-l-4 border-transparent'
+                }`}
+              >
+                <Icon className="w-[18px] h-[18px] mr-3 shrink-0" />
+                <span>{item.name}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="p-4 bg-slate-950/80 border-t border-slate-900 text-xs text-slate-500 font-mono text-center hidden md:block">
+          <p>Painel da Rede</p>
+          <p className="mt-0.5 opacity-80">Somente leitura</p>
+        </div>
+      </aside>
+
+      <main className="erp-workspace flex-1 p-3 sm:p-4 lg:p-5 w-full overflow-y-auto space-y-5">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><active.icon className="w-5 h-5 text-blue-600" />{active.name}</h2>
+          <p className="text-xs text-slate-500">{active.description}</p>
+        </div>
+        {tab === 'geral' && <NetworkOverview />}
+        {tab === 'franquias' && <NetworkFranchises />}
+        {tab === 'usuarios' && <NetworkUsers isOwner={isOwner} currentUserId={currentUser.id} />}
+      </main>
     </div>
   );
 }
@@ -169,18 +224,18 @@ function NetworkOverview() {
   }));
   const missingCost = current.reduce((sum, row) => sum + row.salesMissingCost, 0);
 
-  const cards: { label: string; value: string; change: number | null; hint?: string }[] = [
-    { label: 'Faturamento', value: formatMoney(totals.revenue), change: variation(totals.revenue, prevTotals.revenue), hint: 'Vendas concluídas menos devoluções' },
-    { label: 'Lucro bruto', value: formatMoney(totals.grossProfit), change: variation(totals.grossProfit, prevTotals.grossProfit), hint: 'Faturamento menos custo das mercadorias' },
-    { label: 'Lucro real operacional', value: formatMoney(totals.operatingProfit), change: variation(totals.operatingProfit, prevTotals.operatingProfit), hint: 'Lucro bruto menos taxas de cartão e despesas lançadas' },
-    { label: 'Ticket médio', value: formatMoney(totals.ticket), change: variation(totals.ticket, prevTotals.ticket) },
-    { label: 'Vendas', value: totals.salesCount.toLocaleString('pt-BR'), change: variation(totals.salesCount, prevTotals.salesCount) },
-    { label: 'Margem bruta', value: totals.revenue > 0 ? `${((totals.grossProfit / totals.revenue) * 100).toFixed(1)}%` : '—', change: null },
+  const cards: { label: string; value: string; change: number | null; hint?: string; icon: LucideIcon; tone: string; negative?: boolean }[] = [
+    { label: 'Faturamento', value: formatMoney(totals.revenue), change: variation(totals.revenue, prevTotals.revenue), hint: 'Vendas concluídas menos devoluções', icon: DollarSign, tone: 'bg-blue-50 text-blue-600 border-blue-100/80' },
+    { label: 'Lucro bruto', value: formatMoney(totals.grossProfit), change: variation(totals.grossProfit, prevTotals.grossProfit), hint: 'Faturamento menos custo das mercadorias', icon: TrendingUp, tone: 'bg-emerald-50 text-emerald-600 border-emerald-100/80', negative: totals.grossProfit < 0 },
+    { label: 'Lucro real', value: formatMoney(totals.operatingProfit), change: variation(totals.operatingProfit, prevTotals.operatingProfit), hint: 'Lucro bruto menos taxas de cartão e despesas lançadas', icon: Wallet, tone: 'bg-violet-50 text-violet-600 border-violet-100/80', negative: totals.operatingProfit < 0 },
+    { label: 'Ticket médio', value: formatMoney(totals.ticket), change: variation(totals.ticket, prevTotals.ticket), icon: ReceiptText, tone: 'bg-amber-50 text-amber-600 border-amber-100/80' },
+    { label: 'Vendas', value: totals.salesCount.toLocaleString('pt-BR'), change: variation(totals.salesCount, prevTotals.salesCount), icon: ShoppingCart, tone: 'bg-sky-50 text-sky-600 border-sky-100/80' },
+    { label: 'Margem bruta', value: totals.revenue > 0 ? `${((totals.grossProfit / totals.revenue) * 100).toFixed(1)}%` : '—', change: null, icon: Percent, tone: 'bg-slate-100 text-slate-600 border-slate-200' },
   ];
 
   return (
     <div className="space-y-5 text-xs">
-      <div className="bg-white border border-slate-200 rounded-lg p-3 flex flex-wrap items-end gap-2">
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-3 flex flex-wrap items-end gap-2">
         {(Object.keys(PERIOD_LABELS) as PeriodPreset[]).map(key => (
           <button key={key} type="button" onClick={() => setPreset(key)} className={`px-3 py-1.5 rounded-lg border font-bold ${preset === key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{PERIOD_LABELS[key]}</button>
         ))}
@@ -195,23 +250,28 @@ function NetworkOverview() {
 
       {error && <p className="text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{error}</p>}
 
-      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {cards.map(card => (
-          <div key={card.label} className="bg-white border border-slate-200 rounded-lg p-3" title={card.hint}>
-            <span className="text-[10px] font-bold uppercase text-slate-500 block">{card.label}</span>
-            <span className="text-lg font-black text-slate-900 block mt-0.5">{card.value}</span>
+          <div key={card.label} className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-4" title={card.hint}>
+            <div className={`p-3 rounded-lg shrink-0 border ${card.negative ? 'bg-rose-50 text-rose-600 border-rose-100/80' : card.tone}`}>
+              <card.icon className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+            <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">{card.label}</span>
+            <span className={`text-xl font-extrabold tracking-tight block ${card.negative ? 'text-rose-600' : 'text-slate-900'}`}>{card.value}</span>
             {card.change != null && (
               <span className={`text-[11px] font-bold inline-flex items-center gap-0.5 ${card.change >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                 {card.change >= 0 ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
                 {Math.abs(card.change).toFixed(1)}% <span className="font-normal text-slate-400">vs. período anterior</span>
               </span>
             )}
+            </div>
           </div>
         ))}
       </div>
       {missingCost > 0 && <p className="text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2">{missingCost} venda(s) do período têm produto sem custo registrado: o lucro dessas vendas pode estar maior que o real.</p>}
 
-      <div className="bg-white border border-slate-200 rounded-lg p-4">
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-5">
         <h3 className="text-sm font-bold text-slate-900">Faturamento da rede — últimos 12 meses</h3>
         <div className="h-64 mt-3">
           <ResponsiveContainer width="100%" height="100%">
@@ -226,8 +286,8 @@ function NetworkOverview() {
         </div>
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        <div className="p-4 border-b border-slate-100">
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+        <div className="p-5 border-b border-slate-100">
           <h3 className="text-sm font-bold text-slate-900">Ranking das lojas</h3>
           <p className="text-slate-500">{ranking.length} loja(s) na rede · ordenado por faturamento</p>
         </div>
@@ -249,7 +309,12 @@ function NetworkOverview() {
                   <td className="p-2 font-bold text-slate-900">{entry.row.storeName || entry.row.unitId}</td>
                   <td className="p-2 text-slate-600">{franchiseName(entry.row.tenantId)}</td>
                   <td className="p-2 text-right font-mono font-bold">{formatMoney(entry.revenue)}</td>
-                  <td className="p-2 text-right font-mono">{totals.revenue > 0 ? `${((entry.revenue / totals.revenue) * 100).toFixed(1)}%` : '—'}</td>
+                  <td className="p-2">
+                    <div className="flex items-center justify-end gap-2">
+                      <div className="h-1.5 w-16 rounded-full bg-slate-100 overflow-hidden"><div className="h-full rounded-full bg-blue-600" style={{ width: `${totals.revenue > 0 ? Math.max(0, Math.min(100, (entry.revenue / totals.revenue) * 100)) : 0}%` }} /></div>
+                      <span className="font-mono w-12 text-right">{totals.revenue > 0 ? `${((entry.revenue / totals.revenue) * 100).toFixed(1)}%` : '—'}</span>
+                    </div>
+                  </td>
                   <td className="p-2 text-right font-mono">{entry.row.salesCount}</td>
                   <td className="p-2 text-right font-mono">{formatMoney(entry.ticket)}</td>
                   <td className="p-2 text-right font-mono">{formatMoney(entry.grossProfit)}</td>
@@ -289,7 +354,7 @@ function NetworkFranchises() {
       {error && <p className="text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{error}</p>}
       {franchises.length === 0 && !error && <p className="text-slate-400">Nenhuma franquia ligada a esta rede ainda.</p>}
       {franchises.map(franchise => (
-        <section key={franchise.tenantId} className="bg-white border border-slate-200 rounded-lg p-4 space-y-3">
+        <section key={franchise.tenantId} className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 space-y-3">
           <div className="flex flex-wrap justify-between gap-3">
             <div className="flex items-start gap-2">
               <Building2 className="w-5 h-5 text-blue-600 mt-0.5" />
@@ -365,7 +430,7 @@ function NetworkUsers({ isOwner, currentUserId }: { isOwner: boolean; currentUse
   const input = 'mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500';
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_340px] gap-5 text-xs">
-      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex items-center gap-2"><Users className="w-5 h-5 text-blue-600" /><h3 className="text-sm font-bold text-slate-900">Usuários da rede</h3></div>
         {error && <p className="m-3 text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2">{error}</p>}
         {message && <p className="m-3 text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-2 flex items-center gap-1.5"><Check className="w-4 h-4" />{message}</p>}
@@ -397,7 +462,7 @@ function NetworkUsers({ isOwner, currentUserId }: { isOwner: boolean; currentUse
         </table>
       </div>
       {isOwner && (
-        <form onSubmit={createManager} className="bg-white border border-slate-200 rounded-lg p-4 space-y-3 h-fit">
+        <form onSubmit={createManager} className="bg-white border border-slate-200 rounded-xl shadow-xs p-4 space-y-3 h-fit">
           <div className="flex items-center gap-2"><UserPlus className="w-5 h-5 text-blue-600" /><h3 className="text-sm font-bold text-slate-900">Novo gerente da rede</h3></div>
           <label className="block font-bold text-slate-700">Nome<input required value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} className={input} /></label>
           <label className="block font-bold text-slate-700">E-mail<input required type="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} className={input} /></label>
