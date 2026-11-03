@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import {
+  ArrowLeft,
   Building2,
   CheckCircle2,
   ChevronRight,
@@ -9,12 +10,18 @@ import {
   LoaderCircle,
   Plus,
   RefreshCw,
+  Network,
+  Search,
   Store,
-  Users
+  UserRound,
+  Users,
+  X
 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { PdvOperator, PlatformTenant, PlatformTenantDetails, PosTerminalActivation, PosTerminalActivationStatus, StoreNfceStatus, SubscriptionStatus } from '../types';
 import { supabaseService } from '../db/supabaseService';
 import NetworkAdminPanel from './NetworkAdminPanel';
+import { platformListNetworks, type PlatformNetwork } from '../db/network';
 
 interface UcpViewProps {
   onBackToErp?: () => void;
@@ -51,6 +58,29 @@ const activationStatusClassName: Record<PosTerminalActivationStatus, string> = {
   REVOGADO: 'border-rose-200 bg-rose-50 text-rose-700'
 };
 
+type UcpSection = 'clientes' | 'redes';
+type DetailTab = 'lojas' | 'terminais' | 'usuarios' | 'vendedores';
+
+const UCP_NAV: { id: UcpSection; name: string; icon: LucideIcon; description: string }[] = [
+  { id: 'clientes', name: 'Clientes', icon: Building2, description: 'Franqueados que usam o sistema: assinatura, lojas, PDVs e acessos.' },
+  { id: 'redes', name: 'Redes', icon: Network, description: 'Franqueadoras: a rede acompanha as franquias ligadas a ela no Painel da Rede.' },
+];
+
+const DETAIL_TABS: { id: DetailTab; name: string; icon: LucideIcon }[] = [
+  { id: 'lojas', name: 'Lojas e notas', icon: Store },
+  { id: 'terminais', name: 'Terminais PDV', icon: KeyRound },
+  { id: 'usuarios', name: 'Usuários do ERP', icon: UserRound },
+  { id: 'vendedores', name: 'Vendedores do PDV', icon: Users },
+];
+
+const roleLabel: Record<string, string> = { ADMIN: 'Administrador', MANAGER: 'Gerente de loja', SUPER_ADMIN: 'Plataforma' };
+
+const normalizeSearch = (value: string | null | undefined) =>
+  (value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+const initialsOf = (name: string) =>
+  name.split(/\s+/).filter(word => word.length > 2).slice(0, 2).map(word => word[0].toUpperCase()).join('') || name.slice(0, 2).toUpperCase();
+
 const getErrorMessage = (value: unknown, fallback: string) => (
   typeof value === 'object' && value !== null && 'message' in value && typeof value.message === 'string'
     ? value.message
@@ -83,6 +113,11 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
   const [storeFiscal, setStoreFiscal] = useState<StoreNfceStatus[]>([]);
   const [focusForm, setFocusForm] = useState<{ unitId: string; token: string; environment: 'homologacao' | 'producao' } | null>(null);
   const [isSavingFocus, setIsSavingFocus] = useState(false);
+  const [section, setSection] = useState<UcpSection>('clientes');
+  const [detailTab, setDetailTab] = useState<DetailTab>('lojas');
+  const [showCreate, setShowCreate] = useState(false);
+  const [search, setSearch] = useState('');
+  const [networks, setNetworks] = useState<PlatformNetwork[]>([]);
 
   const loadTenants = async () => {
     setIsLoading(true);
@@ -98,6 +133,8 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
 
   useEffect(() => {
     void loadTenants();
+    // Rede de cada cliente (so informativo).
+    platformListNetworks().then(setNetworks).catch(() => setNetworks([]));
   }, []);
 
   const loadTerminalActivations = async (tenantId: string) => {
@@ -179,6 +216,7 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
       setGeneratedActivationCode(null);
       setCopiedActivationCode(false);
       setIsActivationFormOpen(false);
+      setDetailTab('lojas');
       void loadTerminalActivations(tenantId);
       void loadPdvOperators(tenantId);
       setStoreFiscal([]);
@@ -240,6 +278,7 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
         cnpj: form.cnpj.replace(/\D/g, '')
       });
       setForm({ legalName: '', cnpj: '', adminEmail: '', initialPassword: '' });
+      setShowCreate(false);
       setSuccess(`Cliente criado. O administrador ${result.adminEmail} já pode acessar o ERP.`);
       await loadTenants();
       await selectTenant(result.tenantId);
@@ -273,303 +312,410 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
     }
   };
 
+  const networkNameOf = (tenantId: string) => networks.find(network => network.tenantIds.includes(tenantId))?.name ?? null;
+  const tenantName = (tenant: { legalName: string | null; tradeName: string | null }) => tenant.tradeName || tenant.legalName || 'Cliente sem nome';
+  const searchTerm = normalizeSearch(search.trim());
+  const searchDigits = searchTerm.replace(/\D/g, '');
+  const visibleTenants = !searchTerm ? tenants : tenants.filter(tenant => (
+    [tenant.legalName, tenant.tradeName, networkNameOf(tenant.id)].some(value => normalizeSearch(value).includes(searchTerm))
+    || (searchDigits.length >= 2 && (tenant.cnpj || '').replace(/\D/g, '').includes(searchDigits))
+  ));
+  const totalStores = tenants.reduce((sum, tenant) => sum + tenant.storeCount, 0);
+  const activeTenants = tenants.filter(tenant => tenant.subscriptionStatus === 'ATIVO').length;
+  const attentionTenants = tenants.filter(tenant => tenant.subscriptionStatus !== 'ATIVO').length;
+
+  const openSection = (next: UcpSection) => {
+    setSection(next);
+    setSelectedTenant(null);
+    setError(null);
+    setSuccess(null);
+  };
+
+  const active = UCP_NAV.find(item => item.id === section)!;
+  const inputClass = 'mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100';
+
   return (
-    <div className="mx-auto w-full max-w-7xl space-y-5">
-      <section className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-700">
-            <Building2 className="h-4 w-4" />
-            Administração da plataforma
+    <div className="flex-1 flex flex-col md:flex-row min-h-0">
+      <aside className="w-full md:w-60 bg-slate-950 text-slate-300 flex flex-col border-r border-slate-900 shrink-0">
+        <div className="p-4 bg-slate-950/40 border-b border-slate-900/80 hidden md:block">
+          <span className="text-xs text-slate-500 font-bold uppercase tracking-widest font-mono flex items-center gap-1.5">
+            <Building2 className="w-3.5 h-3.5" />Plataforma
+          </span>
+          <p className="mt-1 text-sm font-bold text-white">Kanguru</p>
+          <div className="mt-2 flex items-center justify-between">
+            <span className="text-xs text-slate-400 font-medium">Clientes:</span>
+            <span className="bg-blue-500/10 text-blue-400 border border-blue-500/20 font-bold font-mono text-xs px-2 py-0.5 rounded">{tenants.length}</span>
           </div>
-          <h2 className="mt-1 text-2xl font-bold text-slate-950">UCP</h2>
-          <p className="mt-1 text-sm text-slate-500">Clientes, acessos e assinaturas da plataforma.</p>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-xs text-slate-400 font-medium">Lojas:</span>
+            <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold font-mono text-xs px-2 py-0.5 rounded">{totalStores}</span>
+          </div>
         </div>
-        {onBackToErp && (
-          <button
-            type="button"
-            onClick={onBackToErp}
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50"
-          >
-            Voltar ao ERP
-          </button>
-        )}
-      </section>
 
-      {(error || success) && (
-        <div className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${error ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
-          {error ? <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
-          <span>{error || success}</span>
-        </div>
-      )}
-
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.85fr)]">
-        <section className="border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900">Clientes cadastrados</h3>
-              <p className="mt-0.5 text-xs text-slate-500">Selecione um cliente para abrir os detalhes.</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void loadTenants()}
-              disabled={isLoading}
-              className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50"
-              title="Atualizar lista"
-            >
-              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+        <nav className="py-4 space-y-1 flex-1 pr-3" aria-label="Menu do UCP">
+          {UCP_NAV.map(item => {
+            const Icon = item.icon;
+            const isActive = section === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => openSection(item.id)}
+                className={`w-full flex items-center px-4 py-3 text-sm font-semibold transition-all duration-150 rounded-r-lg ${
+                  isActive
+                    ? 'bg-blue-600/15 text-blue-400 border-l-4 border-blue-500 font-bold'
+                    : 'hover:bg-slate-900/60 hover:text-white text-slate-400 border-l-4 border-transparent'
+                }`}
+              >
+                <Icon className="w-[18px] h-[18px] mr-3 shrink-0" />
+                <span>{item.name}</span>
+              </button>
+            );
+          })}
+          {onBackToErp && (
+            <button type="button" onClick={onBackToErp} className="w-full flex items-center px-4 py-3 text-sm font-semibold text-slate-400 hover:bg-slate-900/60 hover:text-white border-l-4 border-transparent rounded-r-lg">
+              <ArrowLeft className="w-[18px] h-[18px] mr-3 shrink-0" />Voltar ao ERP
             </button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[700px] text-left text-xs">
-              <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                <tr>
-                  <th className="px-4 py-3">Cliente</th>
-                  <th className="px-4 py-3">CNPJ</th>
-                  <th className="px-4 py-3 text-center">Lojas</th>
-                  <th className="px-4 py-3">Assinatura</th>
-                  <th className="px-4 py-3">Criação</th>
-                  <th className="w-10 px-2 py-3" aria-label="Abrir detalhes" />
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {isLoading && (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400"><LoaderCircle className="mr-2 inline h-4 w-4 animate-spin" />Carregando clientes...</td></tr>
-                )}
-                {!isLoading && tenants.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400">Nenhum cliente cadastrado.</td></tr>
-                )}
-                {tenants.map(tenant => {
-                  const status = tenant.subscriptionStatus || 'BLOQUEADO';
-                  return (
-                    <tr key={tenant.id} className="cursor-pointer transition hover:bg-blue-50/50" onClick={() => void selectTenant(tenant.id)}>
-                      <td className="px-4 py-3">
-                        <div className="font-bold text-slate-800">{tenant.legalName || tenant.tradeName || 'Cliente sem nome'}</div>
-                        {tenant.tradeName && tenant.tradeName !== tenant.legalName && <div className="mt-0.5 text-slate-500">{tenant.tradeName}</div>}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-slate-600">{formatCnpj(tenant.cnpj)}</td>
-                      <td className="px-4 py-3 text-center font-bold text-slate-700">{tenant.storeCount}</td>
-                      <td className="px-4 py-3"><span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-bold ${statusClassName[status]}`}>{status}</span></td>
-                      <td className="px-4 py-3 text-slate-600">{formatDate(tenant.createdAt)}</td>
-                      <td className="px-2 py-3 text-slate-400"><ChevronRight className="h-4 w-4" /></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
+          )}
+        </nav>
 
-        <section className="border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex items-center gap-2">
-            <Plus className="h-4 w-4 text-blue-600" />
-            <h3 className="text-sm font-bold text-slate-900">Novo cliente</h3>
-          </div>
-          <p className="mt-1 text-xs text-slate-500">Cria o tenant e o administrador inicial, sem lojas vinculadas.</p>
-          <form className="mt-4 space-y-3" onSubmit={handleCreateTenant}>
-            <label className="block text-xs font-bold text-slate-700">Razão social
-              <input required value={form.legalName} onChange={event => setForm({ ...form, legalName: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-            </label>
-            <label className="block text-xs font-bold text-slate-700">CNPJ
-              <input required inputMode="numeric" maxLength={18} value={form.cnpj} onChange={event => setForm({ ...form, cnpj: event.target.value })} placeholder="00.000.000/0000-00" className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-            </label>
-            <label className="block text-xs font-bold text-slate-700">E-mail do administrador
-              <input required type="email" value={form.adminEmail} onChange={event => setForm({ ...form, adminEmail: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-            </label>
-            <label className="block text-xs font-bold text-slate-700">Senha inicial
-              <input required type="password" minLength={12} value={form.initialPassword} onChange={event => setForm({ ...form, initialPassword: event.target.value })} className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-            </label>
-            <button type="submit" disabled={isCreating} className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
-              {isCreating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-              {isCreating ? 'Criando cliente...' : 'Criar cliente'}
-            </button>
-          </form>
-        </section>
-      </div>
-
-      <section className="border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-200 px-4 py-3">
-          <h3 className="text-sm font-bold text-slate-900">Detalhes do cliente</h3>
+        <div className="p-4 bg-slate-950/80 border-t border-slate-900 text-xs text-slate-500 font-mono text-center hidden md:block">
+          <p>UCP</p>
+          <p className="mt-0.5 opacity-80">Administração da plataforma</p>
         </div>
-        {isLoadingDetails && <div className="px-4 py-10 text-center text-sm text-slate-400"><LoaderCircle className="mr-2 inline h-4 w-4 animate-spin" />Carregando detalhes...</div>}
-        {!isLoadingDetails && !selectedTenant && <div className="px-4 py-10 text-center text-sm text-slate-400">Selecione um cliente na lista para consultar seus dados.</div>}
-        {!isLoadingDetails && selectedTenant && (
-          <div className="space-y-6 p-4">
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-              <div><div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Razão social</div><div className="mt-1 text-sm font-bold text-slate-800">{selectedTenant.tenant.legalName || 'Não informado'}</div></div>
-              <div><div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Nome fantasia</div><div className="mt-1 text-sm text-slate-700">{selectedTenant.tenant.tradeName || 'Não informado'}</div></div>
-              <div><div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">CNPJ</div><div className="mt-1 font-mono text-sm text-slate-700">{formatCnpj(selectedTenant.tenant.cnpj)}</div></div>
-              <div><div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Plano</div><div className="mt-1 text-sm text-slate-700">{selectedTenant.tenant.planCode || 'Não informado'}</div></div>
-              <div><div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Criado em</div><div className="mt-1 text-sm text-slate-700">{formatDate(selectedTenant.tenant.createdAt)}</div></div>
-            </div>
+      </aside>
 
-            <div className="flex flex-col gap-3 border-y border-slate-100 py-4 sm:flex-row sm:items-end">
-              <label className="block flex-1 text-xs font-bold text-slate-700">Status da assinatura
-                <select value={statusDraft} onChange={event => setStatusDraft(event.target.value as SubscriptionStatus)} className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                  {subscriptionOptions.map(status => <option key={status} value={status}>{status}</option>)}
-                </select>
+      <main className="erp-workspace flex-1 p-3 sm:p-4 lg:p-5 w-full overflow-y-auto space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><active.icon className="w-5 h-5 text-blue-600" />{active.name}</h2>
+            <p className="text-xs text-slate-500">{active.description}</p>
+          </div>
+          {section === 'clientes' && !selectedTenant && (
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <label className="relative flex-1 sm:w-72 sm:flex-none">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Buscar nome, CNPJ ou rede" className="w-full h-10 pl-9 pr-3 rounded-lg border border-slate-200 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400" />
               </label>
-              <button type="button" onClick={() => void handleSaveSubscription()} disabled={isSavingStatus} className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-xs font-bold text-white transition hover:bg-slate-800 disabled:opacity-60">
-                {isSavingStatus && <LoaderCircle className="h-4 w-4 animate-spin" />}Salvar status
+              <button type="button" onClick={() => void loadTenants()} disabled={isLoading} className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 disabled:opacity-50" title="Atualizar lista" aria-label="Atualizar lista">
+                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+              </button>
+              <button type="button" onClick={() => { setShowCreate(true); setError(null); setSuccess(null); }} className="h-10 px-4 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold">
+                <Plus className="h-4 w-4" />Novo cliente
               </button>
             </div>
+          )}
+        </div>
 
-            <section className="border-b border-slate-100 pb-5">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600"><KeyRound className="h-4 w-4" />Ativação de terminal PDV</div>
-                  <p className="mt-1 text-xs text-slate-500">Gere um código temporário para vincular um terminal a uma loja deste cliente.</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsActivationFormOpen(current => !current)}
-                  disabled={selectedTenant.stores.length === 0}
-                  className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <KeyRound className="h-4 w-4" />
-                  Gerar código de ativação de terminal
-                </button>
-              </div>
+        {(error || success) && !showCreate && (
+          <div className={`flex items-start gap-2 rounded-lg border px-4 py-3 text-sm ${error ? 'border-rose-200 bg-rose-50 text-rose-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+            {error ? <CircleAlert className="mt-0.5 h-4 w-4 shrink-0" /> : <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />}
+            <span>{error || success}</span>
+          </div>
+        )}
 
-              {selectedTenant.stores.length === 0 && <p className="mt-3 text-xs text-amber-700">Cadastre uma loja para gerar códigos de ativação.</p>}
+        {section === 'redes' && <NetworkAdminPanel tenants={tenants} />}
 
-              {isActivationFormOpen && (
-                <form onSubmit={handleCreateTerminalActivation} className="mt-4 grid gap-3 border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px_auto] sm:items-end">
-                  <label className="block text-xs font-bold text-slate-700">Loja
-                    <select value={activationForm.unitId} onChange={event => setActivationForm({ ...activationForm, unitId: event.target.value })} className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                      {selectedTenant.stores.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.legalName || store.unitId}</option>)}
-                    </select>
-                  </label>
-                  <label className="block text-xs font-bold text-slate-700">Identificação do terminal
-                    <input required value={activationForm.terminalLabel} onChange={event => setActivationForm({ ...activationForm, terminalLabel: event.target.value })} placeholder="Ex.: Caixa 01" className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
-                  </label>
-                  <label className="block text-xs font-bold text-slate-700">Validade
-                    <select value={activationForm.expiresInMinutes} onChange={event => setActivationForm({ ...activationForm, expiresInMinutes: Number(event.target.value) })} className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
-                      <option value={15}>15 min</option>
-                      <option value={30}>30 min</option>
-                      <option value={60}>1 hora</option>
-                      <option value={240}>4 horas</option>
-                    </select>
-                  </label>
-                  <button type="submit" disabled={isCreatingActivation} className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-xs font-bold text-white transition hover:bg-slate-800 disabled:opacity-60">
-                    {isCreatingActivation && <LoaderCircle className="h-4 w-4 animate-spin" />}Gerar
-                  </button>
-                </form>
-              )}
+        {section === 'clientes' && isLoadingDetails && (
+          <div className="py-10 text-center text-sm text-slate-400"><LoaderCircle className="mr-2 inline h-4 w-4 animate-spin" />Carregando ficha do cliente...</div>
+        )}
 
-              {generatedActivationCode && (
-                <div className="mt-4 flex flex-col gap-3 border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">Código gerado</div>
-                    <div className="mt-1 font-mono text-xl font-bold tracking-widest text-emerald-950">{generatedActivationCode}</div>
+        {section === 'clientes' && !isLoadingDetails && !selectedTenant && (
+          <div className="space-y-4 text-xs">
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+              <SummaryCard label="Clientes" value={tenants.length} icon={Building2} tone="bg-blue-50 text-blue-600 border-blue-100/80" />
+              <SummaryCard label="Assinatura ativa" value={activeTenants} icon={CheckCircle2} tone="bg-emerald-50 text-emerald-600 border-emerald-100/80" />
+              <SummaryCard label="Atrasados ou bloqueados" value={attentionTenants} icon={CircleAlert} tone="bg-amber-50 text-amber-600 border-amber-100/80" />
+              <SummaryCard label="Lojas" value={totalStores} icon={Store} tone="bg-slate-100 text-slate-600 border-slate-200" />
+            </div>
+
+            {isLoading && <p className="py-6 text-center text-slate-400"><LoaderCircle className="mr-2 inline h-4 w-4 animate-spin" />Carregando clientes...</p>}
+            {!isLoading && tenants.length === 0 && <p className="text-slate-400">Nenhum cliente cadastrado.</p>}
+            {!isLoading && tenants.length > 0 && visibleTenants.length === 0 && <p className="text-slate-400">Nenhum cliente encontrado para "{search.trim()}".</p>}
+
+            {visibleTenants.map(tenant => {
+              const status = tenant.subscriptionStatus || 'BLOQUEADO';
+              const networkName = networkNameOf(tenant.id);
+              return (
+                <section key={tenant.id} className="bg-white border border-slate-200 rounded-xl shadow-xs p-4 flex flex-wrap items-center gap-4">
+                  <div className="h-11 w-11 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-sm shrink-0">{initialsOf(tenantName(tenant))}</div>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-bold text-slate-900 truncate">{tenantName(tenant)}</h3>
+                    <p className="text-slate-500">
+                      CNPJ {formatCnpj(tenant.cnpj)} · {tenant.storeCount} loja(s) · desde {formatDate(tenant.createdAt)}
+                      {networkName && <> · Rede <strong className="text-slate-700">{networkName}</strong></>}
+                    </p>
                   </div>
-                  <button type="button" onClick={() => void handleCopyActivationCode()} className="flex h-9 w-9 items-center justify-center rounded-md border border-emerald-300 bg-white text-emerald-800 transition hover:bg-emerald-100" title={copiedActivationCode ? 'Código copiado' : 'Copiar código'} aria-label={copiedActivationCode ? 'Código copiado' : 'Copiar código'}>
-                    <Copy className="h-4 w-4" />
+                  <span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-bold ${statusClassName[status]}`}>{status}</span>
+                  <button type="button" onClick={() => void selectTenant(tenant.id)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold">
+                    Abrir ficha<ChevronRight className="w-4 h-4" />
                   </button>
-                </div>
-              )}
-            </section>
+                </section>
+              );
+            })}
+          </div>
+        )}
 
-            <section>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600"><KeyRound className="h-4 w-4" />Histórico de ativações</div>
-                <button type="button" onClick={() => void loadTerminalActivations(selectedTenant.tenant.id)} disabled={isLoadingActivations} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50" title="Atualizar histórico" aria-label="Atualizar histórico">
-                  <RefreshCw className={`h-4 w-4 ${isLoadingActivations ? 'animate-spin' : ''}`} />
+        {section === 'clientes' && !isLoadingDetails && selectedTenant && (
+          <div className="space-y-4 text-xs">
+            <button type="button" onClick={() => { setSelectedTenant(null); setError(null); setSuccess(null); }} className="inline-flex items-center gap-1.5 font-bold text-blue-700 hover:underline">
+              <ArrowLeft className="h-4 w-4" />Voltar para clientes
+            </button>
+
+            <section className="bg-white border border-slate-200 rounded-xl shadow-xs p-4 flex flex-wrap items-center gap-4">
+              <div className="h-12 w-12 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-base shrink-0">{initialsOf(tenantName(selectedTenant.tenant))}</div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-base font-bold text-slate-900">{tenantName(selectedTenant.tenant)}</h3>
+                {selectedTenant.tenant.tradeName && selectedTenant.tenant.legalName && selectedTenant.tenant.tradeName !== selectedTenant.tenant.legalName && <p className="text-slate-500">{selectedTenant.tenant.legalName}</p>}
+                <p className="text-slate-500">
+                  CNPJ {formatCnpj(selectedTenant.tenant.cnpj)} · Plano {selectedTenant.tenant.planCode || 'não informado'} · desde {formatDate(selectedTenant.tenant.createdAt)}
+                  {networkNameOf(selectedTenant.tenant.id) && <> · Rede <strong className="text-slate-700">{networkNameOf(selectedTenant.tenant.id)}</strong></>}
+                </p>
+              </div>
+              <div className="flex items-end gap-2">
+                <label className="block font-bold text-slate-600">Assinatura
+                  <select value={statusDraft} onChange={event => setStatusDraft(event.target.value as SubscriptionStatus)} className="mt-1 block rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                    {subscriptionOptions.map(status => <option key={status} value={status}>{status}</option>)}
+                  </select>
+                </label>
+                <button type="button" onClick={() => void handleSaveSubscription()} disabled={isSavingStatus || statusDraft === (selectedTenant.tenant.subscriptionStatus || 'ATIVO')} className="inline-flex h-[38px] items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 font-bold text-white transition hover:bg-slate-800 disabled:opacity-50">
+                  {isSavingStatus && <LoaderCircle className="h-4 w-4 animate-spin" />}Salvar
                 </button>
               </div>
-              <div className="overflow-x-auto border border-slate-200">
-                <table className="w-full min-w-[720px] text-left text-xs">
-                  <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Terminal</th><th className="px-3 py-2">Loja</th><th className="px-3 py-2">Gerado em</th><th className="px-3 py-2">Expira em</th><th className="px-3 py-2">Utilizado em</th><th className="px-3 py-2">Status</th></tr></thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {isLoadingActivations && <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400"><LoaderCircle className="mr-2 inline h-4 w-4 animate-spin" />Carregando histórico...</td></tr>}
-                    {!isLoadingActivations && terminalActivations.length === 0 && <tr><td colSpan={6} className="px-3 py-6 text-center text-slate-400">Nenhum código de ativação foi gerado para este cliente.</td></tr>}
-                    {!isLoadingActivations && terminalActivations.map(activation => {
-                      const store = selectedTenant.stores.find(item => item.unitId === activation.unitId);
-                      return <tr key={activation.id}><td className="px-3 py-2 font-bold text-slate-800">{activation.terminalLabel}</td><td className="px-3 py-2 text-slate-600">{store?.tradeName || store?.legalName || activation.unitId}</td><td className="px-3 py-2 text-slate-600">{formatDateTime(activation.createdAt)}</td><td className="px-3 py-2 text-slate-600">{formatDateTime(activation.expiresAt)}</td><td className="px-3 py-2 text-slate-600">{formatDateTime(activation.usedAt)}</td><td className="px-3 py-2"><span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-bold ${activationStatusClassName[activation.status]}`}>{activation.status}</span></td></tr>;
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {activationHistoryError && <p className="mt-2 text-xs text-rose-700">{activationHistoryError}</p>}
             </section>
 
-            <div className="grid gap-5 lg:grid-cols-2">
-              <div>
-                <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600"><Store className="h-4 w-4" />Lojas ({selectedTenant.stores.length})</div>
-                <div className="divide-y divide-slate-100 border border-slate-200">
-                  {selectedTenant.stores.length === 0 && <div className="p-3 text-xs text-slate-400">Nenhuma loja cadastrada.</div>}
+            <div className="flex flex-wrap gap-1 border-b border-slate-200">
+              {DETAIL_TABS.map(tab => {
+                const Icon = tab.icon;
+                const count = tab.id === 'lojas' ? selectedTenant.stores.length : tab.id === 'terminais' ? terminalActivations.length : tab.id === 'usuarios' ? selectedTenant.users.length : pdvOperators.length;
+                return (
+                  <button key={tab.id} type="button" onClick={() => setDetailTab(tab.id)} className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2.5 font-bold ${detailTab === tab.id ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+                    <Icon className="h-4 w-4" />{tab.name}<span className="rounded bg-slate-100 px-1.5 text-[10px] text-slate-600">{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {detailTab === 'lojas' && (
+              <section className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                {selectedTenant.stores.length === 0 && <p className="p-4 text-slate-400">Nenhuma loja cadastrada. O franqueado cria as lojas no ERP › Configurações.</p>}
+                <ul className="divide-y divide-slate-100">
                   {selectedTenant.stores.map(store => {
                     const fiscal = storeFiscal.find(item => item.unitId === store.unitId);
                     const editing = focusForm?.unitId === store.unitId;
                     return (
-                      <div key={store.unitId} className="p-3 text-xs">
-                        <div className="font-bold text-slate-800">{store.tradeName || store.legalName || store.unitId}</div>
-                        <div className="mt-1 font-mono text-slate-500">{formatCnpj(store.cnpj)}</div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <li key={store.unitId} className="p-4">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <Store className="h-4 w-4 text-slate-400 shrink-0" />
+                          <div className="min-w-0 flex-1">
+                            <span className="font-bold text-slate-800">{store.tradeName || store.legalName || store.unitId}</span>
+                            <span className="block font-mono text-slate-500">{formatCnpj(store.cnpj)}</span>
+                          </div>
                           <span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-bold ${fiscal?.configured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-500'}`}>
-                            {fiscal?.configured ? `NFC-e configurada · ${fiscal.environment === 'producao' ? 'Produção' : 'Teste (homologação)'}` : 'NFC-e não configurada'}
+                            {fiscal?.configured ? `Notas configuradas · ${fiscal.environment === 'producao' ? 'Produção' : 'Teste (homologação)'}` : 'Notas não configuradas'}
                           </span>
                           {!editing && <button type="button" onClick={() => setFocusForm({ unitId: store.unitId, token: '', environment: fiscal?.environment || 'homologacao' })} className="font-bold text-blue-700 hover:underline">{fiscal?.configured ? 'Alterar' : 'Configurar'}</button>}
                           {!editing && fiscal?.configured && <button type="button" onClick={() => void handleClearFocus(store.unitId)} className="font-bold text-rose-700 hover:underline">Remover</button>}
                         </div>
                         {editing && focusForm && (
-                          <form onSubmit={handleSaveFocus} className="mt-3 grid gap-2 border border-slate-200 bg-slate-50 p-3">
+                          <form onSubmit={handleSaveFocus} className="mt-3 grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
                             <label className="font-bold text-slate-600">Chave (token) da Focus
-                              <input type="password" autoComplete="off" value={focusForm.token} onChange={event => setFocusForm({ ...focusForm, token: event.target.value })} placeholder={fiscal?.configured ? 'Em branco = manter a chave atual' : 'Cole a chave da empresa na Focus'} className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" />
+                              <input type="password" autoComplete="off" value={focusForm.token} onChange={event => setFocusForm({ ...focusForm, token: event.target.value })} placeholder={fiscal?.configured ? 'Em branco = manter a chave atual' : 'Cole a chave da empresa na Focus'} className={inputClass} />
                             </label>
                             <label className="font-bold text-slate-600">Ambiente
-                              <select value={focusForm.environment} onChange={event => setFocusForm({ ...focusForm, environment: event.target.value as 'homologacao' | 'producao' })} className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                              <select value={focusForm.environment} onChange={event => setFocusForm({ ...focusForm, environment: event.target.value as 'homologacao' | 'producao' })} className={inputClass}>
                                 <option value="homologacao">Teste (homologação) — não vale como nota</option>
                                 <option value="producao">Produção — nota real</option>
                               </select>
                             </label>
                             <div className="flex justify-end gap-2">
-                              <button type="button" onClick={() => setFocusForm(null)} className="rounded-md px-3 py-2 font-bold text-slate-600 hover:bg-slate-100">Cancelar</button>
-                              <button type="submit" disabled={isSavingFocus || (!fiscal?.configured && !focusForm.token.trim())} className="rounded-md bg-blue-600 px-3 py-2 font-bold text-white disabled:opacity-50">{isSavingFocus ? 'Salvando...' : 'Salvar'}</button>
+                              <button type="button" onClick={() => setFocusForm(null)} className="rounded-lg px-3 py-2 font-bold text-slate-600 hover:bg-slate-100">Cancelar</button>
+                              <button type="submit" disabled={isSavingFocus || (!fiscal?.configured && !focusForm.token.trim())} className="rounded-lg bg-blue-600 px-3 py-2 font-bold text-white disabled:opacity-50">{isSavingFocus ? 'Salvando...' : 'Salvar'}</button>
                             </div>
                           </form>
                         )}
-                      </div>
+                      </li>
                     );
                   })}
-                </div>
-              </div>
-              <div>
-                <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600"><Users className="h-4 w-4" />Usuários ({selectedTenant.users.length})</div>
-                <div className="divide-y divide-slate-100 border border-slate-200">
-                  {selectedTenant.users.length === 0 && <div className="p-3 text-xs text-slate-400">Nenhum usuário vinculado.</div>}
-                  {selectedTenant.users.map(user => <div key={user.authUid} className="flex items-center justify-between gap-3 p-3 text-xs"><div className="min-w-0"><div className="truncate font-bold text-slate-800">{user.email || user.authUid}</div><div className="mt-1 text-slate-500">{user.unitId || 'Sem loja vinculada'}</div></div><span className="rounded bg-slate-100 px-2 py-1 font-bold text-slate-700">{user.role}</span></div>)}
-                </div>
-              </div>
-            </div>
+                </ul>
+              </section>
+            )}
 
-            <section>
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600"><Users className="h-4 w-4" />Operadores do PDV ({pdvOperators.length})</div>
-                <button type="button" onClick={() => void loadPdvOperators(selectedTenant.tenant.id)} disabled={isLoadingPdvOperators} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50" title="Atualizar operadores" aria-label="Atualizar operadores">
-                  <RefreshCw className={`h-4 w-4 ${isLoadingPdvOperators ? 'animate-spin' : ''}`} />
-                </button>
+            {detailTab === 'terminais' && (
+              <div className="space-y-4">
+                <section className="bg-white border border-slate-200 rounded-xl shadow-xs p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2"><KeyRound className="h-4 w-4 text-blue-600" />Ativar um novo PDV</h4>
+                      <p className="mt-0.5 text-slate-500">Gere um código temporário e digite-o no PDV da loja para vinculá-lo.</p>
+                    </div>
+                    {!isActivationFormOpen && (
+                      <button type="button" onClick={() => setIsActivationFormOpen(true)} disabled={selectedTenant.stores.length === 0} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">
+                        <KeyRound className="h-4 w-4" />Gerar código de ativação
+                      </button>
+                    )}
+                  </div>
+                  {selectedTenant.stores.length === 0 && <p className="mt-3 text-amber-700">Cadastre uma loja para gerar códigos de ativação.</p>}
+                  {isActivationFormOpen && (
+                    <form onSubmit={handleCreateTerminalActivation} className="mt-4 grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_120px_auto] sm:items-end">
+                      <label className="block font-bold text-slate-700">Loja
+                        <select value={activationForm.unitId} onChange={event => setActivationForm({ ...activationForm, unitId: event.target.value })} className={inputClass}>
+                          {selectedTenant.stores.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.legalName || store.unitId}</option>)}
+                        </select>
+                      </label>
+                      <label className="block font-bold text-slate-700">Identificação do terminal
+                        <input required value={activationForm.terminalLabel} onChange={event => setActivationForm({ ...activationForm, terminalLabel: event.target.value })} placeholder="Ex.: Caixa 01" className={inputClass} />
+                      </label>
+                      <label className="block font-bold text-slate-700">Validade
+                        <select value={activationForm.expiresInMinutes} onChange={event => setActivationForm({ ...activationForm, expiresInMinutes: Number(event.target.value) })} className={inputClass}>
+                          <option value={15}>15 min</option>
+                          <option value={30}>30 min</option>
+                          <option value={60}>1 hora</option>
+                          <option value={240}>4 horas</option>
+                        </select>
+                      </label>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setIsActivationFormOpen(false)} className="rounded-lg px-3 py-2 font-bold text-slate-600 hover:bg-slate-100">Cancelar</button>
+                        <button type="submit" disabled={isCreatingActivation} className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-3 py-2 font-bold text-white transition hover:bg-slate-800 disabled:opacity-60">
+                          {isCreatingActivation && <LoaderCircle className="h-4 w-4 animate-spin" />}Gerar
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                  {generatedActivationCode && (
+                    <div className="mt-4 flex flex-col gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-700">Código gerado</div>
+                        <div className="mt-1 font-mono text-xl font-bold tracking-widest text-emerald-950">{generatedActivationCode}</div>
+                      </div>
+                      <button type="button" onClick={() => void handleCopyActivationCode()} className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-white px-3 py-2 font-bold text-emerald-800 transition hover:bg-emerald-100">
+                        <Copy className="h-4 w-4" />{copiedActivationCode ? 'Copiado' : 'Copiar'}
+                      </button>
+                    </div>
+                  )}
+                </section>
+
+                <section className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                    <h4 className="text-sm font-bold text-slate-900">Histórico de códigos</h4>
+                    <button type="button" onClick={() => void loadTerminalActivations(selectedTenant.tenant.id)} disabled={isLoadingActivations} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 disabled:opacity-50" title="Atualizar histórico" aria-label="Atualizar histórico">
+                      <RefreshCw className={`h-4 w-4 ${isLoadingActivations ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-left">
+                      <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-2">Terminal</th><th className="px-4 py-2">Loja</th><th className="px-4 py-2">Gerado em</th><th className="px-4 py-2">Expira em</th><th className="px-4 py-2">Utilizado em</th><th className="px-4 py-2">Situação</th></tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {isLoadingActivations && <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400"><LoaderCircle className="mr-2 inline h-4 w-4 animate-spin" />Carregando histórico...</td></tr>}
+                        {!isLoadingActivations && terminalActivations.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Nenhum código de ativação foi gerado para este cliente.</td></tr>}
+                        {!isLoadingActivations && terminalActivations.map(activation => {
+                          const store = selectedTenant.stores.find(item => item.unitId === activation.unitId);
+                          return <tr key={activation.id}><td className="px-4 py-2 font-bold text-slate-800">{activation.terminalLabel}</td><td className="px-4 py-2 text-slate-600">{store?.tradeName || store?.legalName || activation.unitId}</td><td className="px-4 py-2 text-slate-600">{formatDateTime(activation.createdAt)}</td><td className="px-4 py-2 text-slate-600">{formatDateTime(activation.expiresAt)}</td><td className="px-4 py-2 text-slate-600">{formatDateTime(activation.usedAt)}</td><td className="px-4 py-2"><span className={`inline-flex rounded-md border px-2 py-1 text-[10px] font-bold ${activationStatusClassName[activation.status]}`}>{activation.status}</span></td></tr>;
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {activationHistoryError && <p className="px-4 py-2 text-rose-700">{activationHistoryError}</p>}
+                </section>
               </div>
-              <div className="overflow-x-auto border border-slate-200">
-                <table className="w-full min-w-[600px] text-left text-xs">
-                  <thead className="bg-slate-50 text-[11px] font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-3 py-2">Operador</th><th className="px-3 py-2">Loja</th><th className="px-3 py-2">Permissões</th><th className="px-3 py-2">Situação</th></tr></thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {isLoadingPdvOperators && <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400"><LoaderCircle className="mr-2 inline h-4 w-4 animate-spin" />Carregando operadores...</td></tr>}
-                    {!isLoadingPdvOperators && pdvOperators.length === 0 && <tr><td colSpan={4} className="px-3 py-6 text-center text-slate-400">Nenhum operador do PDV cadastrado.</td></tr>}
-                    {!isLoadingPdvOperators && pdvOperators.map(operator => {
-                      const store = selectedTenant.stores.find(item => item.unitId === operator.unitId);
-                      const permissionCount = Object.values(operator.permissions).filter(Boolean).length;
-                      return <tr key={operator.id}><td className="px-3 py-2 font-bold text-slate-800">{operator.name}</td><td className="px-3 py-2 text-slate-600">{store?.tradeName || store?.legalName || (operator.unitId || 'Todas as lojas')}</td><td className="px-3 py-2 text-slate-600">{permissionCount} permissões</td><td className="px-3 py-2"><span className={`inline-flex rounded-md px-2 py-1 text-[10px] font-bold ${operator.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{operator.isActive ? 'ATIVO' : 'INATIVO'}</span></td></tr>;
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {pdvOperatorsError && <p className="mt-2 text-xs text-rose-700">{pdvOperatorsError}</p>}
-            </section>
+            )}
+
+            {detailTab === 'usuarios' && (
+              <section className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                {selectedTenant.users.length === 0 && <p className="p-4 text-slate-400">Nenhum usuário vinculado.</p>}
+                <ul className="divide-y divide-slate-100">
+                  {selectedTenant.users.map(user => {
+                    const store = selectedTenant.stores.find(item => item.unitId === user.unitId);
+                    return (
+                      <li key={user.authUid} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                        <UserRound className="h-4 w-4 text-slate-400 shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate font-bold text-slate-800">{user.email || user.authUid}</span>
+                          <span className="text-slate-500">{store?.tradeName || store?.legalName || user.unitId || 'Sem loja vinculada'}</span>
+                        </div>
+                        <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700">{roleLabel[user.role] ?? user.role}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            )}
+
+            {detailTab === 'vendedores' && (
+              <section className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                  <h4 className="text-sm font-bold text-slate-900">Vendedores do PDV</h4>
+                  <button type="button" onClick={() => void loadPdvOperators(selectedTenant.tenant.id)} disabled={isLoadingPdvOperators} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 disabled:opacity-50" title="Atualizar vendedores" aria-label="Atualizar vendedores">
+                    <RefreshCw className={`h-4 w-4 ${isLoadingPdvOperators ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[600px] text-left">
+                    <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-2">Vendedor</th><th className="px-4 py-2">Loja</th><th className="px-4 py-2">Permissões</th><th className="px-4 py-2">Situação</th></tr></thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {isLoadingPdvOperators && <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400"><LoaderCircle className="mr-2 inline h-4 w-4 animate-spin" />Carregando vendedores...</td></tr>}
+                      {!isLoadingPdvOperators && pdvOperators.length === 0 && <tr><td colSpan={4} className="px-4 py-6 text-center text-slate-400">Nenhum vendedor do PDV cadastrado.</td></tr>}
+                      {!isLoadingPdvOperators && pdvOperators.map(operator => {
+                        const store = selectedTenant.stores.find(item => item.unitId === operator.unitId);
+                        const permissionCount = Object.values(operator.permissions).filter(Boolean).length;
+                        return <tr key={operator.id}><td className="px-4 py-2 font-bold text-slate-800">{operator.name}</td><td className="px-4 py-2 text-slate-600">{store?.tradeName || store?.legalName || (operator.unitId || 'Todas as lojas')}</td><td className="px-4 py-2 text-slate-600">{permissionCount} permissões</td><td className="px-4 py-2"><span className={`inline-flex rounded-md px-2 py-1 text-[10px] font-bold ${operator.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{operator.isActive ? 'ATIVO' : 'INATIVO'}</span></td></tr>;
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {pdvOperatorsError && <p className="px-4 py-2 text-rose-700">{pdvOperatorsError}</p>}
+              </section>
+            )}
           </div>
         )}
-      </section>
+      </main>
 
-      <NetworkAdminPanel tenants={tenants} />
+      {showCreate && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
+          <form onSubmit={handleCreateTenant} className="bg-white rounded-xl shadow-xl w-full max-w-md text-xs">
+            <div className="p-4 border-b border-slate-100 flex justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Novo cliente</h3>
+                <p className="text-slate-500">Cria a empresa e o administrador inicial, sem lojas (o franqueado cria as lojas no ERP).</p>
+              </div>
+              <button type="button" onClick={() => setShowCreate(false)} aria-label="Fechar"><X className="w-5 h-5 text-slate-400" /></button>
+            </div>
+            <div className="p-4 space-y-3">
+              <label className="block font-bold text-slate-700">Razão social
+                <input required value={form.legalName} onChange={event => setForm({ ...form, legalName: event.target.value })} className={inputClass} />
+              </label>
+              <label className="block font-bold text-slate-700">CNPJ
+                <input required inputMode="numeric" maxLength={18} value={form.cnpj} onChange={event => setForm({ ...form, cnpj: event.target.value })} placeholder="00.000.000/0000-00" className={inputClass} />
+              </label>
+              <label className="block font-bold text-slate-700">E-mail do administrador
+                <input required type="email" value={form.adminEmail} onChange={event => setForm({ ...form, adminEmail: event.target.value })} className={inputClass} />
+              </label>
+              <label className="block font-bold text-slate-700">Senha inicial (mínimo 12 caracteres)
+                <input required type="password" minLength={12} value={form.initialPassword} onChange={event => setForm({ ...form, initialPassword: event.target.value })} className={inputClass} />
+              </label>
+              {error && <p className="rounded-lg border border-rose-200 bg-rose-50 p-2 text-rose-700">{error}</p>}
+            </div>
+            <div className="p-4 border-t border-slate-100 flex justify-end gap-2">
+              <button type="button" onClick={() => setShowCreate(false)} className="px-4 py-2 rounded-lg border border-slate-200 font-bold text-slate-600">Cancelar</button>
+              <button type="submit" disabled={isCreating} className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-50">
+                {isCreating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}{isCreating ? 'Criando...' : 'Criar cliente'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, icon: Icon, tone }: { label: string; value: number; icon: LucideIcon; tone: string }) {
+  return (
+    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
+      <div className={`p-2.5 rounded-lg shrink-0 border ${tone}`}><Icon className="w-5 h-5" /></div>
+      <div className="min-w-0">
+        <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider block">{label}</span>
+        <span className="text-lg font-extrabold tracking-tight text-slate-900 block">{value}</span>
+      </div>
     </div>
   );
 }

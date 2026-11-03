@@ -110,9 +110,7 @@ export default function App() {
             setCurrentUser(null);
           }}
         />
-        <main className="erp-workspace flex-1 w-full overflow-y-auto p-3 sm:p-4 lg:p-5">
-          <UcpView />
-        </main>
+        <UcpView />
       </div>
     );
   }

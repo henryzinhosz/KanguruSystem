@@ -67,12 +67,12 @@ export default function NetworkAdminPanel({ tenants }: { tenants: PlatformTenant
   const input = 'w-full rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs outline-none focus:border-blue-500';
 
   return (
-    <section className="border border-slate-200 bg-white shadow-sm">
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
       <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
         <div className="flex items-center gap-2">
           <Network className="h-4 w-4 text-blue-700" />
           <div>
-            <h3 className="text-sm font-bold text-slate-900">Redes (franqueadoras)</h3>
+            <h3 className="text-sm font-bold text-slate-900">Redes cadastradas</h3>
             <p className="text-xs text-slate-500">A franqueadora entra no Painel da Rede e acompanha as franquias ligadas a ela (somente leitura).</p>
           </div>
         </div>
@@ -89,7 +89,7 @@ export default function NetworkAdminPanel({ tenants }: { tenants: PlatformTenant
         </form>
 
         {networks.map(network => (
-          <div key={network.id} className="space-y-2 rounded-md border border-slate-200 p-3">
+          <div key={network.id} className="space-y-2 rounded-lg border border-slate-200 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <strong className="text-sm text-slate-900">{network.name}</strong>
               <span className="text-slate-500">{network.tenants} franqueado(s)</span>
