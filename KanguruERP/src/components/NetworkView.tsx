@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Check, ChevronDown, ChevronUp, DollarSign, KeyRound, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Check, ChevronDown, ChevronRight, ChevronUp, Mail, Phone, UserRound, DollarSign, KeyRound, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { User } from '../types';
 import { Dropdown, PERIOD_ORDER, previousRange } from './NetworkFilters';
@@ -24,6 +24,14 @@ import {
 type Tab = 'geral' | 'franquias' | 'usuarios';
 
 const MONTH_SHORT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+const initialsOf = (name: string) =>
+  name.split(/\s+/).filter(word => word.length > 2).slice(0, 2).map(word => word[0].toUpperCase()).join('') || name.slice(0, 2).toUpperCase();
+
+const formatCnpj = (value: string) => {
+  const digits = (value || '').replace(/\D/g, '');
+  return digits.length === 14 ? digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : value;
+};
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : (error as { message?: string })?.message || 'Erro ao carregar os dados.';
@@ -366,40 +374,48 @@ function NetworkFranchises() {
     <div className="space-y-4 text-xs">
       {error && <p className="text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{error}</p>}
       {franchises.length === 0 && !error && <p className="text-slate-400">Nenhuma franquia ligada a esta rede ainda.</p>}
-      {franchises.map(franchise => (
-        <section key={franchise.tenantId} className="bg-white border border-slate-200 rounded-xl shadow-xs p-5 space-y-3">
-          <div className="flex flex-wrap justify-between gap-3">
-            <div className="flex items-start gap-2">
-              <Building2 className="w-5 h-5 text-blue-600 mt-0.5" />
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">{franchise.tradeName || franchise.legalName}</h3>
-                <p className="text-slate-500">{franchise.legalName} · CNPJ {franchise.cnpj}</p>
+      {franchises.map(franchise => {
+        const openCash = franchise.stores.filter(store => store.openCash).length;
+        return (
+          <section key={franchise.tenantId} className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+            <div className="p-5 flex flex-wrap items-center gap-4">
+              <div className="h-11 w-11 rounded-xl bg-blue-600 text-white flex items-center justify-center font-black text-sm shrink-0">
+                {initialsOf(franchise.tradeName || franchise.legalName)}
               </div>
-            </div>
-            <div className="text-right">
-              <span className="text-[10px] font-bold uppercase text-slate-500 block">Franqueado</span>
-              <strong className="text-slate-800">{franchise.ownerName || 'não informado'}</strong>
-              <span className="block text-slate-500">{[franchise.ownerPhone, franchise.ownerEmail].filter(Boolean).join(' · ') || '—'}</span>
-              <button type="button" onClick={() => setSelected(franchise)} className="mt-2 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold">Abrir ficha</button>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-            {franchise.stores.map(store => (
-              <div key={store.unitId} className="border border-slate-200 rounded-lg p-3 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-slate-800"><Store className="w-4 h-4 text-slate-400" />{store.tradeName || store.unitId}</div>
-                {store.address && <p className="text-slate-500">{store.address}</p>}
-                {store.phone && <p className="text-slate-500">Tel. {store.phone}</p>}
-                <div className="flex flex-wrap gap-1.5 pt-1">
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${store.activeTerminals > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>{store.activeTerminals} PDV ativo(s)</span>
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${store.openCash ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{store.openCash ? 'Caixa aberto' : 'Caixa fechado'}</span>
-                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">Última venda: {store.lastSaleAt ? new Date(store.lastSaleAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</span>
-                </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-sm font-bold text-slate-900 truncate">{franchise.tradeName || franchise.legalName}</h3>
+                <p className="text-slate-500">CNPJ {formatCnpj(franchise.cnpj)} · {franchise.stores.length} loja(s){openCash > 0 ? ` · ${openCash} com caixa aberto` : ''}</p>
               </div>
-            ))}
-            {franchise.stores.length === 0 && <p className="text-slate-400">Sem lojas cadastradas.</p>}
-          </div>
-        </section>
-      ))}
+              <button type="button" onClick={() => setSelected(franchise)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold">
+                Abrir ficha<ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="px-5 py-2.5 bg-slate-50 border-y border-slate-100 flex flex-wrap items-center gap-x-5 gap-y-1 text-slate-600">
+              <span className="inline-flex items-center gap-1.5"><UserRound className="w-3.5 h-3.5 text-slate-400" /><strong className="text-slate-800">{franchise.ownerName || 'Franqueado não informado'}</strong></span>
+              {franchise.ownerPhone && <span className="inline-flex items-center gap-1.5"><Phone className="w-3.5 h-3.5 text-slate-400" />{franchise.ownerPhone}</span>}
+              {franchise.ownerEmail && <span className="inline-flex items-center gap-1.5"><Mail className="w-3.5 h-3.5 text-slate-400" />{franchise.ownerEmail}</span>}
+            </div>
+
+            <ul className="divide-y divide-slate-100">
+              {franchise.stores.map(store => (
+                <li key={store.unitId} className="px-5 py-3 flex flex-wrap items-center gap-3">
+                  <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${store.openCash ? 'bg-emerald-500' : 'bg-slate-300'}`} title={store.openCash ? 'Caixa aberto' : 'Caixa fechado'} />
+                  <div className="min-w-0 flex-1">
+                    <span className="font-bold text-slate-800">{store.tradeName || store.unitId}</span>
+                    <span className="block text-slate-500 truncate">{[store.address, store.phone ? `Tel. ${store.phone}` : ''].filter(Boolean).join(' · ') || 'Endereço não informado'}</span>
+                  </div>
+                  <div className="text-right text-slate-500 leading-tight">
+                    <span className={`block font-semibold ${store.openCash ? 'text-emerald-700' : 'text-slate-500'}`}>{store.openCash ? 'Caixa aberto' : 'Caixa fechado'}</span>
+                    <span className="block">{store.activeTerminals} PDV(s) · última venda {store.lastSaleAt ? new Date(store.lastSaleAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</span>
+                  </div>
+                </li>
+              ))}
+              {franchise.stores.length === 0 && <li className="px-5 py-3 text-slate-400">Sem lojas cadastradas.</li>}
+            </ul>
+          </section>
+        );
+      })}
     </div>
   );
 }
