@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, Fragment, useEffect, useState } from 'react';
 import { CheckCircle2, Clock, Landmark, Plus, Printer, Settings2, Trash2, Undo2, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { formatMoney, shiftMonthKey, toLocalDateKey } from '../db/finance';
@@ -106,7 +106,8 @@ export default function NetworkRoyalties({ networkName }: { networkName: string 
       <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-3 flex flex-wrap items-center gap-2">
         <Dropdown label="Mês" value={month} options={monthOptions} onChange={setMonth} />
         <span className="text-slate-500">Base: faturamento bruto (produtos + serviços) menos devoluções, antes de taxas e despesas.</span>
-        <button type="button" onClick={printReport} disabled={rows.length === 0} className="ml-auto h-10 px-4 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-bold inline-flex items-center gap-1.5 disabled:opacity-50"><Printer className="w-4 h-4" />Imprimir</button>
+        <button type="button" onClick={() => setEditing(rows.find(row => !row.rule) ?? rows[0])} disabled={rows.length === 0} className="ml-auto h-10 px-4 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-bold inline-flex items-center gap-1.5 disabled:opacity-50"><Settings2 className="w-4 h-4" />Configurações</button>
+        <button type="button" onClick={printReport} disabled={rows.length === 0} className="h-10 px-4 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 font-bold inline-flex items-center gap-1.5 disabled:opacity-50"><Printer className="w-4 h-4" />Imprimir</button>
       </div>
 
       {error && <p className="text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{error}</p>}
@@ -127,7 +128,7 @@ export default function NetworkRoyalties({ networkName }: { networkName: string 
         <div className="overflow-x-auto">
           <table className="w-full min-w-[900px]">
             <thead className="bg-slate-50 text-[10px] uppercase text-slate-500 text-left">
-              <tr><th className="p-2">Franquia</th><th className="p-2">Regra</th><th className="p-2 text-right">Base do mês</th><th className="p-2 text-right">Repasse</th><th className="p-2">Situação</th><th className="p-2 text-right">Ações</th></tr>
+              <tr><th className="p-2">Franquia</th><th className="p-2">Regra</th><th className="p-2 text-right">Base do mês</th><th className="p-2 text-right">Repasse</th><th className="p-2">Situação</th><th className="p-2" /></tr>
             </thead>
             <tbody>
               {rows.map(row => (
@@ -144,7 +145,6 @@ export default function NetworkRoyalties({ networkName }: { networkName: string 
                   </td>
                   <td className="p-2">
                     <div className="flex justify-end gap-2 whitespace-nowrap">
-                      <button type="button" onClick={() => setEditing(row)} className="inline-flex items-center gap-1 font-bold text-blue-700 hover:underline"><Settings2 className="w-3.5 h-3.5" />Regra</button>
                       {row.paid
                         ? <button type="button" onClick={() => void undoPayment(row)} className="inline-flex items-center gap-1 font-bold text-slate-600 hover:underline"><Undo2 className="w-3.5 h-3.5" />Desfazer</button>
                         : row.rule && month !== currentMonth && <button type="button" onClick={() => setPaying(row)} className="inline-flex items-center gap-1 font-bold text-emerald-700 hover:underline"><CheckCircle2 className="w-3.5 h-3.5" />Marcar pago</button>}
@@ -159,15 +159,19 @@ export default function NetworkRoyalties({ networkName }: { networkName: string 
       </div>
 
       {editing && (
-        <RuleModal
-          row={editing}
-          onClose={() => setEditing(null)}
-          onSaved={async () => {
-            setEditing(null);
-            setMessage('Regra de repasse salva.');
-            await load();
-          }}
+          <Fragment key={editing.tenantId}>
+          <RuleModal
+            row={editing}
+            rows={rows}
+            onPick={setEditing}
+            onClose={() => setEditing(null)}
+            onSaved={async () => {
+              setEditing(null);
+              setMessage('Regra de repasse salva.');
+              await load();
+            }}
         />
+        </Fragment>
       )}
       {paying && (
         <PayModal
@@ -198,7 +202,7 @@ function Card({ label, value, icon: Icon, tone }: { label: string; value: string
   );
 }
 
-function RuleModal({ row, onClose, onSaved }: { row: RoyaltyReportRow; onClose: () => void; onSaved: () => Promise<void> }) {
+function RuleModal({ row, rows, onPick, onClose, onSaved }: { row: RoyaltyReportRow; rows: RoyaltyReportRow[]; onPick: (row: RoyaltyReportRow) => void; onClose: () => void; onSaved: () => Promise<void> }) {
   const [mode, setMode] = useState<'PERCENT' | 'TIERS'>(row.rule?.mode ?? 'PERCENT');
   const [percent, setPercent] = useState<number | null>(row.rule?.percent ?? null);
   const [tiers, setTiers] = useState<RoyaltyTier[]>(() => row.rule?.tiers?.length
@@ -231,8 +235,13 @@ function RuleModal({ row, onClose, onSaved }: { row: RoyaltyReportRow; onClose: 
       <form onSubmit={submit} className="bg-white rounded-xl shadow-xl w-full max-w-xl text-xs">
         <div className="p-4 border-b border-slate-100 flex justify-between gap-2">
           <div>
-            <h3 className="text-sm font-bold text-slate-900">Regra de repasse · {row.name}</h3>
+            <h3 className="text-sm font-bold text-slate-900">Configurações do repasse</h3>
             <p className="text-slate-500">Vale para os meses ainda não marcados como pagos.</p>
+            {rows.length > 1
+              ? <select value={row.tenantId} onChange={event => { const next = rows.find(item => item.tenantId === event.target.value); if (next) onPick(next); }} className="mt-2 border border-slate-200 rounded-lg p-2 bg-white font-bold text-slate-800">
+                  {rows.map(item => <option key={item.tenantId} value={item.tenantId}>{item.name}{item.rule ? '' : ' (sem regra)'}</option>)}
+                </select>
+              : <p className="mt-1 font-bold text-slate-800">{row.name}</p>}
           </div>
           <button type="button" onClick={onClose} aria-label="Fechar"><X className="w-5 h-5 text-slate-400" /></button>
         </div>
