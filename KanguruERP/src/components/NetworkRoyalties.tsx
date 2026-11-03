@@ -19,6 +19,8 @@ const errorText = (error: unknown) =>
 const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] as string));
 
+const ruleModeLabel = (rule: RoyaltyRule | null) => (!rule ? 'Sem regra' : rule.mode === 'TIERS' ? 'Faixa de faturamento' : 'Percentual fixo');
+
 export function describeRule(rule: RoyaltyRule | null): string {
   if (!rule) return 'Sem regra';
   if (rule.mode === 'PERCENT') return `${Number(rule.percent ?? 0).toLocaleString('pt-BR')}% do faturamento`;
@@ -134,7 +136,7 @@ export default function NetworkRoyalties({ networkName }: { networkName: string 
               {rows.map(row => (
                 <tr key={row.tenantId} className="border-t border-slate-100">
                   <td className="p-2"><span className="font-bold text-slate-900">{row.name}</span>{row.ownerName && <span className="block text-slate-500">{row.ownerName}</span>}</td>
-                  <td className="p-2 text-slate-600 max-w-xs">{describeRule(row.paid ? row.paidRule : row.rule)}</td>
+                  <td className="p-2 text-slate-600" title={describeRule(row.paid ? row.paidRule : row.rule)}>{ruleModeLabel(row.paid ? row.paidRule : row.rule)}</td>
                   <td className="p-2 text-right font-mono">{formatMoney(row.base)}</td>
                   <td className="p-2 text-right font-mono font-bold">{formatMoney(row.royalty)}</td>
                   <td className="p-2">
