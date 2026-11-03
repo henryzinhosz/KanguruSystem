@@ -215,6 +215,11 @@ function RuleModal({ row, rows, onPick, onClose, onSaved }: { row: RoyaltyReport
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    const limits = tiers.filter(tier => tier.upTo != null).map(tier => tier.upTo as number);
+    if (mode === 'TIERS' && limits.some((limit, i) => limit <= 0 || (i > 0 && limit <= limits[i - 1]))) {
+      setError('Preencha os limites das faixas em ordem crescente (cada "até" maior que o anterior).');
+      return;
+    }
     setBusy(true);
     setError('');
     try {
@@ -226,8 +231,12 @@ function RuleModal({ row, rows, onPick, onClose, onSaved }: { row: RoyaltyReport
     }
   };
 
-  // A faixa "acima de" (sem limite) fica sempre por ultimo.
-  const ordered = tiers.map((tier, index) => ({ tier, index })).sort((a, b) => (a.tier.upTo ?? Infinity) - (b.tier.upTo ?? Infinity));
+  // Ordem da tela fixa enquanto digita (reordenar a cada tecla tirava o foco do campo); "acima de" sempre por ultimo.
+  const ordered = [
+    ...tiers.map((tier, index) => ({ tier, index })).filter(item => item.tier.upTo != null),
+    ...tiers.map((tier, index) => ({ tier, index })).filter(item => item.tier.upTo == null),
+  ];
+  const highestLimit = Math.max(0, ...tiers.map(tier => tier.upTo ?? 0));
   const input = 'w-full border border-slate-200 rounded-lg p-2 bg-white';
 
   return (
@@ -260,7 +269,7 @@ function RuleModal({ row, rows, onPick, onClose, onSaved }: { row: RoyaltyReport
           ) : (
             <div className="space-y-2">
               {ordered.map(({ tier, index }, position) => {
-                const previous = position > 0 ? ordered[position - 1].tier.upTo : 0;
+                const previous = tier.upTo == null ? highestLimit : position > 0 ? ordered[position - 1].tier.upTo : 0;
                 return (
                   <div key={index} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end">
                     <label className="font-bold text-slate-600">{tier.upTo == null ? 'Acima de' : `De ${formatMoney((previous ?? 0) + (position > 0 ? 0.01 : 0))} até`}

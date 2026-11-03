@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Check, ChevronDown, ChevronRight, ChevronUp, Mail, Phone, UserRound, DollarSign, KeyRound, Landmark, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Check, ChevronDown, ChevronRight, ChevronUp, Mail, Phone, UserRound, DollarSign, KeyRound, Landmark, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, Search, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { User } from '../types';
 import { Dropdown, PERIOD_ORDER, previousRange } from './NetworkFilters';
@@ -79,6 +79,7 @@ const NAV_ITEMS: { id: Tab; name: string; icon: LucideIcon; description: string 
 export default function NetworkView({ currentUser }: { currentUser: User }) {
   const [tab, setTab] = useState<Tab>('geral');
   const [summary, setSummary] = useState<{ franchises: number; stores: number } | null>(null);
+  const [franchiseSearch, setFranchiseSearch] = useState('');
   const isOwner = currentUser.role === 'NETWORK_OWNER';
   const active = NAV_ITEMS.find(item => item.id === tab)!;
 
@@ -135,12 +136,26 @@ export default function NetworkView({ currentUser }: { currentUser: User }) {
       </aside>
 
       <main className="erp-workspace flex-1 p-3 sm:p-4 lg:p-5 w-full overflow-y-auto space-y-5">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><active.icon className="w-5 h-5 text-blue-600" />{active.name}</h2>
-          <p className="text-xs text-slate-500">{active.description}</p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><active.icon className="w-5 h-5 text-blue-600" />{active.name}</h2>
+            <p className="text-xs text-slate-500">{active.description}</p>
+          </div>
+          {tab === 'franquias' && (
+            <label className="relative w-full sm:w-80">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="search"
+                value={franchiseSearch}
+                onChange={event => setFranchiseSearch(event.target.value)}
+                placeholder="Buscar empresa, CNPJ ou loja"
+                className="w-full h-10 pl-9 pr-3 rounded-lg border border-slate-200 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-400"
+              />
+            </label>
+          )}
         </div>
         {tab === 'geral' && <NetworkOverview />}
-        {tab === 'franquias' && <NetworkFranchises />}
+        {tab === 'franquias' && <NetworkFranchises search={franchiseSearch} />}
         {tab === 'repasse' && <NetworkRoyalties networkName={currentUser.networkName || 'Rede'} />}
         {tab === 'usuarios' && <NetworkUsers isOwner={isOwner} currentUserId={currentUser.id} />}
       </main>
@@ -358,7 +373,10 @@ function NetworkOverview() {
 
 // ---------------- Franquias ----------------
 
-function NetworkFranchises() {
+const normalizeSearch = (value: string | null | undefined) =>
+  (value || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+function NetworkFranchises({ search }: { search: string }) {
   const [franchises, setFranchises] = useState<NetworkFranchise[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -371,13 +389,28 @@ function NetworkFranchises() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Busca por empresa (nome/razao social), CNPJ ou nome da loja; achando so pela loja, mostra so as lojas encontradas.
+  const visible = useMemo(() => {
+    const term = normalizeSearch(search.trim());
+    if (!term) return franchises;
+    const digits = term.replace(/D/g, '');
+    return franchises.flatMap(franchise => {
+      const companyMatch = [franchise.tradeName, franchise.legalName].some(name => normalizeSearch(name).includes(term))
+        || (digits.length >= 2 && (franchise.cnpj || '').replace(/D/g, '').includes(digits));
+      if (companyMatch) return [franchise];
+      const stores = franchise.stores.filter(store => normalizeSearch(store.tradeName || store.unitId).includes(term));
+      return stores.length ? [{ ...franchise, stores }] : [];
+    });
+  }, [franchises, search]);
+
   if (loading) return <p className="text-xs text-slate-400">Carregando franquias...</p>;
   if (selected) return <NetworkFranchiseDetail franchise={selected} onBack={() => setSelected(null)} />;
   return (
     <div className="space-y-4 text-xs">
       {error && <p className="text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{error}</p>}
       {franchises.length === 0 && !error && <p className="text-slate-400">Nenhuma franquia ligada a esta rede ainda.</p>}
-      {franchises.map(franchise => {
+      {franchises.length > 0 && visible.length === 0 && <p className="text-slate-400">Nenhuma franquia ou loja encontrada para "{search.trim()}".</p>}
+      {visible.map(franchise => {
         const openCash = franchise.stores.filter(store => store.openCash).length;
         return (
           <section key={franchise.tenantId} className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
@@ -389,7 +422,7 @@ function NetworkFranchises() {
                 <h3 className="text-sm font-bold text-slate-900 truncate">{franchise.tradeName || franchise.legalName}</h3>
                 <p className="text-slate-500">CNPJ {formatCnpj(franchise.cnpj)} · {franchise.stores.length} loja(s){openCash > 0 ? ` · ${openCash} com caixa aberto` : ''}</p>
               </div>
-              <button type="button" onClick={() => setSelected(franchise)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold">
+              <button type="button" onClick={() => setSelected(franchises.find(item => item.tenantId === franchise.tenantId) ?? franchise)} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold">
                 Abrir ficha<ChevronRight className="w-4 h-4" />
               </button>
             </div>
