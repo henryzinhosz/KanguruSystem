@@ -1,8 +1,10 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Check, ChevronDown, ChevronUp, DollarSign, KeyRound, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { User } from '../types';
+import { Dropdown, PERIOD_ORDER, previousRange } from './NetworkFilters';
+import NetworkFranchiseDetail from './NetworkFranchiseDetail';
 import { PERIOD_LABELS, PeriodPreset, formatMoney, monthLabel, resolvePeriod, shiftMonthKey, toLocalDateKey, type DateRange } from '../db/finance';
 import {
   getNetworkMonthlyRevenue,
@@ -25,20 +27,6 @@ const MONTH_SHORT = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Se
 
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : (error as { message?: string })?.message || 'Erro ao carregar os dados.';
-
-// Periodo anterior para comparar: mes corrente -> mesmos dias do mes passado; demais -> mesmo tamanho logo antes.
-function previousRange(preset: PeriodPreset, range: DateRange): DateRange {
-  if (preset === 'mes') {
-    const start = new Date(range.start.getFullYear(), range.start.getMonth() - 1, 1);
-    const days = Math.round((range.end.getTime() - range.start.getTime()) / 86400000);
-    return { start, end: new Date(start.getFullYear(), start.getMonth(), 1 + days) };
-  }
-  if (preset === 'mes_passado') {
-    return { start: new Date(range.start.getFullYear(), range.start.getMonth() - 1, 1), end: range.start };
-  }
-  const length = range.end.getTime() - range.start.getTime();
-  return { start: new Date(range.start.getTime() - length), end: range.start };
-}
 
 interface Totals {
   revenue: number;
@@ -145,67 +133,6 @@ export default function NetworkView({ currentUser }: { currentUser: User }) {
         {tab === 'franquias' && <NetworkFranchises />}
         {tab === 'usuarios' && <NetworkUsers isOwner={isOwner} currentUserId={currentUser.id} />}
       </main>
-    </div>
-  );
-}
-
-const PERIOD_ORDER: PeriodPreset[] = ['hoje', '7dias', 'semana', 'mes', 'mes_passado'];
-
-function Dropdown({ label, value, placeholder, options, onChange }: {
-  label: string;
-  value: string;
-  placeholder?: string;
-  options: { value: string; label: string }[];
-  onChange: (value: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  const selected = options.find(option => option.value === value);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => {
-      if (box.current && !box.current.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, [open]);
-
-  return (
-    <div ref={box} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(previous => !previous)}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        className={`h-10 min-w-44 px-3 rounded-lg border font-bold inline-flex items-center justify-between gap-3 ${selected ? 'bg-white text-slate-800 border-blue-300 ring-1 ring-blue-100' : 'bg-white text-slate-500 border-slate-200'} hover:bg-slate-50`}
-      >
-        <span className="text-left leading-tight">
-          <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">{label}</span>
-          <span className="block">{selected?.label ?? placeholder ?? 'Escolha'}</span>
-        </span>
-        {open ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronUp className="w-4 h-4 text-slate-500" />}
-      </button>
-      {open && (
-        <ul role="listbox" className="absolute left-0 top-full mt-1 z-30 min-w-full max-h-72 overflow-auto bg-white border border-slate-200 rounded-lg shadow-lg py-1">
-          {options.map(option => (
-            <li key={option.value}>
-              <button
-                type="button"
-                role="option"
-                aria-selected={option.value === value}
-                onClick={() => {
-                  onChange(option.value);
-                  setOpen(false);
-                }}
-                className={`w-full text-left px-3 py-2 font-semibold whitespace-nowrap ${option.value === value ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'}`}
-              >
-                {option.label}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }
@@ -424,6 +351,7 @@ function NetworkFranchises() {
   const [franchises, setFranchises] = useState<NetworkFranchise[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<NetworkFranchise | null>(null);
 
   useEffect(() => {
     listNetworkFranchises()
@@ -433,6 +361,7 @@ function NetworkFranchises() {
   }, []);
 
   if (loading) return <p className="text-xs text-slate-400">Carregando franquias...</p>;
+  if (selected) return <NetworkFranchiseDetail franchise={selected} onBack={() => setSelected(null)} />;
   return (
     <div className="space-y-4 text-xs">
       {error && <p className="text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{error}</p>}
@@ -451,6 +380,7 @@ function NetworkFranchises() {
               <span className="text-[10px] font-bold uppercase text-slate-500 block">Franqueado</span>
               <strong className="text-slate-800">{franchise.ownerName || 'não informado'}</strong>
               <span className="block text-slate-500">{[franchise.ownerPhone, franchise.ownerEmail].filter(Boolean).join(' · ') || '—'}</span>
+              <button type="button" onClick={() => setSelected(franchise)} className="mt-2 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold">Abrir ficha</button>
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
