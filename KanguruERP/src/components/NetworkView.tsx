@@ -1,6 +1,6 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowDownRight, ArrowUpRight, Building2, Check, DollarSign, KeyRound, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
+import { ArrowDownRight, ArrowUpRight, Building2, CalendarDays, Check, ChevronDown, ChevronUp, DollarSign, KeyRound, LayoutDashboard, Network, Percent, ReceiptText, RefreshCw, ShoppingCart, Store, TrendingUp, UserPlus, Users, Wallet } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { User } from '../types';
 import { PERIOD_LABELS, PeriodPreset, formatMoney, monthLabel, resolvePeriod, shiftMonthKey, toLocalDateKey, type DateRange } from '../db/finance';
@@ -149,15 +149,77 @@ export default function NetworkView({ currentUser }: { currentUser: User }) {
   );
 }
 
+const PERIOD_ORDER: PeriodPreset[] = ['hoje', '7dias', 'semana', 'mes', 'mes_passado'];
+
+function Dropdown({ label, value, placeholder, options, onChange }: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  options: { value: string; label: string }[];
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const selected = options.find(option => option.value === value);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: MouseEvent) => {
+      if (box.current && !box.current.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+
+  return (
+    <div ref={box} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(previous => !previous)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className={`h-10 min-w-44 px-3 rounded-lg border font-bold inline-flex items-center justify-between gap-3 ${selected ? 'bg-white text-slate-800 border-blue-300 ring-1 ring-blue-100' : 'bg-white text-slate-500 border-slate-200'} hover:bg-slate-50`}
+      >
+        <span className="text-left leading-tight">
+          <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">{label}</span>
+          <span className="block">{selected?.label ?? placeholder ?? 'Escolha'}</span>
+        </span>
+        {open ? <ChevronDown className="w-4 h-4 text-slate-500" /> : <ChevronUp className="w-4 h-4 text-slate-500" />}
+      </button>
+      {open && (
+        <ul role="listbox" className="absolute left-0 top-full mt-1 z-30 min-w-full max-h-72 overflow-auto bg-white border border-slate-200 rounded-lg shadow-lg py-1">
+          {options.map(option => (
+            <li key={option.value}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={option.value === value}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+                className={`w-full text-left px-3 py-2 font-semibold whitespace-nowrap ${option.value === value ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-slate-50'}`}
+              >
+                {option.label}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 // ---------------- Visao geral ----------------
 
 function NetworkOverview() {
-  const [preset, setPreset] = useState<PeriodPreset>('mes');
+  const [preset, setPreset] = useState<PeriodPreset>('hoje');
+  const [scope, setScope] = useState(''); // '' = consolidado (rede toda) ou tenantId da franquia
   const [customFrom, setCustomFrom] = useState(() => toLocalDateKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1)));
   const [customTo, setCustomTo] = useState(() => toLocalDateKey(new Date()));
-  const [current, setCurrent] = useState<NetworkStoreMetrics[]>([]);
-  const [previous, setPrevious] = useState<NetworkStoreMetrics[]>([]);
-  const [monthly, setMonthly] = useState<NetworkMonthlyRow[]>([]);
+  const [currentAll, setCurrent] = useState<NetworkStoreMetrics[]>([]);
+  const [previousAll, setPrevious] = useState<NetworkStoreMetrics[]>([]);
+  const [monthlyAll, setMonthly] = useState<NetworkMonthlyRow[]>([]);
   const [franchises, setFranchises] = useState<NetworkFranchise[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -193,6 +255,11 @@ function NetworkOverview() {
     void load();
   }, [range.start.getTime(), range.end.getTime()]);
 
+  // Consolidado = rede toda; franquia escolhida = so as lojas dela.
+  const inScope = (tenantId: string) => !scope || tenantId === scope;
+  const current = currentAll.filter(row => inScope(row.tenantId));
+  const previous = previousAll.filter(row => inScope(row.tenantId));
+  const monthly = monthlyAll.filter(row => inScope(row.tenantId));
   const totals = totalsOf(current);
   const prevTotals = totalsOf(previous);
   const franchiseName = (tenantId: string) => {
@@ -235,16 +302,33 @@ function NetworkOverview() {
 
   return (
     <div className="space-y-5 text-xs">
-      <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-3 flex flex-wrap items-end gap-2">
-        {(Object.keys(PERIOD_LABELS) as PeriodPreset[]).map(key => (
-          <button key={key} type="button" onClick={() => setPreset(key)} className={`px-3 py-1.5 rounded-lg border font-bold ${preset === key ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>{PERIOD_LABELS[key]}</button>
-        ))}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-xs p-3 flex flex-wrap items-center gap-2">
+        <Dropdown
+          label="Período"
+          value={preset === 'personalizado' ? '' : preset}
+          placeholder="Personalizado"
+          options={PERIOD_ORDER.map(key => ({ value: key, label: PERIOD_LABELS[key] }))}
+          onChange={value => setPreset(value as PeriodPreset)}
+        />
+        <button
+          type="button"
+          onClick={() => setPreset('personalizado')}
+          className={`h-10 px-4 rounded-lg border font-bold inline-flex items-center gap-1.5 ${preset === 'personalizado' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+        >
+          <CalendarDays className="w-4 h-4" />Personalizado
+        </button>
         {preset === 'personalizado' && (
           <>
-            <input type="date" value={customFrom} onChange={event => setCustomFrom(event.target.value)} className="border border-slate-200 rounded-lg p-1.5" />
-            <input type="date" value={customTo} onChange={event => setCustomTo(event.target.value)} className="border border-slate-200 rounded-lg p-1.5" />
+            <input type="date" value={customFrom} onChange={event => setCustomFrom(event.target.value)} className="h-10 border border-slate-200 rounded-lg px-2" aria-label="De" />
+            <input type="date" value={customTo} onChange={event => setCustomTo(event.target.value)} className="h-10 border border-slate-200 rounded-lg px-2" aria-label="Até" />
           </>
         )}
+        <Dropdown
+          label="Visão"
+          value={scope}
+          options={[{ value: '', label: 'Consolidado (rede toda)' }, ...franchises.map(franchise => ({ value: franchise.tenantId, label: franchise.tradeName || franchise.legalName }))]}
+          onChange={setScope}
+        />
         <button type="button" onClick={() => void load()} disabled={loading} className="ml-auto p-2 text-slate-500 hover:text-slate-800 disabled:opacity-50" title="Atualizar" aria-label="Atualizar"><RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /></button>
       </div>
 
