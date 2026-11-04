@@ -71,7 +71,7 @@ const upload = (file) => {
   }
   execSync(
     // Caminho relativo e sem acento: o cmd do Windows estraga o "ç" de "Programação".
-    `npx supabase storage cp "../KanguruPDV/release/${file}" "ss:///pdv-updates/${file}" --linked --experimental`,
+    `npx supabase storage cp "../KanguruPDV/release/${file}" "ss:///pdv-updates/${file}" --linked --experimental --yes`,
     { cwd: supabaseWorkdir, stdio: 'inherit' },
   );
 };
