@@ -28,3 +28,7 @@ desktop.ini
 !.vscode/extensions.json
 .idea/
 KanguruPDV/release/
+
+# Planilhas de trabalho do usuario (nao versionar)
+/Lista de Produtos.xlsx
+/Conferencia fiscal - produtos.xlsx

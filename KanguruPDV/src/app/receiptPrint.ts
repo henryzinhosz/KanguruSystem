@@ -1,4 +1,11 @@
 import QRCode from 'qrcode';
+import { findProductWarranty, warrantyText } from '../services/supabase/warranties';
+
+// Garantia do produto para o cupom (dias ou meses, conforme o cadastro).
+export function itemWarranty(sku: string): string | null {
+  const warranty = findProductWarranty({ sku });
+  return warranty ? warrantyText(warranty.days, warranty.months) : null;
+}
 import type { PosStoreProfile } from '../services/supabase/terminal';
 import type { PosSaleReceipt } from '../services/supabase/sales';
 import logoUrl from '../assets/beb-games-logo.png';
@@ -215,7 +222,8 @@ export function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null
   const itemRows = items.map((item, index) => `
     <div class="row"><span>${String(index + 1).padStart(3, '0')} ${e(item.itemName.toUpperCase())}</span><span>${money(item.lineTotal)}</span></div>
     <div class="sub">${money(item.quantity)} x R$ ${money(item.unitPrice)} R$${item.discountPercent > 0 ? ` &nbsp;(desc. ${money(item.discountPercent)}%)` : ''}</div>
-    ${item.serials.length ? `<div class="sub">S/N ${e(item.serials.join(', '))}</div>` : ''}`).join('');
+    ${item.serials.length ? `<div class="sub">S/N ${e(item.serials.join(', '))}</div>` : ''}
+    ${item.itemType === 'PRODUCT' && itemWarranty(item.itemSku) ? `<div class="sub">Garantia: ${e(itemWarranty(item.itemSku) ?? '')}</div>` : ''}`).join('');
 
   const storeLines = [
     store?.tradeName ? `<div class="store-name">${e(store.tradeName.toUpperCase())}</div>` : '',

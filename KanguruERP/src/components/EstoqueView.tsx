@@ -24,6 +24,9 @@ import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fisca
 import ValueInput from './ValueInput';
 import LabelPrintModal, { LabelRequest } from './LabelPrintModal';
 
+// Categorias de produto (lista da loja; 2026-11-06).
+const PRODUCT_CATEGORIES = ['Carregadores', 'Cabos', 'Adaptadores', 'Fones', 'Periféricos', 'Videogames', 'Geek', 'Peças', 'Computadores', 'Cards', 'Outros'];
+
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
 const DEFAULT_MIN_STOCK = 2;
 
@@ -151,6 +154,7 @@ export default function EstoqueView({
   const [newProdSell, setNewProdSell] = useState(0);
   const [newProdNcm, setNewProdNcm] = useState('');
   const [newProdWarranty, setNewProdWarranty] = useState(12);
+  const [newProdWarrantyUnit, setNewProdWarrantyUnit] = useState<'dias' | 'meses'>('meses');
   const [newProdSerialized, setNewProdSerialized] = useState(false);
   const [newProdStore, setNewProdStore] = useState('');
   const [newProdQty, setNewProdQty] = useState(0);
@@ -340,6 +344,7 @@ export default function EstoqueView({
     setNewProdSell(0);
     setNewProdNcm('');
     setNewProdWarranty(12);
+    setNewProdWarrantyUnit('meses');
     setNewProdSerialized(false);
     setNewProdStore(defaultStoreId);
     setNewProdQty(0);
@@ -369,7 +374,8 @@ export default function EstoqueView({
     setNewProdCost(product.costPrice);
     setNewProdSell(product.sellPrice);
     setNewProdNcm(product.ncm);
-    setNewProdWarranty(product.warrantyMonths);
+    setNewProdWarranty(product.warrantyDays ? product.warrantyDays : product.warrantyMonths);
+    setNewProdWarrantyUnit(product.warrantyDays ? 'dias' : 'meses');
     setNewProdSerialized(product.isSerialized);
     setNewProdMinStock(product.minStock == null ? '' : String(product.minStock));
     setNewProdMaxDiscount(product.maxDiscountPercent ?? null);
@@ -434,7 +440,8 @@ export default function EstoqueView({
           costPrice: newProdCost,
           sellPrice: newProdSell,
           ncm: trimmedNcm,
-          warrantyMonths: newProdWarranty,
+          warrantyMonths: newProdWarrantyUnit === 'meses' ? newProdWarranty : 0,
+          warrantyDays: newProdWarrantyUnit === 'dias' && newProdWarranty > 0 ? newProdWarranty : null,
           isSerialized: newProdSerialized,
           minStock: minStockValue,
           maxDiscountPercent: newProdMaxDiscount,
@@ -448,7 +455,8 @@ export default function EstoqueView({
       costPrice: newProdCost,
       sellPrice: newProdSell,
       ncm: trimmedNcm,
-      warrantyMonths: newProdWarranty,
+      warrantyMonths: newProdWarrantyUnit === 'meses' ? newProdWarranty : 0,
+      warrantyDays: newProdWarrantyUnit === 'dias' && newProdWarranty > 0 ? newProdWarranty : null,
       isSerialized: newProdSerialized,
       isUsed: false,
       minStock: minStockValue,
@@ -470,6 +478,7 @@ export default function EstoqueView({
     setNewProdSell(0);
     setNewProdNcm('');
     setNewProdWarranty(12);
+    setNewProdWarrantyUnit('meses');
     setNewProdSerialized(false);
     setNewProdStore(defaultStoreId);
     setNewProdQty(0);
@@ -789,8 +798,8 @@ export default function EstoqueView({
                 className="w-full bg-slate-50 text-slate-800 text-xs rounded-lg pl-9 pr-4 py-2.5 border border-slate-200 outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
               />
             </div>
-            <div className="flex gap-2">
-              {['Todas', 'Videogames', 'Peças', 'Cards', 'Computadores'].map(cat => (
+            <div className="flex gap-2 flex-wrap">
+              {['Todas', ...PRODUCT_CATEGORIES.filter(category => products.some(product => product.category === category))].map(cat => (
                 <button
                   key={cat}
                   onClick={() => setCategoryFilter(cat)}
@@ -959,7 +968,7 @@ export default function EstoqueView({
                         ) : (
                           <span className="font-mono text-slate-400">Desc. máx.: {p.maxDiscountPercent != null ? `${p.maxDiscountPercent}%` : 'padrão da loja'}</span>
                         )}
-                        <span className="font-mono text-slate-400">Garantia: {p.warrantyMonths}m</span>
+                        <span className="font-mono text-slate-400">Garantia: {p.warrantyDays ? `${p.warrantyDays}d` : `${p.warrantyMonths}m`}</span>
                       </div>
                     </div>
                   </div>
@@ -1631,11 +1640,8 @@ export default function EstoqueView({
                     onChange={(e) => setNewProdCategory(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                   >
-                    <option value="Videogames">Videogames</option>
-                    <option value="Peças">Peças de PC</option>
-                    <option value="Cards">Cards Colecionáveis</option>
-                    <option value="Computadores">Computadores Prontos</option>
-                    <option value="Outros">Outros</option>
+                    {PRODUCT_CATEGORIES.map(category => <option key={category} value={category}>{category}</option>)}
+                    {!PRODUCT_CATEGORIES.includes(newProdCategory) && <option value={newProdCategory}>{newProdCategory}</option>}
                   </select>
                 </div>
               </div>
@@ -1715,15 +1721,25 @@ export default function EstoqueView({
                 <p className="text-[10px] text-slate-400">Desconto máximo que o vendedor pode dar no PDV sem a senha administrativa.</p>
               </div>
 
-              <div className="space-y-1 max-w-[200px]">
-                <label className="font-bold text-slate-700">Garantia (meses)</label>
-                <ValueInput
-                  decimals={0}
-                  value={newProdWarranty || null}
-                  placeholder="0 = sem garantia"
-                  onValueChange={(value) => setNewProdWarranty(value ?? 0)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
-                />
+              <div className="space-y-1 max-w-[280px]">
+                <label className="font-bold text-slate-700">Garantia</label>
+                <div className="flex gap-2">
+                  <ValueInput
+                    decimals={0}
+                    value={newProdWarranty || null}
+                    placeholder="0 = sem garantia"
+                    onValueChange={(value) => setNewProdWarranty(value ?? 0)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
+                  />
+                  <select
+                    value={newProdWarrantyUnit}
+                    onChange={(e) => setNewProdWarrantyUnit(e.target.value as 'dias' | 'meses')}
+                    className="bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
+                  >
+                    <option value="dias">dias</option>
+                    <option value="meses">meses</option>
+                  </select>
+                </div>
               </div>
 
               <fieldset className="border border-slate-200 rounded-lg p-3 space-y-3">

@@ -158,7 +158,7 @@ export default function CustomerDetail({ customer, onBack, onEdit }: { customer:
                         <span className="block text-slate-500">Comprado em {date(warranty.saleDate)} · {warranty.storeName}{warranty.serial ? ` · série ${warranty.serial}` : ''}</span>
                       </div>
                       <span className={`px-2 py-1 rounded font-bold ${valid ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                        {valid ? 'Em garantia' : 'Vencida'} · até {date(warranty.until)} ({warranty.months} meses)
+                        {valid ? 'Em garantia' : 'Vencida'} · até {date(warranty.until)} ({warranty.days ? `${warranty.days} dias` : `${warranty.months} meses`})
                       </span>
                     </li>
                   );

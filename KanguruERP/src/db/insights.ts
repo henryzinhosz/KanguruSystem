@@ -38,7 +38,7 @@ export interface CustomerHistory {
     items: CustomerHistoryItem[];
     returns: { returnNumber: number; createdAt: string; amount: number; refundMethod: string; reason: string }[];
   }[];
-  warranties: { saleId: string; saleDate: string; storeName: string | null; itemName: string | null; serial: string | null; months: number; until: string | null; saleStatus: string }[];
+  warranties: { saleId: string; saleDate: string; storeName: string | null; itemName: string | null; serial: string | null; months: number; days?: number; until: string | null; saleStatus: string }[];
   workOrders: {
     id: string; orderNumber: number | null; unitId: string; storeName: string | null; status: string; equipment: string | null;
     createdAt: string; expectedDate: string | null; deliveredAt: string | null; warrantyUntil: string | null; paid: boolean; total: number;

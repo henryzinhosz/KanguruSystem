@@ -84,7 +84,7 @@ export function CustomerHistoryModal({ cpf, name, onClose }: { cpf: string; name
                   {activeWarranties.map((warranty, index) => (
                     <div className="product-row" key={index}>
                       <span><strong>{warranty.itemName}</strong><small>Comprado em {date(warranty.saleDate)} · {warranty.storeName}{warranty.serial ? ` · série ${warranty.serial}` : ''}</small></span>
-                      <span><strong>até {date(warranty.until)}</strong><small>{warranty.months} meses</small></span>
+                      <span><strong>até {date(warranty.until)}</strong><small>{warranty.days ? `${warranty.days} dias` : `${warranty.months} meses`}</small></span>
                     </div>
                   ))}
                 </div>

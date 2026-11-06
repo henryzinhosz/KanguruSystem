@@ -173,6 +173,7 @@ export interface Product {
   sellPrice: number;
   ncm: string;
   warrantyMonths: number; // calculated warranty automatically from purchase date
+  warrantyDays?: number | null; // garantia em dias (vale no lugar dos meses); null = usa os meses
   isSerialized: boolean; // true for consoles, notebooks, motherboards, GPUs
   isUsed: boolean; // used vs new
   variations?: ProductVariation[];

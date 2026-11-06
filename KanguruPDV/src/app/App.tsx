@@ -1,4 +1,5 @@
 ﻿import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
+import { findProductWarranty, loadProductWarranties } from '../services/supabase/warranties';
 import {
   ArrowLeft,
   CircleAlert,
@@ -333,7 +334,9 @@ const SCANNED_SERIAL_MESSAGES: Record<string, string> = {
   OUTRA_LOJA: 'pertence ao estoque de outra loja',
 };
 
-function warrantyLabel(months: number | null): string {
+function warrantyLabel(months: number | null, sku?: string): string {
+  const days = sku ? findProductWarranty({ sku })?.days : null;
+  if (days && days > 0) return `${days} ${days === 1 ? 'dia' : 'dias'} de garantia`;
   if (months === null) return 'Garantia nao cadastrada';
   if (months <= 0) return 'Sem garantia';
   return `${months} ${months === 1 ? 'mes' : 'meses'} de garantia`;
@@ -1813,6 +1816,8 @@ export function App() {
   useEffect(() => {
     if (screen !== 'sale' && screen !== 'reservations') return;
     getPosCardFees().then(setCardFees).catch(() => undefined);
+    // Garantia em dias/meses de cada produto (carrinho e linha "Garantia" do cupom).
+    void loadProductWarranties();
   }, [screen]);
 
   useEffect(() => {
@@ -2660,7 +2665,7 @@ export function App() {
                     {item.itemType === 'SERVICE' ? 'Serviço' : 'Produto'} | {item.sku}
                     {item.brand ? ` | ${item.brand}` : ''}
                   </small>
-                  {item.itemType === 'PRODUCT' && <small>{warrantyLabel(item.warrantyMonths)}</small>}
+                  {item.itemType === 'PRODUCT' && <small>{warrantyLabel(item.warrantyMonths, item.sku)}</small>}
                   {item.requiresUnitSelection && <small>Serializado: selecione a unidade.</small>}
                 </span>
                 <span>

@@ -42,7 +42,7 @@ export interface PosCustomerHistory {
     id: string; timestamp: string; storeName: string | null; status: string; grossAmount: number; returnedAmount: number;
     sellerName: string | null; items: { name: string | null; itemType: string; quantity: number; lineTotal: number; serials: string[] }[];
   }[];
-  warranties: { saleDate: string; storeName: string | null; itemName: string | null; serial: string | null; months: number; until: string | null }[];
+  warranties: { saleDate: string; storeName: string | null; itemName: string | null; serial: string | null; months: number; days?: number; until: string | null }[];
   workOrders: { id: string; orderNumber: number | null; storeName: string | null; status: string; equipment: string | null; createdAt: string; paid: boolean; total: number }[];
   reservations: { id: string; storeName: string | null; status: string; expiresAt: string; deposit: number; items: { name: string; quantity: number }[] }[];
 }

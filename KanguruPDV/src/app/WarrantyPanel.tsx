@@ -2,26 +2,20 @@ import { FormEvent, useState } from 'react';
 import { Search, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { findPosWarranty, type PosWarrantyLine } from '../services/supabase/customers';
 import { formatCpf } from './reservationVoucher';
+import { findProductWarranty, warrantyEndDate, warrantyText } from '../services/supabase/warranties';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Fim da garantia: data da venda + meses de garantia (vale ate o fim desse dia).
-function warrantyEnd(saleDate: string, months: number): Date {
-  const end = new Date(saleDate);
-  end.setMonth(end.getMonth() + months);
-  end.setHours(23, 59, 59, 999);
-  return end;
-}
-
 function warrantyStatus(line: PosWarrantyLine): { className: string; label: string; until: string | null } {
   if (line.saleStatus === 'CANCELADA') return { className: 'expired', label: 'Venda estornada', until: null };
-  if (line.warrantyMonths <= 0) return { className: 'expired', label: 'Produto sem garantia', until: null };
-  const end = warrantyEnd(line.saleDate, line.warrantyMonths);
-  const days = Math.ceil((end.getTime() - Date.now()) / DAY_MS);
+  const days = findProductWarranty({ sku: line.itemSku })?.days ?? null;
+  const end = warrantyEndDate(line.saleDate, days, line.warrantyMonths);
+  if (!end) return { className: 'expired', label: 'Produto sem garantia', until: null };
+  const left = Math.ceil((end.getTime() - Date.now()) / DAY_MS);
   const until = end.toLocaleDateString('pt-BR');
-  return days >= 0
-    ? { className: 'valid', label: `Em garantia · faltam ${days} dia(s)`, until }
-    : { className: 'expired', label: `Garantia vencida há ${Math.abs(days)} dia(s)`, until };
+  return left >= 0
+    ? { className: 'valid', label: `Em garantia · faltam ${left} dia(s)`, until }
+    : { className: 'expired', label: `Garantia vencida há ${Math.abs(left)} dia(s)`, until };
 }
 
 export function WarrantyPanel() {
@@ -76,7 +70,7 @@ export function WarrantyPanel() {
                 </span>
               </div>
               <dl className="warranty-details">
-                <dt>Garantia até</dt><dd>{status.until ?? '—'}{line.warrantyMonths > 0 ? ` (${line.warrantyMonths} meses)` : ''}</dd>
+                <dt>Garantia até</dt><dd>{status.until ?? '—'}{status.until ? ` (${warrantyText(findProductWarranty({ sku: line.itemSku })?.days, line.warrantyMonths)})` : ''}</dd>
                 <dt>Data da compra</dt><dd>{new Date(line.saleDate).toLocaleDateString('pt-BR')}</dd>
                 <dt>Cliente</dt><dd>{line.customerName || 'Não informado'}{line.customerCpf ? ` · CPF ${formatCpf(line.customerCpf)}` : ''}</dd>
                 <dt>Loja</dt><dd>{line.storeName}</dd>

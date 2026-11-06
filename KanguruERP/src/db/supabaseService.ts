@@ -1082,6 +1082,8 @@ export const supabaseService = {
       sellPrice: Number(p.sell_price),
       ncm: p.ncm || '',
       warrantyMonths: p.warranty_months || 0,
+      // undefined = banco ainda sem a coluna (migration 20261121): nao envia no upsert.
+      warrantyDays: p.warranty_days === undefined ? undefined : (p.warranty_days ?? null),
       isSerialized: p.is_serialized,
       isUsed: p.is_used,
       variations: p.variations || undefined,
@@ -1124,7 +1126,8 @@ export const supabaseService = {
       csosn: p.csosn || null,
       icms_rate: p.icmsRate ?? null,
       icms_reduction: p.icmsReduction ?? null,
-      tax_burden_percent: p.taxBurdenPercent ?? null
+      tax_burden_percent: p.taxBurdenPercent ?? null,
+      ...(p.warrantyDays !== undefined ? { warranty_days: p.warrantyDays && p.warrantyDays > 0 ? p.warrantyDays : null } : {})
     };
 
     const { data, error } = await supabase

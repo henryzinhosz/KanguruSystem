@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { itemWarranty } from '../app/receiptPrint';
 import type { PosSaleReceipt } from '../services/supabase/sales';
 import type { PosStoreProfile } from '../services/supabase/terminal';
 import { formatReceiptNumber, instagramUrl } from '../app/receiptPrint';
@@ -109,6 +110,8 @@ async function davVia(doc: EscPos, receipt: PosSaleReceipt, store: PosStoreProfi
     doc.pair(`${String(index + 1).padStart(3, '0')} ${item.itemName.toUpperCase()}`, money(item.lineTotal));
     doc.line(`  ${money(item.quantity)} x R$ ${money(item.unitPrice)}${item.discountPercent > 0 ? ` (desc. ${money(item.discountPercent)}%)` : ''}`);
     if (item.serials.length) doc.line(`  S/N ${item.serials.join(', ')}`);
+    const warranty = item.itemType === 'PRODUCT' ? itemWarranty(item.itemSku) : null;
+    if (warranty) doc.line(`  Garantia: ${warranty}`);
   });
   const listTotal = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   const discount = Math.max(0, Math.round((listTotal - receipt.grossAmount) * 100) / 100);
