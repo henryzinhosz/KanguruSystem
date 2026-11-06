@@ -4,7 +4,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Supplier, SupplierInvoiceReminder } from '../types';
+import { Product, StockInventory, StoreConfig, Supplier, SupplierInvoiceReminder, User } from '../types';
+import SupplierCatalogPanel from './SupplierCatalogPanel';
 import { supabaseService } from '../db/supabaseService';
 import ValueInput from './ValueInput';
 import { 
@@ -24,6 +25,10 @@ import {
 } from 'lucide-react';
 
 interface AdminToolsViewProps {
+  currentUser: User;
+  products: Product[];
+  inventory: StockInventory[];
+  storeConfigs: StoreConfig[];
   suppliers: Supplier[];
   addSupplier: (supplier: Omit<Supplier, 'id' | 'historyCount'>) => Promise<Supplier>;
   editSupplier: (updatedSupplier: Supplier) => Promise<void>;
@@ -31,11 +36,16 @@ interface AdminToolsViewProps {
 }
 
 export default function AdminToolsView({
+  currentUser,
+  products,
+  inventory,
+  storeConfigs,
   suppliers,
   addSupplier,
   editSupplier,
   deleteSupplier
 }: AdminToolsViewProps) {
+  const [section, setSection] = useState<'contas' | 'catalogos'>('contas');
   const [reminders, setReminders] = useState<SupplierInvoiceReminder[]>([]);
   const [invoiceError, setInvoiceError] = useState<string | null>(null);
   const [invoiceSuccess, setInvoiceSuccess] = useState<string | null>(null);
@@ -271,8 +281,33 @@ export default function AdminToolsView({
 
   const overdueCount = reminders.filter(r => r.status === 'PENDENTE' && r.dueDate < todayStr).length;
 
+  const sectionTabs = (
+    <div className="flex gap-2">
+      {([['contas', 'Contas e fornecedores'], ['catalogos', 'Catálogos e pedidos de compra']] as const).map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => setSection(key)}
+          className={`px-4 py-2 rounded-lg text-xs font-bold border transition ${section === key ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (section === 'catalogos') {
+    return (
+      <div className="space-y-4 w-full font-sans">
+        {sectionTabs}
+        <SupplierCatalogPanel currentUser={currentUser} suppliers={suppliers} products={products} inventory={inventory} storeConfigs={storeConfigs} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 w-full font-sans text-xs">
+      {sectionTabs}
       {pendingDeletion && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 p-4">
           <div className="w-full max-w-sm rounded-lg bg-white p-5 shadow-xl">

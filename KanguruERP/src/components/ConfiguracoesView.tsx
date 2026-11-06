@@ -1,10 +1,11 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Building2, Check, Pencil, Plus, Save, Store, Trash2, UserRound, Users, X } from 'lucide-react';
+import { Building2, Check, ChevronDown, Pencil, Plus, Save, Store, Trash2, UserRound, Users, X } from 'lucide-react';
 import { PdvOperator, PdvOperatorPermissions, StoreConfig, StoreNfceStatus, User, UserRole } from '../types';
 import { supabaseService } from '../db/supabaseService';
 import ValueInput from './ValueInput';
 import ManagerPasswordPanel from './ManagerPasswordPanel';
 import TenantUsersPanel from './TenantUsersPanel';
+import FranchiseeContactPanel from './FranchiseeContactPanel';
 
 interface ConfiguracoesViewProps {
   currentUser: User;
@@ -41,7 +42,11 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   workOrderTerms: '',
   workOrderDeliveryTerms: '',
   instagram: '',
+  municipalRegistration: '',
+  cityIbgeCode: '',
+  simplesNacionalOption: '3',
   exchangeDays: 7,
+  cashDifferenceAlert: 10,
   fixedCost: 0,
   maxItemDiscountPercent: 0,
   paymentFees: { DINHEIRO: 0, PIX: 0, CREDITO: 0, DEBITO: 0 }
@@ -99,10 +104,20 @@ export default function ConfiguracoesView({
   const [storeMessage, setStoreMessage] = useState('');
   const [storeError, setStoreError] = useState('');
   const [editingOperatorId, setEditingOperatorId] = useState<string | null>(null);
-  const [operatorForm, setOperatorForm] = useState({ name: '', code: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true });
+  const [operatorForm, setOperatorForm] = useState<{ name: string; code: string; unitId: string; permissions: PdvOperatorPermissions; isActive: boolean; monthlyGoal: number | null }>({ name: '', code: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true, monthlyGoal: null });
   const [operatorMessage, setOperatorMessage] = useState('');
   const [operatorError, setOperatorError] = useState('');
   const canManageOperators = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
+  type SettingsTab = 'conta' | 'lojas' | 'pdv' | 'usuarios';
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('conta');
+  const settingsTabs = ([
+    ['conta', 'Minha conta'],
+    ['lojas', 'Lojas'],
+    ...(canManageOperators ? [['pdv', 'Configurações do PDV']] : []),
+    ...(currentUser.role === UserRole.ADMIN ? [['usuarios', 'Usuários do ERP']] : []),
+  ] as [SettingsTab, string][]);
+  // Janela da loja dividida em abas.
+  const [storeSection, setStoreSection] = useState<StoreSection>('dados');
 
   const updateStoreField = <K extends keyof Omit<StoreConfig, 'unitId'>>(field: K, value: Omit<StoreConfig, 'unitId'>[K]) => {
     setStoreForm(previous => ({ ...previous, [field]: value }));
@@ -158,6 +173,7 @@ export default function ConfiguracoesView({
     setStoreForm(EMPTY_STORE);
     setStoreError('');
     setStoreMessage('');
+    setStoreSection('dados');
     setStoreModalOpen(true);
   };
 
@@ -169,6 +185,7 @@ export default function ConfiguracoesView({
   };
 
   const editStore = (store: StoreConfig) => {
+    setStoreSection('dados');
     setStoreModalOpen(true);
     setEditingUnitId(store.unitId);
     setStoreForm({
@@ -184,7 +201,11 @@ export default function ConfiguracoesView({
       workOrderTerms: store.workOrderTerms || '',
       workOrderDeliveryTerms: store.workOrderDeliveryTerms || '',
       instagram: store.instagram || '',
+      municipalRegistration: store.municipalRegistration || '',
+      cityIbgeCode: store.cityIbgeCode || '',
+      simplesNacionalOption: store.simplesNacionalOption || '3',
       exchangeDays: store.exchangeDays ?? 7,
+      cashDifferenceAlert: store.cashDifferenceAlert ?? 10,
       fixedCost: store.fixedCost,
       maxItemDiscountPercent: store.maxItemDiscountPercent,
       paymentFees: store.paymentFees
@@ -211,7 +232,7 @@ export default function ConfiguracoesView({
 
   const resetOperatorForm = () => {
     setEditingOperatorId(null);
-    setOperatorForm({ name: '', code: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true });
+    setOperatorForm({ name: '', code: '', unitId: '', permissions: EMPTY_OPERATOR_PERMISSIONS, isActive: true, monthlyGoal: null });
   };
 
   const handleOperatorSubmit = async (event: FormEvent) => {
@@ -250,7 +271,8 @@ export default function ConfiguracoesView({
         code,
         unitId: operatorForm.unitId,
         permissions: operatorForm.permissions,
-        isActive: operatorForm.isActive
+        isActive: operatorForm.isActive,
+        monthlyGoal: operatorForm.monthlyGoal && operatorForm.monthlyGoal > 0 ? operatorForm.monthlyGoal : null
       });
       setOperatorMessage(editingOperatorId ? 'Operador atualizado.' : 'Operador cadastrado.');
       resetOperatorForm();
@@ -266,7 +288,8 @@ export default function ConfiguracoesView({
       code: operator.code || '',
       unitId: operator.unitId || '',
       permissions: { ...EMPTY_OPERATOR_PERMISSIONS, ...operator.permissions },
-      isActive: operator.isActive
+      isActive: operator.isActive,
+      monthlyGoal: operator.monthlyGoal ?? null
     });
     setOperatorError('');
     setOperatorMessage('');
@@ -288,9 +311,17 @@ export default function ConfiguracoesView({
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-bold text-slate-900">Configurações</h2>
-        <p className="mt-1 text-xs text-slate-500">Gerencie sua identificação no ERP e os dados cadastrais das unidades.</p>
+        <p className="mt-1 text-xs text-slate-500">Sua conta, as lojas, o PDV e a equipe do ERP.</p>
       </div>
 
+      {/* Abas: cada parte das configuracoes na sua aba (como no Catalogo & Estoque). */}
+      <div className="flex flex-wrap gap-1 border-b border-slate-200">
+        {settingsTabs.map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setSettingsTab(id)} className={`px-4 py-2 text-xs font-bold border-b-2 -mb-px ${settingsTab === id ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{label}</button>
+        ))}
+      </div>
+
+      {settingsTab === 'conta' && (
       <section className="bg-white border border-slate-200 rounded-lg p-5 space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -300,9 +331,6 @@ export default function ConfiguracoesView({
               <p className="text-xs text-slate-500">Este nome aparece no cabeçalho e nos novos registros criados por você.</p>
             </div>
           </div>
-          <button type="button" onClick={openNewStore} className="px-4 py-2.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 shrink-0">
-            <Building2 className="w-4 h-4" />Criar loja
-          </button>
         </div>
 
         {profileError && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{profileError}</p>}
@@ -323,17 +351,26 @@ export default function ConfiguracoesView({
           </button>
         </form>
       </section>
+      )}
 
+      {settingsTab === 'conta' && currentUser.role === UserRole.ADMIN && <FranchiseeContactPanel />}
+
+      {settingsTab === 'lojas' && (
       <section>
         <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-4">
           {storeMessage && <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3 flex items-center gap-2"><Check className="w-4 h-4" />{storeMessage}</p>}
           {storeError && !storeModalOpen && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{storeError}</p>}
+          <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <Store className="w-5 h-5 text-blue-600" />
             <div>
               <h3 className="text-sm font-bold text-slate-900">Lojas cadastradas</h3>
               <p className="text-xs text-slate-500">Unidades são entidades da empresa, sem vínculo direto a um usuário específico.</p>
             </div>
+          </div>
+          <button type="button" onClick={openNewStore} className="px-4 py-2.5 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 shrink-0">
+            <Building2 className="w-4 h-4" />Criar loja
+          </button>
           </div>
 
           <div className="overflow-x-auto border border-slate-200 rounded-lg">
@@ -398,10 +435,9 @@ export default function ConfiguracoesView({
         </div>
 
       </section>
+      )}
 
-      {currentUser.role === UserRole.ADMIN && <TenantUsersPanel currentUser={currentUser} storeConfigs={storeConfigs} />}
-
-      {currentUser.role === UserRole.ADMIN && <ManagerPasswordPanel storeConfigs={storeConfigs} />}
+      {settingsTab === 'usuarios' && currentUser.role === UserRole.ADMIN && <TenantUsersPanel currentUser={currentUser} storeConfigs={storeConfigs} />}
 
       {storeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="presentation" onKeyDown={event => { if (event.key === 'Escape') closeStoreModal(); }}>
@@ -416,7 +452,13 @@ export default function ConfiguracoesView({
 
             {storeError && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{storeError}</p>}
 
-            <StoreFields form={storeForm} onChange={updateStoreField} />
+            <div className="flex flex-wrap gap-1 border-b border-slate-200">
+              {STORE_SECTIONS.map(([id, label]) => (
+                <button key={id} type="button" onClick={() => setStoreSection(id)} className={`px-3 py-1.5 text-xs font-bold border-b-2 -mb-px ${storeSection === id ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{label}</button>
+              ))}
+            </div>
+
+            <StoreFields form={storeForm} onChange={updateStoreField} section={storeSection} />
 
             <div className="flex gap-2 pt-1">
               <button type="button" onClick={closeStoreModal} className="px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg">Cancelar</button>
@@ -429,65 +471,93 @@ export default function ConfiguracoesView({
         </div>
       )}
 
-      {canManageOperators && (
-        <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6">
-          <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Users className="w-5 h-5 text-blue-600" />
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">Operadores do PDV</h3>
-                <p className="text-xs text-slate-500">Cadastros sem e-mail, senha ou conta de acesso.</p>
+      {settingsTab === 'pdv' && (
+        <div className="space-y-6">
+        {canManageOperators && (
+          <section className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-6">
+            <div className="bg-white border border-slate-200 rounded-lg p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-blue-600" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Vendedores do PDV</h3>
+                  <p className="text-xs text-slate-500">Cadastros sem e-mail, senha ou conta de acesso.</p>
+                </div>
+              </div>
+              <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                <table className="w-full text-xs text-left">
+                  <thead className="bg-slate-50 text-slate-500 uppercase text-[10px]"><tr><th className="p-3">Código</th><th className="p-3">Operador</th><th className="p-3">Loja</th><th className="p-3">Situação</th><th className="p-3 text-right">Ações</th></tr></thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {pdvOperators.map(operator => {
+                      const permissionCount = Object.values(operator.permissions).filter(Boolean).length;
+                      const store = storeConfigs.find(item => item.unitId === operator.unitId);
+                      return <tr key={operator.id}><td className="p-3 font-mono font-bold text-slate-900">{operator.code || <span className="text-amber-700 font-sans font-normal">sem código</span>}</td><td className="p-3"><span className="block font-bold text-slate-900">{operator.name}</span><span className="text-slate-500">{permissionCount} permissões{operator.monthlyGoal ? ` · meta ${operator.monthlyGoal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/mês` : ''}</span></td><td className="p-3 text-slate-600">{store?.tradeName || store?.legalName || (operator.unitId ? operator.unitId : 'Todas as lojas')}</td><td className="p-3"><span className={`rounded px-2 py-1 text-[10px] font-bold ${operator.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{operator.isActive ? 'ATIVO' : 'INATIVO'}</span></td><td className="p-3"><div className="flex justify-end gap-1"><button type="button" onClick={() => editOperator(operator)} title="Editar operador" className="p-2 text-blue-700 rounded-lg hover:bg-blue-50"><Pencil className="w-4 h-4" /></button><button type="button" onClick={() => void removeOperator(operator)} title="Excluir operador" className="p-2 text-rose-600 rounded-lg hover:bg-rose-50"><Trash2 className="w-4 h-4" /></button></div></td></tr>;
+                    })}
+                    {pdvOperators.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">Nenhum operador cadastrado.</td></tr>}
+                  </tbody>
+                </table>
               </div>
             </div>
-            <div className="overflow-x-auto border border-slate-200 rounded-lg">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-slate-50 text-slate-500 uppercase text-[10px]"><tr><th className="p-3">Código</th><th className="p-3">Operador</th><th className="p-3">Loja</th><th className="p-3">Situação</th><th className="p-3 text-right">Ações</th></tr></thead>
-                <tbody className="divide-y divide-slate-100">
-                  {pdvOperators.map(operator => {
-                    const permissionCount = Object.values(operator.permissions).filter(Boolean).length;
-                    const store = storeConfigs.find(item => item.unitId === operator.unitId);
-                    return <tr key={operator.id}><td className="p-3 font-mono font-bold text-slate-900">{operator.code || <span className="text-amber-700 font-sans font-normal">sem código</span>}</td><td className="p-3"><span className="block font-bold text-slate-900">{operator.name}</span><span className="text-slate-500">{permissionCount} permissões</span></td><td className="p-3 text-slate-600">{store?.tradeName || store?.legalName || (operator.unitId ? operator.unitId : 'Todas as lojas')}</td><td className="p-3"><span className={`rounded px-2 py-1 text-[10px] font-bold ${operator.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>{operator.isActive ? 'ATIVO' : 'INATIVO'}</span></td><td className="p-3"><div className="flex justify-end gap-1"><button type="button" onClick={() => editOperator(operator)} title="Editar operador" className="p-2 text-blue-700 rounded-lg hover:bg-blue-50"><Pencil className="w-4 h-4" /></button><button type="button" onClick={() => void removeOperator(operator)} title="Excluir operador" className="p-2 text-rose-600 rounded-lg hover:bg-rose-50"><Trash2 className="w-4 h-4" /></button></div></td></tr>;
-                  })}
-                  {pdvOperators.length === 0 && <tr><td colSpan={5} className="p-8 text-center text-slate-400">Nenhum operador cadastrado.</td></tr>}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <form onSubmit={handleOperatorSubmit} className="bg-white border border-slate-200 rounded-lg p-5 space-y-3 h-fit">
-            <div className="flex items-center gap-2"><Users className="w-5 h-5 text-blue-600" /><h3 className="text-sm font-bold text-slate-900">{editingOperatorId ? 'Editar operador' : 'Cadastrar operador'}</h3></div>
-            {operatorError && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{operatorError}</p>}
-            {operatorMessage && <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3">{operatorMessage}</p>}
-            <label className="block text-xs font-bold text-slate-700">Nome<input required value={operatorForm.name} onChange={event => setOperatorForm({ ...operatorForm, name: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500" /></label>
-            <label className="block text-xs font-bold text-slate-700">Código do vendedor <span className="font-normal text-slate-400">(2 dígitos, usado para finalizar vendas no PDV)</span><input required inputMode="numeric" maxLength={2} placeholder="Ex: 07" value={operatorForm.code} onChange={event => setOperatorForm({ ...operatorForm, code: event.target.value.replace(/[^0-9]/g, '').slice(0, 2) })} className="mt-1.5 w-24 bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono font-bold text-center tracking-widest outline-none focus:ring-1 focus:ring-blue-500" /></label>
-            <label className="block text-xs font-bold text-slate-700">Loja<select required value={operatorForm.unitId} onChange={event => setOperatorForm({ ...operatorForm, unitId: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500"><option value="">Selecione a loja</option>{storeConfigs.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.legalName || store.unitId}</option>)}</select></label>
-            <fieldset className="space-y-2"><legend className="text-xs font-bold text-slate-700">Permissões</legend>{(Object.keys(operatorPermissionLabels) as Array<keyof PdvOperatorPermissions>).map(permission => <label key={permission} className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={operatorForm.permissions[permission]} onChange={event => setOperatorForm({ ...operatorForm, permissions: { ...operatorForm.permissions, [permission]: event.target.checked } })} />{operatorPermissionLabels[permission]}</label>)}</fieldset>
-            <label className="flex items-center gap-2 text-xs font-bold text-slate-700"><input type="checkbox" checked={operatorForm.isActive} onChange={event => setOperatorForm({ ...operatorForm, isActive: event.target.checked })} />Operador ativo</label>
-            <div className="flex gap-2 pt-1">{editingOperatorId && <button type="button" onClick={resetOperatorForm} className="px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg">Cancelar</button>}<button type="submit" className="ml-auto px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2">{editingOperatorId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}{editingOperatorId ? 'Salvar alterações' : 'Cadastrar operador'}</button></div>
-          </form>
-        </section>
+            <form onSubmit={handleOperatorSubmit} className="bg-white border border-slate-200 rounded-lg p-5 space-y-3 h-fit">
+              <div className="flex items-center gap-2"><Users className="w-5 h-5 text-blue-600" /><h3 className="text-sm font-bold text-slate-900">{editingOperatorId ? 'Editar operador' : 'Cadastrar operador'}</h3></div>
+              {operatorError && <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{operatorError}</p>}
+              {operatorMessage && <p className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg p-3">{operatorMessage}</p>}
+              <label className="block text-xs font-bold text-slate-700">Nome<input required value={operatorForm.name} onChange={event => setOperatorForm({ ...operatorForm, name: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500" /></label>
+              <label className="block text-xs font-bold text-slate-700">Código do vendedor <span className="font-normal text-slate-400">(2 dígitos, usado para finalizar vendas no PDV)</span><input required inputMode="numeric" maxLength={2} placeholder="Ex: 07" value={operatorForm.code} onChange={event => setOperatorForm({ ...operatorForm, code: event.target.value.replace(/[^0-9]/g, '').slice(0, 2) })} className="mt-1.5 w-24 bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-mono font-bold text-center tracking-widest outline-none focus:ring-1 focus:ring-blue-500" /></label>
+              <label className="block text-xs font-bold text-slate-700">Loja<select required value={operatorForm.unitId} onChange={event => setOperatorForm({ ...operatorForm, unitId: event.target.value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500"><option value="">Selecione a loja</option>{storeConfigs.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.legalName || store.unitId}</option>)}</select></label>
+              <label className="block text-xs font-bold text-slate-700">Meta do mês (R$) <span className="font-normal text-slate-400">(opcional; só produtos, aparece no relatório "Vendas por vendedor" do PDV)</span><ValueInput value={operatorForm.monthlyGoal} onValueChange={value => setOperatorForm({ ...operatorForm, monthlyGoal: value })} className="mt-1.5 w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 font-medium outline-none focus:ring-1 focus:ring-blue-500" /></label>
+              <fieldset className="space-y-2"><legend className="text-xs font-bold text-slate-700">Permissões</legend>{(Object.keys(operatorPermissionLabels) as Array<keyof PdvOperatorPermissions>).map(permission => <label key={permission} className="flex items-center gap-2 text-xs text-slate-700"><input type="checkbox" checked={operatorForm.permissions[permission]} onChange={event => setOperatorForm({ ...operatorForm, permissions: { ...operatorForm.permissions, [permission]: event.target.checked } })} />{operatorPermissionLabels[permission]}</label>)}</fieldset>
+              <label className="flex items-center gap-2 text-xs font-bold text-slate-700"><input type="checkbox" checked={operatorForm.isActive} onChange={event => setOperatorForm({ ...operatorForm, isActive: event.target.checked })} />Operador ativo</label>
+              <div className="flex gap-2 pt-1">{editingOperatorId && <button type="button" onClick={resetOperatorForm} className="px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-lg">Cancelar</button>}<button type="submit" className="ml-auto px-3 py-2 bg-blue-600 text-white text-xs font-bold rounded-lg hover:bg-blue-700 flex items-center gap-2">{editingOperatorId ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}{editingOperatorId ? 'Salvar alterações' : 'Cadastrar operador'}</button></div>
+            </form>
+          </section>
+        )}
+          {currentUser.role === UserRole.ADMIN && <ManagerPasswordPanel storeConfigs={storeConfigs} />}
+        </div>
       )}
     </div>
   );
 }
 
-function StoreFields({ form, onChange }: {
+type StoreSection = 'dados' | 'fiscal' | 'pdv' | 'textos';
+
+const STORE_SECTIONS: [StoreSection, string][] = [
+  ['dados', 'Dados'],
+  ['fiscal', 'Fiscal'],
+  ['pdv', 'Regras do PDV'],
+  ['textos', 'Textos dos impressos'],
+];
+
+type StoreTextField = 'reservationVoucherTerms' | 'tradeInTerms' | 'workOrderTerms' | 'workOrderDeliveryTerms';
+
+// Textos dos impressos da loja (cada um abre ao clicar no titulo).
+const STORE_TEXTS: { field: StoreTextField; title: string; hint: string; placeholder: string; rows: number }[] = [
+  { field: 'reservationVoucherTerms', title: 'Regras do voucher de reserva', hint: 'Impressas nos vouchers de reserva do PDV desta loja. Em branco usa o texto padrão.', placeholder: DEFAULT_VOUCHER_TERMS, rows: 4 },
+  { field: 'tradeInTerms', title: 'Declarações do termo da Troca Gamer', hint: 'Impressas no termo de compra de videogame usado. Uma linha em branco separa os parágrafos. Em branco usa o texto padrão.', placeholder: DEFAULT_TRADE_IN_TERMS, rows: 8 },
+  { field: 'workOrderTerms', title: 'Condições do comprovante de entrada da OS', hint: 'Impressas quando o cliente deixa o aparelho. Uma linha em branco separa os parágrafos. Em branco usa o texto padrão.', placeholder: DEFAULT_WORK_ORDER_TERMS, rows: 8 },
+  { field: 'workOrderDeliveryTerms', title: 'Declaração do comprovante de entrega da OS', hint: 'Impressa quando o cliente retira o aparelho. Em branco usa o texto padrão.', placeholder: DEFAULT_WORK_ORDER_DELIVERY_TERMS, rows: 6 },
+];
+
+function StoreFields({ form, onChange, section }: {
+  section: StoreSection;
   form: Omit<StoreConfig, 'unitId'>;
   onChange: <K extends keyof Omit<StoreConfig, 'unitId'>>(field: K, value: Omit<StoreConfig, 'unitId'>[K]) => void;
 }) {
-  const fields: { field: keyof Omit<StoreConfig, 'unitId'>; label: string; type?: string }[] = [
-    { field: 'tradeName', label: 'Nome fantasia' },
-    { field: 'legalName', label: 'Razão social' },
-    { field: 'cnpj', label: 'CNPJ' },
-    { field: 'stateRegistration', label: 'Inscrição estadual' },
-    { field: 'address', label: 'Endereço completo' },
-    { field: 'phone', label: 'Telefone' },
-    { field: 'contactEmail', label: 'E-mail de contato', type: 'email' },
-    { field: 'instagram', label: 'Instagram da loja (ex.: @bebgamescg) — vira o QR code do cupom' }
+  const [openText, setOpenText] = useState<StoreTextField | null>(null);
+  const fields: { field: keyof Omit<StoreConfig, 'unitId'>; label: string; type?: string; section: StoreSection }[] = [
+    { field: 'tradeName', label: 'Nome fantasia', section: 'dados' },
+    { field: 'legalName', label: 'Razão social', section: 'dados' },
+    { field: 'cnpj', label: 'CNPJ', section: 'dados' },
+    { field: 'stateRegistration', label: 'Inscrição estadual', section: 'fiscal' },
+    { field: 'municipalRegistration', label: 'Inscrição municipal (NFS-e dos serviços)', section: 'fiscal' },
+    { field: 'address', label: 'Endereço completo', section: 'dados' },
+    { field: 'phone', label: 'Telefone', section: 'dados' },
+    { field: 'contactEmail', label: 'E-mail de contato', type: 'email', section: 'dados' },
+    { field: 'instagram', label: 'Instagram da loja (ex.: @bebgamescg) — vira o QR code do cupom', section: 'dados' }
   ];
 
   return (
     <div className="space-y-3">
-      {fields.map(({ field, label, type = 'text' }) => (
+      {fields.filter(entry => entry.section === section).map(({ field, label, type = 'text' }) => (
         <label key={field} className="block text-xs font-bold text-slate-700">
           {label}
           <input
@@ -498,6 +568,33 @@ function StoreFields({ form, onChange }: {
           />
         </label>
       ))}
+      {section === 'fiscal' && <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="block text-xs font-bold text-slate-700">
+          Município da loja (código IBGE) <span className="font-normal text-slate-400">(NFS-e)</span>
+          <div className="mt-1 flex gap-1.5">
+            <input
+              value={form.cityIbgeCode || ''}
+              placeholder="3304557"
+              onChange={event => onChange('cityIbgeCode', event.target.value.replace(/\D/g, '').slice(0, 7))}
+              className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+            />
+            <button type="button" onClick={() => onChange('cityIbgeCode', '3304557')} className="shrink-0 px-2 text-[10px] font-bold border border-slate-200 rounded-lg hover:bg-slate-50" title="Rio de Janeiro">Rio (RJ)</button>
+          </div>
+        </label>
+        <label className="block text-xs font-bold text-slate-700">
+          Simples Nacional <span className="font-normal text-slate-400">(NFS-e)</span>
+          <select
+            value={form.simplesNacionalOption || '3'}
+            onChange={event => onChange('simplesNacionalOption', event.target.value as '1' | '2' | '3')}
+            className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+          >
+            <option value="3">Optante — ME/EPP</option>
+            <option value="2">Optante — MEI</option>
+            <option value="1">Não optante</option>
+          </select>
+        </label>
+      </div>}
+      {section === 'pdv' && <>
       <label className="block text-xs font-bold text-slate-700">
         Limite de desconto padrão (%) <span className="font-normal text-slate-400">(usado quando o produto não tem limite próprio; vale também para serviços)</span>
         <ValueInput
@@ -516,45 +613,51 @@ function StoreFields({ form, onChange }: {
         />
       </label>
       <label className="block text-xs font-bold text-slate-700">
-        Regras do voucher de reserva desta loja <span className="font-normal text-slate-400">(impressas nos vouchers do PDV desta loja; cada loja tem o seu texto; em branco usa o texto padrão)</span>
-        <textarea
-          rows={4}
-          value={form.reservationVoucherTerms || ''}
-          placeholder={DEFAULT_VOUCHER_TERMS}
-          onChange={event => onChange('reservationVoucherTerms', event.target.value)}
+        Alerta de diferença de caixa (R$) <span className="font-normal text-slate-400">(fechamento com diferença acima deste valor aparece em "Precisa de atenção")</span>
+        <ValueInput
+          value={form.cashDifferenceAlert ?? 10}
+          onValueChange={value => onChange('cashDifferenceAlert', Math.max(0, value ?? 0))}
           className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
         />
       </label>
-      <label className="block text-xs font-bold text-slate-700">
-        Declarações do termo da Troca Gamer desta loja <span className="font-normal text-slate-400">(impressas no termo de compra de videogame usado; uma linha em branco separa os parágrafos; em branco usa o texto padrão)</span>
-        <textarea
-          rows={6}
-          value={form.tradeInTerms || ''}
-          placeholder={DEFAULT_TRADE_IN_TERMS}
-          onChange={event => onChange('tradeInTerms', event.target.value)}
-          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
-        />
-      </label>
-      <label className="block text-xs font-bold text-slate-700">
-        Condições do comprovante de entrada da OS desta loja <span className="font-normal text-slate-400">(impressas quando o cliente deixa o aparelho; uma linha em branco separa os parágrafos; em branco usa o texto padrão)</span>
-        <textarea
-          rows={6}
-          value={form.workOrderTerms || ''}
-          placeholder={DEFAULT_WORK_ORDER_TERMS}
-          onChange={event => onChange('workOrderTerms', event.target.value)}
-          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
-        />
-      </label>
-      <label className="block text-xs font-bold text-slate-700">
-        Declaração do comprovante de entrega da OS desta loja <span className="font-normal text-slate-400">(impressa quando o cliente retira o aparelho consertado; em branco usa o texto padrão)</span>
-        <textarea
-          rows={5}
-          value={form.workOrderDeliveryTerms || ''}
-          placeholder={DEFAULT_WORK_ORDER_DELIVERY_TERMS}
-          onChange={event => onChange('workOrderDeliveryTerms', event.target.value)}
-          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
-        />
-      </label>
+      </>}
+      {section === 'textos' && (
+        <div className="divide-y divide-slate-200 border border-slate-200 rounded-lg overflow-hidden">
+          {STORE_TEXTS.map(({ field, title, hint, placeholder, rows }) => {
+            const open = openText === field;
+            const filled = Boolean((form[field] as string | undefined)?.trim());
+            return (
+              <div key={field}>
+                <button
+                  type="button"
+                  onClick={() => setOpenText(open ? null : field)}
+                  aria-expanded={open}
+                  className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left text-xs font-bold ${open ? 'bg-blue-50 text-blue-800' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                >
+                  <span>
+                    {title}
+                    <span className={`ml-2 text-[10px] font-semibold ${filled ? 'text-emerald-700' : 'text-slate-400'}`}>{filled ? 'texto próprio' : 'texto padrão'}</span>
+                  </span>
+                  <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
+                </button>
+                {open && (
+                  <div className="px-3 pb-3 pt-1 bg-white space-y-1">
+                    <p className="text-[11px] text-slate-500">{hint}</p>
+                    <textarea
+                      rows={rows}
+                      autoFocus
+                      value={(form[field] as string) || ''}
+                      placeholder={placeholder}
+                      onChange={event => onChange(field, event.target.value as never)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-xs outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

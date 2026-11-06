@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabaseService, isTableMissingError } from './supabaseService';
 import { supabase } from './supabaseClient';
+import { getMyNetworkAccess } from './network';
 import { 
   User, 
-  UserRole,
+  UserRole, isNetworkRole,
   Product, 
   Service,
   StockInventory, 
@@ -77,6 +78,27 @@ export function useErpStore() {
       try {
         const profile = await supabaseService.getCurrentAppUserProfile(authUser.id);
         if (!profile) {
+          // Login da franqueadora: abre o Painel da Rede (sem dados operacionais de franquia).
+          const network = await getMyNetworkAccess();
+          if (network) {
+            if (!network.isActive) throw new Error('Seu acesso ao Painel da Rede foi desativado.');
+            clearOperationalData();
+            const networkUser: User = {
+              id: authUser.id,
+              name: network.displayName || authUser.email?.split('@')[0] || 'Rede',
+              role: network.role === 'OWNER' ? UserRole.NETWORK_OWNER : UserRole.NETWORK_MANAGER,
+              tenantId: null,
+              unitId: 'central',
+              planCode: null,
+              subscriptionStatus: null,
+              networkId: network.networkId,
+              networkName: network.networkName,
+            };
+            setCurrentUser(previous => previous && previous.id === networkUser.id && previous.role === networkUser.role
+              && previous.name === networkUser.name && previous.networkName === networkUser.networkName ? previous : networkUser);
+            setAuthProfileError(null);
+            return;
+          }
           setAuthProfileError('Esta conta ainda não possui acesso ao ERP. Peça ao administrador para criar seu vínculo de usuário.');
           setCurrentUser(null);
           return;
@@ -138,7 +160,7 @@ export function useErpStore() {
 
   // Load all data from Supabase
   const loadAllFromSupabase = useCallback(async () => {
-    if (currentUser?.role === UserRole.SUPER_ADMIN) {
+    if (currentUser?.role === UserRole.SUPER_ADMIN || isNetworkRole(currentUser?.role)) {
       clearOperationalData();
       setSupabaseLoading(false);
       return false;
@@ -227,7 +249,7 @@ export function useErpStore() {
 
   // Load protected data after the Supabase login has established an authenticated session.
   useEffect(() => {
-    if (currentUser && currentUser.role !== UserRole.SUPER_ADMIN) {
+    if (currentUser && currentUser.role !== UserRole.SUPER_ADMIN && !isNetworkRole(currentUser.role)) {
       void loadAllFromSupabase();
     }
   }, [currentUser, loadAllFromSupabase]);

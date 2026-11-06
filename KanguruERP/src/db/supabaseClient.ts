@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 const DEFAULT_SUPABASE_URL = 'https://qnxmboxwluuyjvgiqlbm.supabase.co';
 const DEFAULT_SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFueG1ib3h3bHV1eWp2Z2lxbGJtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQzMjk3NjMsImV4cCI6MjA5OTkwNTc2M30.HxfLzGhHXGUHpmS_vtA4eb1WXGK9fK8Q0APhLI72D74';
 
-const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env ?? {};
+const env = (import.meta.env ?? {}) as unknown as Record<string, string | undefined>;
 const hasConfiguredEnv = Boolean(env.VITE_SUPABASE_URL && env.VITE_SUPABASE_ANON_KEY);
 const useDevFallback = !hasConfiguredEnv && import.meta.env.DEV;
 

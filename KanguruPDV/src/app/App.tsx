@@ -1,4 +1,5 @@
-﻿import { FormEvent, useEffect, useRef, useState } from 'react';
+﻿import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
+import { findProductWarranty, loadProductWarranties } from '../services/supabase/warranties';
 import {
   ArrowLeft,
   CircleAlert,
@@ -32,9 +33,13 @@ import {
 import {
   emitPosNfce,
   getPosNfceStatus,
+  getPosCardFees,
   getPosSaleReceipt,
+  cardFeeRate,
+  lineSurcharge,
   saleRpc,
   syncNfceContingency,
+  type CardFeeTable,
   type NfceStatus,
   type PaymentLine,
   type PaymentMethodKey,
@@ -53,8 +58,12 @@ import { getVersion } from '@tauri-apps/api/app';
 import { TopBar } from './TopBar';
 import { HomeMenu, type MenuAction } from './HomeMenu';
 import { ProductLookupModal } from './ProductLookupModal';
+import { SellerReportModal } from './SellerReportModal';
+import { CustomerHistoryModal } from './CustomerHistoryModal';
 import { PrinterSettingsModal } from './PrinterSettingsModal';
 import { getDirectPrinter, openCashDrawer } from '../printing/directPrint';
+import { printPdfBase64 } from '../printing/pdfPrint';
+import { emitPosNfse, fetchDanfsePdf, getPosNfseStatus, type PosNfseConfig } from '../services/supabase/nfse';
 import {
   cacheTerminal,
   enqueueOfflineMovement,
@@ -287,6 +296,17 @@ function resolvePayments(lines: PaymentLine[], total: number): PaymentResolution
   return { ...base, applied };
 }
 
+// Linhas de cartao com "Repassar taxa": juros calculados para o servidor conferir.
+function withCardSurcharge(lines: PaymentLine[], table: CardFeeTable | null): PaymentLine[] {
+  return lines.map((line) => (line.passFee ? { ...line, surcharge: lineSurcharge(table, line) } : line));
+}
+
+function surchargeTotal(lines: PaymentLine[]): number {
+  return lines.reduce((sum, line) => sum + toCents(line.surcharge ?? 0), 0) / 100;
+}
+
+const percentText = (value: number) => value.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+
 function legacyPaymentMethod(applied: PaymentLine[]): string {
   return applied.length === 1 ? applied[0].paymentMethod : 'DIVIDIDO';
 }
@@ -314,7 +334,9 @@ const SCANNED_SERIAL_MESSAGES: Record<string, string> = {
   OUTRA_LOJA: 'pertence ao estoque de outra loja',
 };
 
-function warrantyLabel(months: number | null): string {
+function warrantyLabel(months: number | null, sku?: string): string {
+  const days = sku ? findProductWarranty({ sku })?.days : null;
+  if (days && days > 0) return `${days} ${days === 1 ? 'dia' : 'dias'} de garantia`;
   if (months === null) return 'Garantia nao cadastrada';
   if (months <= 0) return 'Sem garantia';
   return `${months} ${months === 1 ? 'mes' : 'meses'} de garantia`;
@@ -374,6 +396,8 @@ export function App() {
   const [reservationCustomerPhone, setReservationCustomerPhone] = useState('');
   const [reservationCustomerCpf, setReservationCustomerCpf] = useState('');
   const [storeProfile, setStoreProfile] = useState<PosStoreProfile | null>(null);
+  // Taxas do cartao da loja (ERP > Livro Caixa): parcelas e "Repassar taxa".
+  const [cardFees, setCardFees] = useState<CardFeeTable | null>(null);
   // Cliente da venda (opcional): identifica a compra para nota e garantia.
   const [saleCustomer, setSaleCustomer] = useState<PosCustomer | null>(null);
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
@@ -422,6 +446,8 @@ export function App() {
   // NFC-e (2.8b): loja configurada no UCP? Escolha do vendedor (NFC-e / Nao Fiscal) da venda em curso.
   const [nfceConfig, setNfceConfig] = useState<PosNfceStatus | null>(null);
   const [nfceEmitting, setNfceEmitting] = useState(false);
+  // NFS-e Nacional dos servicos (mesma chave da Focus; precisa do municipio da loja no ERP).
+  const [nfseConfig, setNfseConfig] = useState<PosNfseConfig | null>(null);
   const [nfceProblem, setNfceProblem] = useState<{ saleId: string; change: number; status: NfceStatus; message: string | null } | null>(null);
   const fiscalChoiceRef = useRef<FiscalChoice>('NAO_FISCAL');
   // Troca/devolucao (2.9): venda aberta no modal e saldo de vale-troca do cliente da venda.
@@ -431,6 +457,8 @@ export function App() {
   const [offlineCustomerOpen, setOfflineCustomerOpen] = useState(false);
   // Menu inicial (2.10): consulta de produto, versao do app e numero da abertura na barra.
   const [lookupOpen, setLookupOpen] = useState(false);
+  const [sellerReportOpen, setSellerReportOpen] = useState(false);
+  const [customerHistoryOpen, setCustomerHistoryOpen] = useState(false);
   // Impressao direta (2.8c): impressora termica escolhida neste PC.
   const [printerOpen, setPrinterOpen] = useState(false);
   const [directPrinter, setDirectPrinterState] = useState<string | null>(() => getDirectPrinter());
@@ -901,9 +929,9 @@ export function App() {
       : `Unidade ${serialUnit.serialNumber} adicionada ao carrinho.`);
   }
 
-  function addSelectedSerialUnit() {
-    if (!serialProduct || !selectedSerialUnitId) return;
-    const serialUnit = serialUnits.find((unit) => unit.serialUnitId === selectedSerialUnitId);
+  function addSelectedSerialUnit(unitId: string | null = selectedSerialUnitId) {
+    if (!serialProduct || !unitId) return;
+    const serialUnit = serialUnits.find((unit) => unit.serialUnitId === unitId);
     if (!serialUnit) return;
 
     addSerialUnitToCart(serialProduct, serialUnit);
@@ -947,6 +975,12 @@ export function App() {
       setAdminApprovalOpen(true);
       return;
     }
+    const charged = withCardSurcharge(resolution.applied, cardFees);
+    const juros = surchargeTotal(charged);
+    if (juros > 0 && isOffline()) {
+      setMessage('Sem internet não dá para repassar a taxa do cartão. Desligue "Repassar taxa" e cobre na maquininha sem juros.');
+      return;
+    }
     setBusy(true);
     setMessage(null);
     setAdminApprovalError(null);
@@ -980,7 +1014,7 @@ export function App() {
           ...(item.workOrderId ? { workOrderId: item.workOrderId } : {}),
         })),
         paymentMethod: legacyPaymentMethod(resolution.applied),
-        payments: resolution.applied,
+        payments: charged,
         grossAmount,
         feeAmount: 0,
         netAmount: grossAmount,
@@ -1014,6 +1048,10 @@ export function App() {
         return;
       }
       const charge = cart.some((item) => item.workOrderId) ? workOrderCharge : null;
+      const saleKinds = {
+        products: cart.some((item) => item.itemType === 'PRODUCT'),
+        services: cart.some((item) => item.itemType === 'SERVICE'),
+      };
       const sellerCode = saleSeller.code;
       setCart([]);
       setCatalogItems([]);
@@ -1026,11 +1064,12 @@ export function App() {
       setAdminApprovalOpen(false);
       setWorkOrderCharge(null);
       setMessage(
-        resolution.changeCents > 0
+        (resolution.changeCents > 0
           ? `Venda registrada com sucesso. Troco: ${currency.format(resolution.changeCents / 100)}.`
-          : 'Venda registrada com sucesso.'
+          : 'Venda registrada com sucesso.')
+          + (juros > 0 ? ` Total com juros do cartão: ${currency.format(grossAmount + juros)}.` : '')
       );
-      void deliverReceipt(saleId, resolution.changeCents / 100);
+      void deliverReceipt(saleId, resolution.changeCents / 100, saleKinds);
       if (charge) void finishWorkOrderSale(charge, sellerCode, resolution.changeCents / 100);
       // Venda com dinheiro: abre a gaveta (impressao direta configurada).
       if (resolution.applied.some((line) => line.paymentMethod === 'DINHEIRO')) void openCashDrawer();
@@ -1038,12 +1077,18 @@ export function App() {
       // Caiu a internet no meio: registra offline com o mesmo id (o envio e idempotente).
       if (isNetworkError(error)) {
         setOffline(true);
+        if (juros > 0) {
+          setMessage('A internet caiu. Sem internet não dá para repassar a taxa do cartão: desligue "Repassar taxa" e finalize de novo.');
+          return;
+        }
         await finalizeOffline(saleId, resolution.applied, resolution.changeCents / 100);
         return;
       }
       const text = errorMessage(error);
       setMessage(text);
       if (adminApprovalOpen) setAdminApprovalError(text);
+      // Taxa alterada no ERP durante o dia: recarrega para o vendedor conferir.
+      getPosCardFees().then(setCardFees).catch(() => undefined);
     } finally {
       setBusy(false);
     }
@@ -1098,6 +1143,9 @@ export function App() {
         if (local.ok) payload.nfce = local.nfce;
         else fiscalNote = ` NFC-e não emitida (${local.message}). Saiu como Não Fiscal.`;
       }
+    }
+    if (fiscalChoiceRef.current === 'NFCE' && cart.some((item) => item.itemType === 'SERVICE')) {
+      fiscalNote += ' NFS-e dos serviços: emita em Cupons e notas quando a internet voltar.';
     }
     await enqueueOfflineSale(payload);
     const receipt: PosSaleReceipt = {
@@ -1237,6 +1285,7 @@ export function App() {
         setScreen('unlock');
         break;
       case 'product-lookup': setLookupOpen(true); break;
+      case 'seller-report': setSellerReportOpen(true); break;
       case 'comunicador': configureComunicador(); break;
       case 'version':
         setMessage(`Kanguru PDV versão ${appVersion ?? '-'}. O PDV procura atualizações sozinho ao abrir e a cada 4 horas.`);
@@ -1299,9 +1348,39 @@ export function App() {
   }
 
   // Depois da venda: Nao Fiscal imprime o cupom; NFC-e emite a nota e imprime o DANFE.
-  async function deliverReceipt(saleId: string, changeAmount: number) {
-    if (fiscalChoiceRef.current === 'NFCE') await emitNfce(saleId, changeAmount);
+  // "Nota fiscal": produtos em NFC-e e servicos em NFS-e (com o DANFSe impresso em A4).
+  async function deliverReceipt(saleId: string, changeAmount: number, kinds = { products: true, services: false }) {
+    if (fiscalChoiceRef.current !== 'NFCE') {
+      await printReceipt(saleId, changeAmount);
+      return;
+    }
+    if (kinds.products) await emitNfce(saleId, changeAmount);
     else await printReceipt(saleId, changeAmount);
+    if (kinds.services) await emitNfse(saleId);
+  }
+
+  const appendMessage = (text: string) => setMessage((current) => (current ? `${current} ${text}` : text));
+
+  async function emitNfse(saleId: string) {
+    setNfceEmitting(true);
+    try {
+      const result = await emitPosNfse(saleId);
+      const authorized = result.invoices.filter((invoice) => invoice.status === 'AUTORIZADA' && invoice.id);
+      if (result.status === 'AUTORIZADA') appendMessage(authorized.length > 1 ? `${authorized.length} NFS-e autorizadas.` : 'NFS-e autorizada.');
+      else if (result.status === 'PENDENTE') appendMessage(`NFS-e pendente: ${result.message ?? 'aguarde e confira em Cupons e notas.'}`);
+      else appendMessage(`NFS-e não emitida: ${result.message ?? 'erro.'} Corrija e emita de novo em Cupons e notas.`);
+      for (const invoice of authorized) await printDanfse(invoice.id!);
+    } finally {
+      setNfceEmitting(false);
+    }
+  }
+
+  async function printDanfse(invoiceId: string) {
+    try {
+      await printPdfBase64(await fetchDanfsePdf(invoiceId));
+    } catch (error) {
+      appendMessage(`O DANFSe não pôde ser impresso (${errorMessage(error)}): reimprima em Cupons e notas.`);
+    }
   }
 
   async function emitNfce(saleId: string, changeAmount: number) {
@@ -1650,7 +1729,7 @@ export function App() {
         paymentMethod: resolution
           ? legacyPaymentMethod(resolution.applied)
           : reservation.depositPaymentMethod ?? 'DINHEIRO',
-        payments: resolution ? resolution.applied : null,
+        payments: resolution ? withCardSurcharge(resolution.applied, cardFees) : null,
         grossAmount: total,
         feeAmount: 0,
         netAmount: total,
@@ -1731,6 +1810,14 @@ export function App() {
     if (screen !== 'sale' && screen !== 'receipts') return;
     // Sem internet vale a configuracao guardada (NFC-e pelo Comunicador Offline).
     getPosNfceStatus().then(setNfceConfig).catch(async () => setNfceConfig((await getSnapshot())?.nfce ?? null));
+    getPosNfseStatus().then(setNfseConfig).catch(() => setNfseConfig(null));
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen !== 'sale' && screen !== 'reservations') return;
+    getPosCardFees().then(setCardFees).catch(() => undefined);
+    // Garantia em dias/meses de cada produto (carrinho e linha "Garantia" do cupom).
+    void loadProductWarranties();
   }, [screen]);
 
   useEffect(() => {
@@ -1796,17 +1883,32 @@ export function App() {
     getCashSessionReport().then((report) => setSessionNumber(report?.sessionNumber ?? null)).catch(() => undefined);
   }, [cashSession, offlineNow]);
 
+  // Sair da venda para o menu descarta a venda em andamento (proxima venda comeca limpa).
+  function leaveSaleToMenu() {
+    setCart([]);
+    setCatalogItems([]);
+    setQuery('');
+    setPaymentLines([]);
+    setSaleSellerCode('');
+    setSaleSeller(null);
+    setSaleCustomer(null);
+    setWorkOrderCharge(null);
+    setAdminApprovalPassword('');
+    setMessage(null);
+    setScreen('menu');
+  }
+
   useEffect(() => {
     if (screen !== 'sale') return;
     function onKey(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
-      if (serialProduct || adminApprovalOpen || customerPickerOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
+      if (serialProduct || adminApprovalOpen || customerPickerOpen || customerHistoryOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
       if (catalogItems.length > 0 || query) {
         setCatalogItems([]);
         setQuery('');
         return;
       }
-      setScreen('menu');
+      leaveSaleToMenu();
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -1838,8 +1940,11 @@ export function App() {
 
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
   const cartHasBackorder = cart.some((item) => item.backorder);
-  // Servicos ficam fora da NFC-e: venda so com servicos sai como Nao Fiscal.
+  // Servicos ficam fora da NFC-e: com "Nota fiscal" eles saem em NFS-e.
   const cartHasProduct = cart.some((item) => item.itemType === 'PRODUCT');
+  const cartHasService = cart.some((item) => item.itemType === 'SERVICE');
+  // Produto exige NFC-e configurada; venda so com servicos exige a NFS-e pronta.
+  const fiscalReady = cartHasProduct ? nfceConfig?.configured === true : cart.length > 0 && nfseConfig?.ready === true;
   const reservationDepositAmount = valueAsNumber(reservationDeposit);
 
   useEffect(() => {
@@ -2250,6 +2355,9 @@ export function App() {
           busy={busy || nfceEmitting}
           onReprint={(saleId) => printReceipt(saleId)}
           onEmitNfce={(saleId) => emitNfce(saleId, 0)}
+          nfseReady={nfseConfig?.ready === true}
+          onEmitNfse={(saleId) => emitNfse(saleId)}
+          onPrintDanfse={(invoiceId) => printDanfse(invoiceId)}
           onReturn={(saleId) => { setMessage(null); setReturnSaleId(saleId); }}
         />
         {returnSaleId && (
@@ -2361,6 +2469,7 @@ export function App() {
           <ReservationPaymentModal
             reservation={conversionReservation}
             paymentLines={conversionPaymentLines}
+            cardFees={cardFees}
             busy={busy}
             message={message}
             sellerCode={conversionSellerCode}
@@ -2502,6 +2611,7 @@ export function App() {
           />
         )}
         {lookupOpen && <ProductLookupModal onClose={() => setLookupOpen(false)} />}
+        {sellerReportOpen && <SellerReportModal onClose={() => setSellerReportOpen(false)} loadStoreProfile={loadStoreProfile} />}
         {nfceModal}
       </main>
     );
@@ -2517,7 +2627,7 @@ export function App() {
             <ArrowLeft size={18} /> Reservas
           </button>
         ) : (
-          <button className="top-bar-menu" type="button" onClick={() => setScreen('menu')} disabled={busy}>
+          <button className="top-bar-menu" type="button" onClick={leaveSaleToMenu} disabled={busy}>
             <LayoutGrid size={18} /> Menu <small>(Esc)</small>
           </button>
         )}
@@ -2555,7 +2665,7 @@ export function App() {
                     {item.itemType === 'SERVICE' ? 'Serviço' : 'Produto'} | {item.sku}
                     {item.brand ? ` | ${item.brand}` : ''}
                   </small>
-                  {item.itemType === 'PRODUCT' && <small>{warrantyLabel(item.warrantyMonths)}</small>}
+                  {item.itemType === 'PRODUCT' && <small>{warrantyLabel(item.warrantyMonths, item.sku)}</small>}
                   {item.requiresUnitSelection && <small>Serializado: selecione a unidade.</small>}
                 </span>
                 <span>
@@ -2715,6 +2825,7 @@ export function App() {
                       <small>CPF {formatCpf(saleCustomer.cpf)} | {saleCustomer.phone}</small>
                     </div>
                     <div className="sale-customer-actions">
+                      {!offlineNow && <button className="text-action" type="button" onClick={() => setCustomerHistoryOpen(true)}>Histórico</button>}
                       <button className="text-action" type="button" onClick={() => setCustomerForm({ customer: saleCustomer, cpf: '' })}>Editar</button>
                       <button className="text-action" type="button" onClick={() => (offlineNow ? setOfflineCustomerOpen(true) : setCustomerPickerOpen(true))}>Trocar</button>
                       <button className="text-action" type="button" onClick={() => setSaleCustomer(null)}>Remover</button>
@@ -2738,6 +2849,7 @@ export function App() {
                 total={grossAmount}
                 totalLabel="Total da venda"
                 busy={busy}
+                cardFees={cardFees}
                 onChange={setPaymentLines}
               />
 
@@ -2753,7 +2865,8 @@ export function App() {
                   />
                   <div className="total-row">
                     <span>Total</span>
-                    <strong>{currency.format(grossAmount)}</strong>
+                    {/* Com "Repassar taxa" o total ja mostra o valor com os juros do cartao. */}
+                    <strong>{currency.format(grossAmount + surchargeTotal(withCardSurcharge(paymentLines, cardFees)))}</strong>
                   </div>
                 </div>
 
@@ -2761,17 +2874,17 @@ export function App() {
                   <button
                     className="primary-action finish-button finish-nfce"
                     type="button"
-                    disabled={!nfceConfig?.configured || busy || nfceEmitting || cart.length === 0 || !saleSeller || cartHasBackorder || !cartHasProduct}
-                    title={!nfceConfig?.configured ? 'NFC-e não configurada para esta loja.' : !cartHasProduct && cart.length > 0 ? 'Venda só com serviços não gera NFC-e: use Não Fiscal.' : 'Finalizar com NFC-e'}
+                    disabled={!fiscalReady || busy || nfceEmitting || cart.length === 0 || !saleSeller || cartHasBackorder}
+                    title={fiscalReady
+                      ? `Finalizar com nota fiscal${cartHasProduct ? ' (NFC-e dos produtos)' : ''}${cartHasService ? ' (NFS-e dos serviços)' : ''}`
+                      : cartHasProduct ? 'NFC-e não configurada para esta loja.' : `NFS-e não configurada: ${nfseConfig?.missing.join(', ') || 'confira o ERP'}.`}
                     onClick={() => void finalizeSale('NFCE')}
                   >
                     <CreditCard size={20} />
-                    {nfceEmitting ? 'Emitindo...' : 'NFC-e'}
-                    {!nfceConfig?.configured
+                    {nfceEmitting ? 'Emitindo...' : 'Nota fiscal'}
+                    {!fiscalReady
                       ? <small>não configurada</small>
-                      : !cartHasProduct && cart.length > 0
-                        ? <small>só serviços</small>
-                        : nfceConfig.environment === 'homologacao' && <small>teste</small>}
+                      : (cartHasProduct ? nfceConfig?.environment : nfseConfig?.environment) === 'homologacao' && <small>teste</small>}
                   </button>
                   <button
                     className="primary-action finish-button"
@@ -2807,7 +2920,8 @@ export function App() {
           error={serialUnitsError}
           onSelect={setSelectedSerialUnitId}
           onClose={closeSerialUnitModal}
-          onConfirm={addSelectedSerialUnit}
+          onConfirm={() => addSelectedSerialUnit()}
+          onPick={(unitId) => addSelectedSerialUnit(unitId)}
         />
       )}
       {adminApprovalOpen && (
@@ -2826,6 +2940,9 @@ export function App() {
           }}
           onConfirm={() => void confirmDiscountApproval()}
         />
+      )}
+      {customerHistoryOpen && saleCustomer && (
+        <CustomerHistoryModal cpf={saleCustomer.cpf} name={saleCustomer.name} onClose={() => setCustomerHistoryOpen(false)} />
       )}
       {customerPickerOpen && (
         <CustomerPickerModal
@@ -2988,16 +3105,48 @@ interface PaymentLinesEditorProps {
   total: number;
   totalLabel: string;
   busy: boolean;
+  cardFees: CardFeeTable | null;
   onChange: (lines: PaymentLine[]) => void;
 }
 
-function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: PaymentLinesEditorProps) {
+function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange }: PaymentLinesEditorProps) {
   const resolution = resolvePayments(lines, total);
   const totalCents = toCents(total);
   const balanced = resolution.error === null;
+  const jurosCents = toCents(surchargeTotal(withCardSurcharge(lines, cardFees)));
+
+  // Cartao com "Repassar taxa" fica travado e sempre cobre o que falta depois das
+  // outras formas (a ordem de lancamento nao importa). Com mais de um, ajusta o ultimo.
+  function balanceCardLine(next: PaymentLine[]): PaymentLine[] {
+    let target = -1;
+    next.forEach((line, i) => {
+      if (line.passFee && (line.paymentMethod === 'CREDITO' || line.paymentMethod === 'DEBITO')) target = i;
+    });
+    if (target < 0) return next;
+    const otherCents = next.reduce((sum, line, i) => (i === target ? sum : sum + toCents(line.amount)), 0);
+    const amount = Math.max(0, totalCents - otherCents) / 100;
+    return next[target].amount === amount ? next : next.map((line, i) => (i === target ? { ...line, amount } : line));
+  }
+
+  function emit(next: PaymentLine[]) {
+    onChange(balanceCardLine(next));
+  }
+
+  // Total mudou (item incluido/removido): reajusta o cartao com repasse.
+  useEffect(() => {
+    const balanced = balanceCardLine(lines);
+    if (balanced !== lines) onChange(balanced);
+  }, [totalCents]);
 
   function updateLine(index: number, patch: Partial<PaymentLine>) {
-    onChange(lines.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
+    emit(lines.map((entry, i) => (i === index ? { ...entry, ...patch } : entry)));
+  }
+
+  // Linha ainda sem valor: usa o saldo restante (assim o valor com a taxa aparece na hora).
+  function fillAmount(line: PaymentLine, otherLinesCents: number): Partial<PaymentLine> {
+    if (line.amount) return {};
+    const suggested = Math.max(0, totalCents - otherLinesCents) / 100;
+    return suggested > 0 ? { amount: suggested } : {};
   }
 
   return (
@@ -3007,7 +3156,7 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
         <button
           className="text-action"
           type="button"
-          onClick={() => onChange([...lines, { paymentMethod: 'DINHEIRO', amount: 0 }])}
+          onClick={() => emit([...lines, { paymentMethod: 'DINHEIRO', amount: 0 }])}
           disabled={busy}
         >
           + Adicionar forma
@@ -3018,12 +3167,19 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
       ) : (
         lines.map((line, index) => {
           const otherLinesCents = lines.reduce((acc, current, i) => (i === index ? acc : acc + toCents(current.amount)), 0);
+          const isCard = line.paymentMethod === 'CREDITO' || line.paymentMethod === 'DEBITO';
+          const installments = line.installments ?? 1;
+          const rate = isCard ? cardFeeRate(cardFees, line.paymentMethod, installments) : 0;
+          const juros = lineSurcharge(cardFees, line);
+          const charged = (line.amount || 0) + juros;
           return (
-            <div className="payment-line" key={`payment-${index}`}>
+            <div className="payment-line-block" key={`payment-${index}`}>
+            <div className="payment-line">
               <select
                 aria-label={`Forma ${index + 1}`}
                 value={line.paymentMethod}
-                onChange={(event) => updateLine(index, { paymentMethod: event.target.value as PaymentMethod })}
+                onChange={(event) =>
+                  updateLine(index, { paymentMethod: event.target.value as PaymentMethod, installments: 1, passFee: false })}
               >
                 {(Object.keys(PAYMENT_METHOD_LABELS) as PaymentMethod[]).map((method) => (
                   <option key={method} value={method}>
@@ -3033,7 +3189,11 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
               </select>
               <ValueInput
                 aria-label={`Valor da forma ${index + 1}`}
-                value={Number.isFinite(line.amount) && line.amount ? line.amount : null}
+                // Com "Repassar taxa" mostra o valor com juros (o que passa na maquininha);
+                // para mudar o valor, desliga o repasse.
+                value={line.passFee && juros > 0 ? charged : Number.isFinite(line.amount) && line.amount ? line.amount : null}
+                disabled={busy || (line.passFee && juros > 0)}
+                title={line.passFee && juros > 0 ? 'Valor com a taxa. Para mudar, desligue "Repassar taxa".' : undefined}
                 onValueChange={(value) => updateLine(index, { amount: value ?? 0 })}
                 onFocus={() => {
                   // Pre-preenche com o saldo restante quando o campo esta zerado.
@@ -3049,19 +3209,61 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, onChange }: Paymen
                 className="icon-button"
                 type="button"
                 title="Remover forma"
-                onClick={() => onChange(lines.filter((_, i) => i !== index))}
+                onClick={() => emit(lines.filter((_, i) => i !== index))}
               >
                 <Trash2 size={16} />
               </button>
+            </div>
+            {isCard && (
+              <div className="payment-card-options">
+                {line.paymentMethod === 'CREDITO' && (
+                  <select
+                    aria-label={`Parcelas da forma ${index + 1}`}
+                    value={installments}
+                    onChange={(event) => updateLine(index, { installments: Number(event.target.value), ...fillAmount(line, otherLinesCents) })}
+                  >
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((count) => {
+                      const countRate = cardFeeRate(cardFees, 'CREDITO', count);
+                      return (
+                        <option key={count} value={count}>
+                          {count}x{countRate > 0 ? ` (${percentText(countRate)}%)` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
+                {rate > 0 ? (
+                  <label className="payment-pass-fee">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(line.passFee)}
+                      onChange={(event) => updateLine(index, { passFee: event.target.checked, ...fillAmount(line, otherLinesCents) })}
+                    />
+                    Repassar taxa ({percentText(rate)}%)
+                  </label>
+                ) : (
+                  <small>Taxa não cadastrada no ERP</small>
+                )}
+                {line.passFee && juros > 0 ? (
+                  line.paymentMethod === 'CREDITO' && installments > 1 ? (
+                    <small className="payment-card-charge">
+                      <strong>{installments}x de {currency.format(charged / installments)}</strong>
+                    </small>
+                  ) : null
+                ) : rate > 0 ? (
+                  <small>A taxa de {percentText(rate)}% fica com a loja</small>
+                ) : null}
+              </div>
+            )}
             </div>
           );
         })
       )}
       <div className="payment-lines-summary">
         <span>{totalLabel}</span>
-        <strong>{currency.format(totalCents / 100)}</strong>
+        <strong>{currency.format((totalCents + jurosCents) / 100)}</strong>
         <span>Soma das formas</span>
-        <strong className={balanced ? '' : 'negative'}>{currency.format(resolution.sumCents / 100)}</strong>
+        <strong className={balanced ? '' : 'negative'}>{currency.format((resolution.sumCents + jurosCents) / 100)}</strong>
         {resolution.missingCents > 0 && (
           <>
             <span>Falta</span>
@@ -3090,6 +3292,7 @@ interface ReservationPaymentModalProps {
   unitChoices: Record<string, string>;
   onUnitChoice: (reservationItemId: string, unitId: string) => void;
   paymentLines: PaymentLine[];
+  cardFees: CardFeeTable | null;
   busy: boolean;
   message: string | null;
   sellerCode: string;
@@ -3108,6 +3311,7 @@ function ReservationPaymentModal({
   unitChoices,
   onUnitChoice,
   paymentLines,
+  cardFees,
   busy,
   message,
   sellerCode,
@@ -3179,6 +3383,7 @@ function ReservationPaymentModal({
             total={remaining}
             totalLabel="Saldo a cobrar"
             busy={busy}
+            cardFees={cardFees}
             onChange={onPaymentLines}
           />
         ) : (
@@ -3295,7 +3500,11 @@ interface SerialUnitModalProps {
   onSelect: (serialUnitId: string) => void;
   onClose: () => void;
   onConfirm: () => void;
+  onPick: (serialUnitId: string) => void;
 }
+
+// Busca do serial: so letras e numeros, sem diferenciar maiusculas (o leitor pode mandar hifen/espaco).
+const serialKey = (value: string | null | undefined) => (value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 function SerialUnitModal({
   product,
@@ -3306,7 +3515,25 @@ function SerialUnitModal({
   onSelect,
   onClose,
   onConfirm,
+  onPick,
 }: SerialUnitModalProps) {
+  const [query, setQuery] = useState('');
+  const key = serialKey(query);
+  const filtered = key
+    ? units.filter((unit) => serialKey(unit.serialNumber).includes(key) || serialKey(unit.imei).includes(key))
+    : units;
+  const exact = key
+    ? units.find((unit) => serialKey(unit.serialNumber) === key || serialKey(unit.imei) === key)
+    : undefined;
+
+  // Enter (ou o leitor, que digita e aperta Enter): serial exato ou um unico resultado vai direto ao carrinho.
+  function handleSearchKey(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const target = exact ?? (filtered.length === 1 ? filtered[0] : undefined);
+    if (target) onPick(target.serialUnitId);
+  }
+
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="serial-unit-modal" role="dialog" aria-modal="true" aria-labelledby="serial-unit-title">
@@ -3319,16 +3546,28 @@ function SerialUnitModal({
             <X size={20} />
           </button>
         </div>
-        <p className="modal-copy">Escolha a unidade fisica que sera adicionada ao carrinho.</p>
+        <p className="modal-copy">Digite ou bipe o serial (ou IMEI) da unidade que está com o cliente.</p>
+        {!loading && !error && units.length > 0 && (
+          <input
+            className="serial-search-input"
+            autoFocus
+            value={query}
+            placeholder={`Serial ou IMEI (${units.length} disponível(is))`}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={handleSearchKey}
+          />
+        )}
         {loading ? (
           <p className="empty-state">Buscando unidades disponiveis...</p>
         ) : error ? (
           <p className="notice">{error}</p>
         ) : units.length === 0 ? (
           <p className="empty-state">Nenhuma unidade disponivel em estoque nesta loja.</p>
+        ) : filtered.length === 0 ? (
+          <p className="notice">Serial "{query.trim()}" não existe entre as unidades disponíveis deste produto nesta loja.</p>
         ) : (
           <div className="serial-unit-list">
-            {units.map((unit) => (
+            {filtered.map((unit) => (
               <label className="serial-unit-option" key={unit.serialUnitId}>
                 <input
                   type="radio"

@@ -17,7 +17,13 @@ import ConfiguracoesView from './components/ConfiguracoesView';
 import ServicosView from './components/ServicosView';
 import ClientesView from './components/ClientesView';
 import UcpView from './components/UcpView';
-import { DEFAULT_MANAGER_PERMISSIONS, ErpArea, UserRole } from './types';
+import NetworkView from './components/NetworkView';
+import BalancoPanel from './components/BalancoPanel';
+import AttentionPanel, { AttentionDrawer } from './components/AttentionPanel';
+import AnnouncementsView, { ImportantAnnouncementModal } from './components/AnnouncementsView';
+import StoreGoalsCard from './components/StoreGoalsCard';
+import { useFranchiseeInsights } from './db/useFranchiseeInsights';
+import { DEFAULT_MANAGER_PERMISSIONS, ErpArea, UserRole, isNetworkRole } from './types';
 import { 
   LayoutDashboard, 
   Package, 
@@ -29,7 +35,9 @@ import {
   ArrowUpRight,
   Coins,
   Settings,
-  Users
+  Users,
+  ClipboardCheck,
+  Megaphone
 } from 'lucide-react';
 
 export default function App() {
@@ -74,13 +82,30 @@ export default function App() {
   } = useErpStore();
 
   // Active Main View Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'servicos' | 'clientes' | 'vendas' | 'financeiro' | 'admin' | 'configuracoes'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'balanco' | 'servicos' | 'clientes' | 'vendas' | 'financeiro' | 'admin' | 'configuracoes' | 'comunicados'>('dashboard');
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  const insights = useFranchiseeInsights(currentUser, products, inventory, sales, storeConfigs);
 
   if (!currentUser) {
     return <LoginScreen accessError={authProfileError} />;
   }
 
   const isPlatformAdmin = currentUser.role === UserRole.SUPER_ADMIN;
+
+  if (isNetworkRole(currentUser.role)) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
+        <Header
+          currentUser={currentUser}
+          onLogout={() => {
+            void supabase.auth.signOut();
+            setCurrentUser(null);
+          }}
+        />
+        <NetworkView currentUser={currentUser} />
+      </div>
+    );
+  }
 
   if (isPlatformAdmin) {
     return (
@@ -92,9 +117,7 @@ export default function App() {
             setCurrentUser(null);
           }}
         />
-        <main className="erp-workspace flex-1 w-full overflow-y-auto p-3 sm:p-4 lg:p-5">
-          <UcpView />
-        </main>
+        <UcpView />
       </div>
     );
   }
@@ -110,18 +133,21 @@ export default function App() {
   const navigationItems = [
     { id: 'dashboard', name: 'Relatórios Gerais', icon: LayoutDashboard },
     { id: 'estoque', name: 'Catálogo & Estoque', icon: Package },
+    { id: 'balanco', name: 'Balanço', icon: ClipboardCheck },
     { id: 'servicos', name: 'Serviços / OS', icon: Wrench },
     { id: 'clientes', name: 'Clientes', icon: Users },
     { id: 'vendas', name: 'Troca Gamer', icon: Coins },
     { id: 'financeiro', name: 'Livro Caixa & DRE', icon: DollarSign },
     { id: 'admin', name: 'Fornecedores', icon: FileSpreadsheet },
-    { id: 'configuracoes', name: 'Configurações', icon: Settings }
+    { id: 'configuracoes', name: 'Configurações', icon: Settings },
+    { id: 'comunicados', name: 'Comunicados', icon: Megaphone }
   ] as const;
 
   // Gerente de loja: so as areas liberadas pelo dono; Configuracoes so para o administrador.
   const AREA_BY_TAB: Partial<Record<(typeof navigationItems)[number]['id'], ErpArea>> = {
     dashboard: 'relatorios',
     estoque: 'estoque',
+    balanco: 'estoque',
     servicos: 'servicos',
     clientes: 'clientes',
     vendas: 'troca_gamer',
@@ -129,6 +155,8 @@ export default function App() {
     admin: 'fornecedores',
   };
   const canOpen = (id: (typeof navigationItems)[number]['id']) => {
+    // Comunicados da rede: so aparece quando a empresa recebeu algum.
+    if (id === 'comunicados') return insights.announcements.length > 0;
     if (currentUser.role === UserRole.ADMIN) return true;
     if (id === 'configuracoes') return false;
     const area = AREA_BY_TAB[id];
@@ -136,19 +164,34 @@ export default function App() {
     return Boolean(area && permissions[area]);
   };
   const allowedItems = navigationItems.filter(item => canOpen(item.id));
+  const attentionStoreName = (unitId: string) => storeConfigs.find(store => store.unitId === unitId)?.tradeName || unitId;
   // Aba sem permissao (ex.: link antigo): abre a primeira liberada.
   const tab = canOpen(activeTab) ? activeTab : (allowedItems[0]?.id ?? 'dashboard');
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans">
       {/* Top Header with Store & Account controls */}
-      <Header 
-        currentUser={currentUser} 
+      <Header
+        currentUser={currentUser}
         onLogout={() => {
           void supabase.auth.signOut();
           setCurrentUser(null);
         }}
+        alertCount={insights.alerts.length}
+        onAlertsClick={() => { setAttentionOpen(true); void insights.reloadAlerts(); }}
       />
+      {attentionOpen && (
+        <AttentionDrawer
+          alerts={insights.alerts}
+          loading={insights.alertsLoading}
+          storeName={attentionStoreName}
+          onNavigate={target => setActiveTab(target)}
+          onClose={() => setAttentionOpen(false)}
+        />
+      )}
+      {insights.pendingImportant && (
+        <ImportantAnnouncementModal announcement={insights.pendingImportant} onConfirmed={insights.reloadAnnouncements} />
+      )}
 
       <div className="flex-1 flex flex-col md:flex-row">
         {/* Sidebar Left Navigation Rail */}
@@ -191,6 +234,9 @@ export default function App() {
                 >
                   <IconComponent className="w-[18px] h-[18px] mr-3 shrink-0" />
                   <span>{item.name}</span>
+                  {item.id === 'comunicados' && insights.unreadAnnouncements > 0 && (
+                    <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">{insights.unreadAnnouncements}</span>
+                  )}
                 </button>
               );
             })}
@@ -205,6 +251,22 @@ export default function App() {
 
         {/* Main Content Workspace Container */}
         <main className="erp-workspace flex-1 p-3 sm:p-4 lg:p-5 w-full overflow-y-auto">
+          {tab === 'dashboard' && (
+            <div className="space-y-5 mb-5">
+              <AttentionPanel
+                alerts={insights.alerts}
+                loading={insights.alertsLoading}
+                storeName={attentionStoreName}
+                onNavigate={target => setActiveTab(target)}
+              />
+              <StoreGoalsCard />
+            </div>
+          )}
+
+          {tab === 'comunicados' && (
+            <AnnouncementsView announcements={insights.announcements} onRead={insights.reloadAnnouncements} />
+          )}
+
           {tab === 'dashboard' && (
             <DashboardView 
               currentUser={currentUser}
@@ -231,6 +293,17 @@ export default function App() {
               registerSerializedStockEntry={registerSerializedStockEntry}
               registerTransfer={registerTransfer}
               registerStockEntry={registerStockEntry}
+              productStoreCosts={productStoreCosts}
+              onStockChanged={loadAllFromSupabase}
+            />
+          )}
+
+          {tab === 'balanco' && (
+            <BalancoPanel
+              currentUser={currentUser}
+              products={products}
+              inventory={inventory}
+              storeConfigs={storeConfigs}
               productStoreCosts={productStoreCosts}
               onStockChanged={loadAllFromSupabase}
             />
@@ -279,6 +352,10 @@ export default function App() {
 
           {tab === 'admin' && (
             <AdminToolsView 
+              currentUser={currentUser}
+              products={products}
+              inventory={inventory}
+              storeConfigs={storeConfigs}
               suppliers={suppliers}
               addSupplier={addSupplier}
               editSupplier={editSupplier}

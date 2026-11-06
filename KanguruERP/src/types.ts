@@ -8,8 +8,14 @@ export enum UserRole {
   ADMIN = 'ADMIN',
   MANAGER = 'MANAGER',
   SELLER = 'SELLER',
-  OPERATOR = 'OPERATOR'
+  OPERATOR = 'OPERATOR',
+  // Painel da Rede (franqueadora): so leitura das franquias da rede.
+  NETWORK_OWNER = 'NETWORK_OWNER',
+  NETWORK_MANAGER = 'NETWORK_MANAGER'
 }
+
+export const isNetworkRole = (role: UserRole | string | undefined) =>
+  role === UserRole.NETWORK_OWNER || role === UserRole.NETWORK_MANAGER;
 
 export interface User {
   id: string;
@@ -22,6 +28,9 @@ export interface User {
   // Gerente de loja: areas liberadas e lojas que acessa (nulo = administrador, tudo).
   permissions?: ErpPermissions | null;
   storeIds?: string[] | null;
+  // Login da rede (franqueadora).
+  networkId?: string | null;
+  networkName?: string | null;
 }
 
 // Areas do ERP que o dono libera para cada gerente (Configuracoes fica sempre so com o dono).
@@ -77,6 +86,7 @@ export interface PdvOperator {
   name: string;
   permissions: PdvOperatorPermissions;
   isActive: boolean;
+  monthlyGoal?: number | null; // meta do mes em R$ (relatorio do PDV; migration 20261118)
   createdAt: string;
   updatedAt: string;
 }
@@ -163,6 +173,7 @@ export interface Product {
   sellPrice: number;
   ncm: string;
   warrantyMonths: number; // calculated warranty automatically from purchase date
+  warrantyDays?: number | null; // garantia em dias (vale no lugar dos meses); null = usa os meses
   isSerialized: boolean; // true for consoles, notebooks, motherboards, GPUs
   isUsed: boolean; // used vs new
   variations?: ProductVariation[];
@@ -201,6 +212,23 @@ export interface Service {
   category: string;
   sellPrice: number;
   isActive: boolean;
+  // NFS-e Nacional: codigo de tributacao nacional (6 digitos), NBS (9), codigo municipal e texto da nota.
+  nfseServiceCode?: string;
+  nfseNbsCode?: string;
+  nfseMunicipalCode?: string;
+  nfseDescription?: string;
+}
+
+export interface SaleServiceInvoice {
+  id: string;
+  saleId: string;
+  status: 'PENDENTE' | 'AUTORIZADA' | 'ERRO' | 'CANCELADA';
+  number: string | null;
+  danfseUrl: string | null;
+  xmlUrl: string | null;
+  message: string | null;
+  environment: string | null;
+  amount: number;
 }
 
 export interface StockQuantity {
@@ -492,12 +520,25 @@ export interface StoreConfig {
   workOrderDeliveryTerms?: string;
   instagram?: string; // perfil da loja (QR code do cupom)
   exchangeDays?: number; // prazo de troca em dias (2.9; padrao 7)
+  // NFS-e Nacional: inscricao municipal, municipio (IBGE) e opcao do Simples (1 nao optante, 2 MEI, 3 ME/EPP).
+  municipalRegistration?: string;
+  cityIbgeCode?: string;
+  simplesNacionalOption?: '1' | '2' | '3';
+  // Taxas do cartao em % (calculadora de juros do PDV): debito e credito de 1x a 12x.
+  cardFeeTable?: CardFeeTable | null;
+  // Diferenca de caixa (R$) a partir da qual o ERP mostra alerta (migration 20261118; padrao 10).
+  cashDifferenceAlert?: number;
   paymentFees: {
     DINHEIRO: number; // percentage (e.g. 0)
     PIX: number; // percentage (e.g. 0.005 = 0.5%)
     CREDITO: number; // percentage (e.g. 0.035 = 3.5%)
     DEBITO: number; // percentage (e.g. 0.019 = 1.9%)
   };
+}
+
+export interface CardFeeTable {
+  debito: number;
+  credito: number[]; // 12 valores: posicao 0 = 1x ... posicao 11 = 12x
 }
 
 export interface Supplier {

@@ -3,17 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { User, UserRole } from '../types';
-import { LayoutPanelTop, LogOut } from 'lucide-react';
+import { User, UserRole, isNetworkRole } from '../types';
+import { Bell, LayoutPanelTop, LogOut } from 'lucide-react';
 
 interface HeaderProps {
   currentUser: User;
   onLogout: () => void;
   isUcpActive?: boolean;
   onToggleUcp?: () => void;
+  // Sino "Precisa de atenção" (so no ERP do franqueado).
+  alertCount?: number;
+  onAlertsClick?: () => void;
 }
 
-export default function Header({ currentUser, onLogout, isUcpActive = false, onToggleUcp }: HeaderProps) {
+export default function Header({ currentUser, onLogout, isUcpActive = false, onToggleUcp, alertCount, onAlertsClick }: HeaderProps) {
+  // Nome ao lado da logo: UCP (plataforma), Redes (Painel da Rede) ou ERP.
+  const productName = currentUser.role === UserRole.SUPER_ADMIN ? 'UCP' : isNetworkRole(currentUser.role) ? 'Redes' : 'ERP';
   return (
     <header className="bg-white text-slate-800 border-b border-slate-200 shadow-sm sticky top-0 z-50">
       <div className="w-full px-3 sm:px-4">
@@ -22,12 +27,12 @@ export default function Header({ currentUser, onLogout, isUcpActive = false, onT
           <div className="flex items-center space-x-3">
             <img
               src="/kanguru-erp-logo.png"
-              alt="Kanguru ERP"
+              alt={`Kanguru ${productName}`}
               className="h-12 w-12 rounded-lg object-cover shadow-sm"
             />
             <div>
               <h1 className="text-xl font-bold tracking-tight text-slate-900 flex items-center">
-                Kanguru <span className="text-blue-600 ml-1">ERP</span>
+                Kanguru <span className="text-blue-600 ml-1">{productName}</span>
               </h1>
             </div>
           </div>
@@ -49,11 +54,27 @@ export default function Header({ currentUser, onLogout, isUcpActive = false, onT
                 {isUcpActive ? 'ERP' : 'UCP'}
               </button>
             )}
+            {onAlertsClick && (
+              <button
+                type="button"
+                onClick={onAlertsClick}
+                className="relative p-2.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100"
+                title={alertCount ? `${alertCount} item(ns) precisam de atenção` : 'Nada precisa de atenção'}
+                aria-label="Precisa de atenção"
+              >
+                <Bell className="w-5 h-5" />
+                {Boolean(alertCount) && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center">
+                    {alertCount! > 99 ? '99+' : alertCount}
+                  </span>
+                )}
+              </button>
+            )}
             <div className="flex items-center space-x-2 pl-2 border-l border-slate-200">
               <div className="text-right hidden sm:block">
                 <div className="text-sm font-bold text-slate-900">{currentUser.name}</div>
                 <div className="text-xs text-slate-400 font-medium leading-none">
-                  {currentUser.role === UserRole.SUPER_ADMIN ? 'Administração da Plataforma' : 'Gestor Comercial'}
+                  {currentUser.role === UserRole.SUPER_ADMIN ? 'Administração da Plataforma' : currentUser.role === UserRole.NETWORK_OWNER ? 'Dono da rede' : currentUser.role === UserRole.NETWORK_MANAGER ? 'Gerente da rede' : 'Gestor Comercial'}
                 </div>
               </div>
               <button

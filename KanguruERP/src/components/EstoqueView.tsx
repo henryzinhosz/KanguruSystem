@@ -22,7 +22,10 @@ import { supabaseService } from '../db/supabaseService';
 import { sanitizeItemCode } from '../db/itemCode';
 import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fiscal';
 import ValueInput from './ValueInput';
-import BalancoPanel from './BalancoPanel';
+import LabelPrintModal, { LabelRequest } from './LabelPrintModal';
+
+// Categorias de produto (lista da loja; 2026-11-06).
+const PRODUCT_CATEGORIES = ['Carregadores', 'Cabos', 'Adaptadores', 'Fones', 'Periféricos', 'Videogames', 'Geek', 'Peças', 'Computadores', 'Cards', 'Outros'];
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
 const DEFAULT_MIN_STOCK = 2;
@@ -58,8 +61,7 @@ import {
   Calendar,
   Layers,
   ArrowRight,
-  Pencil,
-  ClipboardCheck
+  Pencil
 } from 'lucide-react';
 
 interface EstoqueViewProps {
@@ -132,7 +134,7 @@ export default function EstoqueView({
   const [categoryFilter, setCategoryFilter] = useState('Todas');
   
   // UI Tabs inside Estoque
-  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'avariados' | 'balanco'>('catalogo');
+  const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'avariados'>('catalogo');
   // Avariados (2.9): produtos devolvidos com defeito, fora da venda.
   const [damaged, setDamaged] = useState<{ unitId: string; productId: string; quantity: number; serials: string[] }[] | null>(null);
   const [damagedError, setDamagedError] = useState('');
@@ -152,6 +154,7 @@ export default function EstoqueView({
   const [newProdSell, setNewProdSell] = useState(0);
   const [newProdNcm, setNewProdNcm] = useState('');
   const [newProdWarranty, setNewProdWarranty] = useState(12);
+  const [newProdWarrantyUnit, setNewProdWarrantyUnit] = useState<'dias' | 'meses'>('meses');
   const [newProdSerialized, setNewProdSerialized] = useState(false);
   const [newProdStore, setNewProdStore] = useState('');
   const [newProdQty, setNewProdQty] = useState(0);
@@ -169,7 +172,6 @@ export default function EstoqueView({
   const [maxDiscountDrafts, setMaxDiscountDrafts] = useState<Record<string, number | null>>({});
   const [newProdError, setNewProdError] = useState('');
   const [newProdSaving, setNewProdSaving] = useState(false);
-  const [nextItemCode, setNextItemCode] = useState('');
 
   // Form states: Stock Entry
   const [stockEntrySearch, setStockEntrySearch] = useState('');
@@ -264,11 +266,6 @@ export default function EstoqueView({
   useEffect(() => {
     if (!showAddProductModal) return;
     setNewProdError('');
-    let active = true;
-    supabaseService.getNextItemCode()
-      .then(code => { if (active) setNextItemCode(code); })
-      .catch(() => { if (active) setNextItemCode(''); });
-    return () => { active = false; };
   }, [showAddProductModal]);
 
   // Transferencia: busca por codigo ou nome (como no PDV). Enter com codigo exato, resultado unico
@@ -347,6 +344,7 @@ export default function EstoqueView({
     setNewProdSell(0);
     setNewProdNcm('');
     setNewProdWarranty(12);
+    setNewProdWarrantyUnit('meses');
     setNewProdSerialized(false);
     setNewProdStore(defaultStoreId);
     setNewProdQty(0);
@@ -376,7 +374,8 @@ export default function EstoqueView({
     setNewProdCost(product.costPrice);
     setNewProdSell(product.sellPrice);
     setNewProdNcm(product.ncm);
-    setNewProdWarranty(product.warrantyMonths);
+    setNewProdWarranty(product.warrantyDays ? product.warrantyDays : product.warrantyMonths);
+    setNewProdWarrantyUnit(product.warrantyDays ? 'dias' : 'meses');
     setNewProdSerialized(product.isSerialized);
     setNewProdMinStock(product.minStock == null ? '' : String(product.minStock));
     setNewProdMaxDiscount(product.maxDiscountPercent ?? null);
@@ -441,7 +440,8 @@ export default function EstoqueView({
           costPrice: newProdCost,
           sellPrice: newProdSell,
           ncm: trimmedNcm,
-          warrantyMonths: newProdWarranty,
+          warrantyMonths: newProdWarrantyUnit === 'meses' ? newProdWarranty : 0,
+          warrantyDays: newProdWarrantyUnit === 'dias' && newProdWarranty > 0 ? newProdWarranty : null,
           isSerialized: newProdSerialized,
           minStock: minStockValue,
           maxDiscountPercent: newProdMaxDiscount,
@@ -455,7 +455,8 @@ export default function EstoqueView({
       costPrice: newProdCost,
       sellPrice: newProdSell,
       ncm: trimmedNcm,
-      warrantyMonths: newProdWarranty,
+      warrantyMonths: newProdWarrantyUnit === 'meses' ? newProdWarranty : 0,
+      warrantyDays: newProdWarrantyUnit === 'dias' && newProdWarranty > 0 ? newProdWarranty : null,
       isSerialized: newProdSerialized,
       isUsed: false,
       minStock: minStockValue,
@@ -477,6 +478,7 @@ export default function EstoqueView({
     setNewProdSell(0);
     setNewProdNcm('');
     setNewProdWarranty(12);
+    setNewProdWarrantyUnit('meses');
     setNewProdSerialized(false);
     setNewProdStore(defaultStoreId);
     setNewProdQty(0);
@@ -532,6 +534,11 @@ export default function EstoqueView({
       try {
         await registerSerializedStockEntry(selectedStockEntryProduct.id, serializedEntryUnitId, units, movementReason);
         setStockEntrySuccess(`${units.length} unidade(s) serializada(s) registrada(s) para ${selectedStockEntryProduct.name}.`);
+        setLabelRequest({
+          title: `Imprimir ${units.length} etiqueta${units.length === 1 ? '' : 's'}?`,
+          product: selectedStockEntryProduct,
+          serials: units.map(unit => unit.serialNumber),
+        });
         setSerializedEntryUnits([emptySerializedDraft()]);
         setSerializedApplyAllCost('');
         setStockEntryReason('Reposição de estoque');
@@ -570,6 +577,12 @@ export default function EstoqueView({
         movementReason
       );
       setStockEntrySuccess(`Entrada registrada para ${selectedStockEntryProduct.name} em ${requestedEntries.length} loja(s), custo unitário ${formatMoney(unitCost)}.`);
+      const labelCount = requestedEntries.reduce((sum, entry) => sum + entry.qty, 0);
+      setLabelRequest({
+        title: `Imprimir ${labelCount} etiqueta${labelCount === 1 ? '' : 's'}?`,
+        product: selectedStockEntryProduct,
+        quantity: labelCount,
+      });
       setStockEntryQuantities(Object.fromEntries(stores.map(store => [store.unitId, ''])));
       setStockEntryUnitCost('');
       setStockEntryReason('Reposição de estoque');
@@ -579,6 +592,9 @@ export default function EstoqueView({
       setStockEntrySubmitting(false);
     }
   };
+
+  // Etiquetas: depois da entrada ("Imprimir N etiquetas?") e reimpressao pela lista.
+  const [labelRequest, setLabelRequest] = useState<LabelRequest | null>(null);
 
   // Edicao direto na lista: erro do banco aparece acima dos produtos.
   const [inlineError, setInlineError] = useState('');
@@ -752,18 +768,6 @@ export default function EstoqueView({
             <Package className="w-4 h-4 mr-1.5" />
             Avariados
           </button>
-          <button
-            id="tab-estoque-balanco"
-            onClick={() => setActiveSubTab('balanco')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
-              activeSubTab === 'balanco'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <ClipboardCheck className="w-4 h-4 mr-1.5" />
-            Balanço
-          </button>
         </div>
 
         {activeSubTab === 'catalogo' && (
@@ -794,8 +798,8 @@ export default function EstoqueView({
                 className="w-full bg-slate-50 text-slate-800 text-xs rounded-lg pl-9 pr-4 py-2.5 border border-slate-200 outline-none focus:ring-1 focus:ring-blue-500 font-semibold"
               />
             </div>
-            <div className="flex gap-2">
-              {['Todas', 'Videogames', 'Peças', 'Cards', 'Computadores'].map(cat => (
+            <div className="flex gap-2 flex-wrap">
+              {['Todas', ...PRODUCT_CATEGORIES.filter(category => products.some(product => product.category === category))].map(cat => (
                 <button
                   key={cat}
                   onClick={() => setCategoryFilter(cat)}
@@ -812,8 +816,8 @@ export default function EstoqueView({
           </div>
 
           {inlineError && <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{inlineError}</p>}
-          {/* Grid Catalog Display */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* Lista do catalogo: um produto por linha */}
+          <div className="grid grid-cols-1 gap-5 bg-slate-200/60 p-4 rounded-2xl">
             {filteredProducts.map(p => {
               const prodInv = inventory.find(i => i.productId === p.id);
               
@@ -830,9 +834,9 @@ export default function EstoqueView({
               return (
                 <div key={p.id} className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden flex flex-col justify-between">
                   <div className="p-5 space-y-4">
-                    {/* Catalog Details */}
-                    <div className="flex justify-between items-start">
-                      <div>
+                    {/* Esquerda: dados e preco; direita: estoque por loja */}
+                    <div className="flex flex-col md:flex-row md:items-start gap-4">
+                      <div className="md:w-2/5 min-w-0">
                         <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded uppercase font-mono">
                           {p.category}
                         </span>
@@ -852,11 +856,13 @@ export default function EstoqueView({
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
                           )}
+                          <button type="button" onClick={() => setLabelRequest({ title: 'Imprimir etiquetas', product: p })} title="Imprimir etiquetas" aria-label={`Imprimir etiquetas de ${p.name}`} className="p-1 text-slate-500 rounded hover:bg-slate-100">
+                            <Tag className="w-3.5 h-3.5" />
+                          </button>
                           {(!p.ncm || !p.icmsOrigin || !(p.csosn || p.icmsCst)) && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100" title="Sem os dados fiscais a NFC-e é recusada: edite o produto">DADOS FISCAIS PENDENTES</span>}
                         </h3>
                         <p className="text-xs text-slate-400 font-mono mt-0.5">Código: {p.sku}</p>
-                      </div>
-                      <div className="text-right">
+                        <div className="mt-3">
                         <span className="text-[10px] text-slate-400 font-mono block">Preço de Venda</span>
                         <span className="text-base font-black text-slate-900 font-mono">
                           R$ {p.sellPrice.toLocaleString('pt-BR')}
@@ -866,11 +872,11 @@ export default function EstoqueView({
                             Custo padrão: {formatMoney(p.costPrice)}
                           </span>
                         )}
+                        </div>
                       </div>
-                    </div>
 
                     {/* Stock levels by physical units */}
-                    <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-100/80 space-y-2">
+                    <div className="flex-1 min-w-0 bg-slate-50 p-3.5 rounded-lg border border-slate-100/80 space-y-2">
                       <h4 className="text-[10px] text-slate-400 font-bold uppercase tracking-wider font-sans mb-1">
                         Estoque por Unidade
                       </h4>
@@ -882,7 +888,7 @@ export default function EstoqueView({
                           return (
                             <div key={unit.id} className="flex justify-between items-center p-1 bg-white rounded border border-slate-200/50">
                               <div className="min-w-0">
-                                <span className="text-slate-600 truncate max-w-[100px] font-medium text-[11px] block">
+                                <span className="text-slate-600 truncate font-medium text-[11px] block">
                                   {unit.name.split(' - ')[0]}
                                 </span>
                                 {isAdmin && (
@@ -909,6 +915,7 @@ export default function EstoqueView({
                           );
                         })}
                       </div>
+                    </div>
                     </div>
 
                     {/* Serialization or Conditions metadata */}
@@ -961,7 +968,7 @@ export default function EstoqueView({
                         ) : (
                           <span className="font-mono text-slate-400">Desc. máx.: {p.maxDiscountPercent != null ? `${p.maxDiscountPercent}%` : 'padrão da loja'}</span>
                         )}
-                        <span className="font-mono text-slate-400">Garantia: {p.warrantyMonths}m</span>
+                        <span className="font-mono text-slate-400">Garantia: {p.warrantyDays ? `${p.warrantyDays}d` : `${p.warrantyMonths}m`}</span>
                       </div>
                     </div>
                   </div>
@@ -1560,16 +1567,6 @@ export default function EstoqueView({
       )}
 
       {/* 3. VIEW: Avariados */}
-      {activeSubTab === 'balanco' && (
-        <BalancoPanel
-          currentUser={currentUser}
-          products={products}
-          inventory={inventory}
-          storeConfigs={storeConfigs}
-          productStoreCosts={productStoreCosts}
-          onStockChanged={onStockChanged}
-        />
-      )}
 
       {activeSubTab === 'avariados' && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
@@ -1629,12 +1626,12 @@ export default function EstoqueView({
                   <label className="font-bold text-slate-700">Código do Produto</label>
                   <input
                     type="text"
-                    placeholder={nextItemCode ? `Automático: ${nextItemCode}` : 'Automático'}
+                    placeholder="Automático (gerado ao salvar)"
                     value={newProdSku}
                     onChange={(e) => setNewProdSku(sanitizeItemCode(e.target.value))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                   />
-                  <p className="text-[10px] text-slate-400">Deixe em branco para gerar o próximo número. Só letras, números e hífen.</p>
+                  <p className="text-[10px] text-slate-400">Deixe em branco para o sistema gerar um código (6 ou 7 números, começando com 7 ou 9). Só letras, números e hífen.</p>
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Categoria</label>
@@ -1643,11 +1640,8 @@ export default function EstoqueView({
                     onChange={(e) => setNewProdCategory(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
                   >
-                    <option value="Videogames">Videogames</option>
-                    <option value="Peças">Peças de PC</option>
-                    <option value="Cards">Cards Colecionáveis</option>
-                    <option value="Computadores">Computadores Prontos</option>
-                    <option value="Outros">Outros</option>
+                    {PRODUCT_CATEGORIES.map(category => <option key={category} value={category}>{category}</option>)}
+                    {!PRODUCT_CATEGORIES.includes(newProdCategory) && <option value={newProdCategory}>{newProdCategory}</option>}
                   </select>
                 </div>
               </div>
@@ -1727,15 +1721,25 @@ export default function EstoqueView({
                 <p className="text-[10px] text-slate-400">Desconto máximo que o vendedor pode dar no PDV sem a senha administrativa.</p>
               </div>
 
-              <div className="space-y-1 max-w-[200px]">
-                <label className="font-bold text-slate-700">Garantia (meses)</label>
-                <ValueInput
-                  decimals={0}
-                  value={newProdWarranty || null}
-                  placeholder="0 = sem garantia"
-                  onValueChange={(value) => setNewProdWarranty(value ?? 0)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
-                />
+              <div className="space-y-1 max-w-[280px]">
+                <label className="font-bold text-slate-700">Garantia</label>
+                <div className="flex gap-2">
+                  <ValueInput
+                    decimals={0}
+                    value={newProdWarranty || null}
+                    placeholder="0 = sem garantia"
+                    onValueChange={(value) => setNewProdWarranty(value ?? 0)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
+                  />
+                  <select
+                    value={newProdWarrantyUnit}
+                    onChange={(e) => setNewProdWarrantyUnit(e.target.value as 'dias' | 'meses')}
+                    className="bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none"
+                  >
+                    <option value="dias">dias</option>
+                    <option value="meses">meses</option>
+                  </select>
+                </div>
               </div>
 
               <fieldset className="border border-slate-200 rounded-lg p-3 space-y-3">
@@ -1824,6 +1828,9 @@ export default function EstoqueView({
             </form>
           </div>
         </div>
+      )}
+      {labelRequest && (
+        <LabelPrintModal request={labelRequest} storeConfigs={storeConfigs} onClose={() => setLabelRequest(null)} />
       )}
     </div>
   );

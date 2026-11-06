@@ -12,6 +12,7 @@ import {
   TradeIn, 
   WorkOrder, 
   WorkOrderStatus,
+  SaleServiceInvoice,
   ErpPermissions,
   TenantUser,
   StockCount,
@@ -71,6 +72,7 @@ function mapPdvOperator(operator: any): PdvOperator {
     name: operator.name,
     permissions: { ...defaultPdvOperatorPermissions, ...(operator.permissions || {}) },
     isActive: operator.is_active,
+    monthlyGoal: operator.monthly_goal === undefined ? undefined : operator.monthly_goal === null ? null : Number(operator.monthly_goal),
     createdAt: operator.created_at,
     updatedAt: operator.updated_at
   };
@@ -1080,6 +1082,8 @@ export const supabaseService = {
       sellPrice: Number(p.sell_price),
       ncm: p.ncm || '',
       warrantyMonths: p.warranty_months || 0,
+      // undefined = banco ainda sem a coluna (migration 20261121): nao envia no upsert.
+      warrantyDays: p.warranty_days === undefined ? undefined : (p.warranty_days ?? null),
       isSerialized: p.is_serialized,
       isUsed: p.is_used,
       variations: p.variations || undefined,
@@ -1122,7 +1126,8 @@ export const supabaseService = {
       csosn: p.csosn || null,
       icms_rate: p.icmsRate ?? null,
       icms_reduction: p.icmsReduction ?? null,
-      tax_burden_percent: p.taxBurdenPercent ?? null
+      tax_burden_percent: p.taxBurdenPercent ?? null,
+      ...(p.warrantyDays !== undefined ? { warranty_days: p.warrantyDays && p.warrantyDays > 0 ? p.warrantyDays : null } : {})
     };
 
     const { data, error } = await supabase
@@ -1156,7 +1161,11 @@ export const supabaseService = {
       name: service.name,
       category: service.category,
       sellPrice: Number(service.sell_price),
-      isActive: service.is_active
+      isActive: service.is_active,
+      nfseServiceCode: service.nfse_service_code ?? undefined,
+      nfseNbsCode: service.nfse_nbs_code ?? undefined,
+      nfseMunicipalCode: service.nfse_municipal_code ?? undefined,
+      nfseDescription: service.nfse_description ?? undefined
     }));
   },
 
@@ -1167,7 +1176,14 @@ export const supabaseService = {
       name: service.name.trim(),
       category: service.category.trim(),
       sell_price: service.sellPrice,
-      is_active: service.isActive
+      is_active: service.isActive,
+      // Dados da NFS-e (migration 20261113): so envia quando a tela trabalhou com eles.
+      ...(service.nfseServiceCode !== undefined ? {
+        nfse_service_code: service.nfseServiceCode.replace(/\D/g, '') || null,
+        nfse_nbs_code: (service.nfseNbsCode || '').replace(/\D/g, '') || null,
+        nfse_municipal_code: (service.nfseMunicipalCode || '').trim() || null,
+        nfse_description: (service.nfseDescription || '').trim() || null
+      } : {})
     }).select('sku').single();
     if (error) throw error;
     return data.sku;
@@ -1536,6 +1552,18 @@ export const supabaseService = {
     return Number((data as any)?.adjustedProducts ?? 0);
   },
 
+  // Seriais em estoque de um produto (todas as lojas que o usuario enxerga), para reimprimir etiquetas.
+  async getProductSerials(productId: string): Promise<{ serial: string; unitId: string; status: string }[]> {
+    const { data, error } = await supabase
+      .from('product_serial_units')
+      .select('serial_number, unit_id, status')
+      .eq('product_id', productId)
+      .in('status', ['DISPONIVEL', 'RESERVADO'])
+      .order('serial_number');
+    if (error) throw error;
+    return (data || []).map((row: any) => ({ serial: String(row.serial_number), unitId: row.unit_id, status: row.status }));
+  },
+
   // Seriais em estoque numa loja (para reconhecer o serial bipado no balanco).
   async getStoreSerials(unitId: string): Promise<{ productId: string; serial: string; status: string }[]> {
     const { data, error } = await supabase
@@ -1591,6 +1619,54 @@ export const supabaseService = {
       configured: Boolean(row.configured),
       environment: row.environment ?? null
     }));
+  },
+
+  // NFS-e dos servicos das vendas visiveis (RLS por loja). Antes da migration 20261113: lista vazia.
+  async listSaleServiceInvoices(): Promise<SaleServiceInvoice[]> {
+    const { data, error } = await supabase
+      .from('sale_service_invoices')
+      .select('id, sale_id, status, number, danfse_url, xml_url, message, environment, amount')
+      .order('created_at', { ascending: false })
+      .limit(5000);
+    if (error) return [];
+    return (data || []).map(row => ({
+      id: row.id,
+      saleId: row.sale_id,
+      status: row.status,
+      number: row.number,
+      danfseUrl: row.danfse_url,
+      xmlUrl: row.xml_url,
+      message: row.message,
+      environment: row.environment,
+      amount: Number(row.amount)
+    }));
+  },
+
+  // Contato do franqueado (migration 20261114): le qualquer usuario da empresa, salva so o dono.
+  async getTenantContact(): Promise<{ ownerName: string | null; ownerPhone: string | null; ownerEmail: string | null } | null> {
+    const { data, error } = await supabase.rpc('get_my_tenant_contact');
+    if (error) throw error;
+    return data;
+  },
+
+  async saveTenantContact(contact: { ownerName: string; ownerPhone: string; ownerEmail: string }): Promise<void> {
+    const { error } = await supabase.rpc('save_my_tenant_contact', {
+      p_owner_name: contact.ownerName,
+      p_owner_phone: contact.ownerPhone,
+      p_owner_email: contact.ownerEmail
+    });
+    if (error) throw error;
+  },
+
+  // Cancela as NFS-e autorizadas da venda (prazo da prefeitura). Lanca o motivo se recusado.
+  async cancelSaleNfse(saleId: string, justification: string): Promise<void> {
+    const { data, error } = await supabase.functions.invoke('nfse-cancel', { body: { saleId, justification } });
+    if (error) {
+      const context = (error as { context?: Response }).context;
+      const body = context && typeof context.json === 'function' ? await context.json().catch(() => null) : null;
+      throw new Error(body?.error || 'Não foi possível cancelar a NFS-e.');
+    }
+    if (data?.status !== 'CANCELADA' && data?.status !== 'SEM_NFSE') throw new Error(data?.error || 'Não foi possível cancelar a NFS-e.');
   },
 
   // Cancela a NFC-e na Sefaz (ate 30 min depois da autorizacao). Lanca o motivo se recusado.
@@ -1814,6 +1890,11 @@ export const supabaseService = {
       fixedCost: Number(c.fixed_cost),
       maxItemDiscountPercent: Number(c.max_item_discount_percent ?? 0),
       paymentFees: c.payment_fees,
+      cardFeeTable: c.card_fee_table ?? null,
+      cashDifferenceAlert: c.cash_difference_alert === undefined ? undefined : Number(c.cash_difference_alert),
+      municipalRegistration: c.municipal_registration ?? undefined,
+      cityIbgeCode: c.city_ibge_code ?? undefined,
+      simplesNacionalOption: c.simples_nacional_option ?? undefined,
       tradeName: c.trade_name || undefined,
       legalName: c.legal_name || undefined,
       cnpj: c.cnpj || undefined,
@@ -1848,7 +1929,14 @@ export const supabaseService = {
       work_order_terms: c.workOrderTerms?.trim() || null,
       work_order_delivery_terms: c.workOrderDeliveryTerms?.trim() || null,
       instagram: c.instagram?.trim() || null,
-      ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {})
+      ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {}),
+      // Antes da migration 20261111 a coluna nao existe: so envia quando foi lida do banco.
+      ...(c.cardFeeTable !== undefined ? { card_fee_table: c.cardFeeTable } : {}),
+      ...(c.cashDifferenceAlert !== undefined ? { cash_difference_alert: Math.max(0, c.cashDifferenceAlert) } : {}),
+      // NFS-e (migration 20261113): so envia quando a coluna ja foi lida ou a tela preencheu.
+      ...(c.municipalRegistration !== undefined ? { municipal_registration: c.municipalRegistration.trim() || null } : {}),
+      ...(c.cityIbgeCode !== undefined ? { city_ibge_code: c.cityIbgeCode.replace(/\D/g, '') || null } : {}),
+      ...(c.simplesNacionalOption !== undefined ? { simples_nacional_option: c.simplesNacionalOption } : {})
     };
 
     const { error } = await supabase.from('store_configs').upsert(payload);
@@ -1883,7 +1971,9 @@ export const supabaseService = {
         code: operator.code,
         name: operator.name,
         permissions: operator.permissions,
-        is_active: operator.isActive
+        is_active: operator.isActive,
+        // Antes da migration 20261118 a coluna nao existe: so envia quando a tela preencheu.
+        ...(operator.monthlyGoal !== undefined ? { monthly_goal: operator.monthlyGoal } : {})
       })
       .select()
       .single();

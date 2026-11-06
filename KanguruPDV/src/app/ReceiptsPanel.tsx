@@ -1,12 +1,14 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Printer, RotateCcw, Search, Send } from 'lucide-react';
+import { FileText, Printer, RotateCcw, Search, Send } from 'lucide-react';
 import { searchPosSales, type NfceStatus, type PosSaleSummary } from '../services/supabase/sales';
+import { getSaleServiceInvoices, type SaleFiscalKinds, type SaleServiceInvoice } from '../services/supabase/nfse';
 import { formatCpf } from './reservationVoucher';
 import { maskCpf } from './cpf';
 import { formatReceiptNumber } from './receiptPrint';
 
 // Reimpressao de cupons (2.8b): busca por data, numero (cupom ou NFC-e) ou CPF.
-// NFC-e com erro ou pendente pode ser emitida de novo daqui.
+// NFC-e com erro ou pendente pode ser emitida de novo daqui; NFS-e dos servicos tambem
+// (e o DANFSe reimpresso).
 
 type SearchMode = 'date' | 'number' | 'cpf';
 
@@ -30,9 +32,14 @@ interface ReceiptsPanelProps {
   onReprint: (saleId: string) => Promise<void>;
   onEmitNfce: (saleId: string) => Promise<void>;
   onReturn: (saleId: string) => void;
+  nfseReady: boolean;
+  onEmitNfse: (saleId: string) => Promise<void>;
+  onPrintDanfse: (invoiceId: string) => Promise<void>;
 }
 
-export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce, onReturn }: ReceiptsPanelProps) {
+export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce, onReturn, nfseReady, onEmitNfse, onPrintDanfse }: ReceiptsPanelProps) {
+  const [kinds, setKinds] = useState<Record<string, SaleFiscalKinds>>({});
+  const [serviceInvoices, setServiceInvoices] = useState<SaleServiceInvoice[]>([]);
   const [mode, setMode] = useState<SearchMode>('date');
   const [value, setValue] = useState(todayValue);
   const [results, setResults] = useState<PosSaleSummary[]>([]);
@@ -45,10 +52,15 @@ export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce, onR
     setSearching(true);
     setError(null);
     try {
-      setResults(await searchPosSales(
+      const found = await searchPosSales(
         mode === 'date' ? { date: value } : mode === 'number' ? { number: value } : { cpf: value }
-      ));
+      );
+      setResults(found);
       setSearched(true);
+      // NFS-e e tipos de item (antes da migration 20261113 a consulta falha em silencio).
+      const fiscal = await getSaleServiceInvoices(found.map((sale) => sale.saleId)).catch(() => ({ sales: [], invoices: [] }));
+      setKinds(Object.fromEntries(fiscal.sales.map((entry) => [entry.saleId, entry])));
+      setServiceInvoices(fiscal.invoices);
     } catch {
       setError('Não foi possível buscar as vendas. Confira a conexão e tente de novo.');
     } finally {
@@ -112,8 +124,12 @@ export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce, onR
       <div className="receipts-list">
         {results.map((sale) => {
           const date = new Date(sale.timestamp);
-          const canEmit = nfceConfigured && sale.status === 'CONCLUIDA'
+          const saleKinds = kinds[sale.saleId];
+          const canEmit = nfceConfigured && sale.status === 'CONCLUIDA' && saleKinds?.hasProducts !== false
             && sale.fiscalStatus !== 'AUTORIZADA' && sale.fiscalStatus !== 'CANCELADA';
+          const invoices = serviceInvoices.filter((invoice) => invoice.saleId === sale.saleId);
+          const canEmitNfse = nfseReady && sale.status === 'CONCLUIDA' && saleKinds?.hasServices === true
+            && !(invoices.length > 0 && invoices.every((invoice) => invoice.status === 'AUTORIZADA' || invoice.status === 'CANCELADA'));
           return (
             <article className="receipt-card" key={sale.saleId}>
               <div>
@@ -134,11 +150,19 @@ export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce, onR
                   {sale.nfceContingency && sale.fiscalStatus === 'AUTORIZADA' ? (
                     <span className="receipt-tag nfce-pendente" title="Emitida com a Sefaz fora do ar; aguardando a Sefaz efetivar (até 24 h)">em contingência</span>
                   ) : null}
-                  {sale.fiscalStatus ? null : (
+                  {sale.fiscalStatus || invoices.length ? null : (
                     <span className="receipt-tag">Não fiscal</span>
                   )}
+                  {invoices.map((invoice) => (
+                    <span key={invoice.id} className={`receipt-tag nfce-${invoice.status.toLowerCase()}`} title={invoice.message ?? invoice.description}>
+                      NFS-e {invoice.number ? `nº ${invoice.number} ` : ''}{NFCE_LABELS[invoice.status]}
+                    </span>
+                  ))}
                 </span>
                 {sale.fiscalStatus === 'ERRO' && sale.nfceMessage && <small className="field-error">{sale.nfceMessage}</small>}
+                {invoices.filter((invoice) => invoice.status === 'ERRO' && invoice.message).map((invoice) => (
+                  <small key={invoice.id} className="field-error">NFS-e: {invoice.message}</small>
+                ))}
               </div>
               <div className="receipt-actions">
                 {canEmit && (
@@ -146,6 +170,16 @@ export function ReceiptsPanel({ nfceConfigured, busy, onReprint, onEmitNfce, onR
                     <Send size={16} /> Emitir NFC-e
                   </button>
                 )}
+                {canEmitNfse && (
+                  <button className="reservation-nav" type="button" disabled={busy} onClick={() => void onEmitNfse(sale.saleId).then(runSearch)}>
+                    <Send size={16} /> {invoices.some((invoice) => invoice.status === 'PENDENTE') ? 'Consultar NFS-e' : 'Emitir NFS-e'}
+                  </button>
+                )}
+                {invoices.filter((invoice) => invoice.status === 'AUTORIZADA').map((invoice) => (
+                  <button key={invoice.id} className="reservation-nav" type="button" disabled={busy} onClick={() => void onPrintDanfse(invoice.id)}>
+                    <FileText size={16} /> DANFSe{invoice.number ? ` nº ${invoice.number}` : ''}
+                  </button>
+                ))}
                 {sale.status === 'CONCLUIDA' && (
                   <button className="reservation-nav" type="button" disabled={busy} onClick={() => onReturn(sale.saleId)}>
                     <RotateCcw size={16} /> Trocar / Devolver
