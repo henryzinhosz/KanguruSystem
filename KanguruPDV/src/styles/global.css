@@ -2006,3 +2006,15 @@ small {
   background: #fdecea;
   color: #a5281b;
 }
+
+/* Busca do serial no seletor de unidade */
+.serial-search-input {
+  width: 100%;
+  margin-top: 0.6rem;
+  font-size: 1.05rem;
+}
+
+.serial-unit-modal .serial-unit-list {
+  max-height: 46vh;
+  overflow-y: auto;
+}

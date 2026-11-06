@@ -1549,6 +1549,18 @@ export const supabaseService = {
     return Number((data as any)?.adjustedProducts ?? 0);
   },
 
+  // Seriais em estoque de um produto (todas as lojas que o usuario enxerga), para reimprimir etiquetas.
+  async getProductSerials(productId: string): Promise<{ serial: string; unitId: string; status: string }[]> {
+    const { data, error } = await supabase
+      .from('product_serial_units')
+      .select('serial_number, unit_id, status')
+      .eq('product_id', productId)
+      .in('status', ['DISPONIVEL', 'RESERVADO'])
+      .order('serial_number');
+    if (error) throw error;
+    return (data || []).map((row: any) => ({ serial: String(row.serial_number), unitId: row.unit_id, status: row.status }));
+  },
+
   // Seriais em estoque numa loja (para reconhecer o serial bipado no balanco).
   async getStoreSerials(unitId: string): Promise<{ productId: string; serial: string; status: string }[]> {
     const { data, error } = await supabase

@@ -22,6 +22,7 @@ import { supabaseService } from '../db/supabaseService';
 import { sanitizeItemCode } from '../db/itemCode';
 import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fiscal';
 import ValueInput from './ValueInput';
+import LabelPrintModal, { LabelRequest } from './LabelPrintModal';
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
 const DEFAULT_MIN_STOCK = 2;
@@ -167,7 +168,6 @@ export default function EstoqueView({
   const [maxDiscountDrafts, setMaxDiscountDrafts] = useState<Record<string, number | null>>({});
   const [newProdError, setNewProdError] = useState('');
   const [newProdSaving, setNewProdSaving] = useState(false);
-  const [nextItemCode, setNextItemCode] = useState('');
 
   // Form states: Stock Entry
   const [stockEntrySearch, setStockEntrySearch] = useState('');
@@ -262,11 +262,6 @@ export default function EstoqueView({
   useEffect(() => {
     if (!showAddProductModal) return;
     setNewProdError('');
-    let active = true;
-    supabaseService.getNextItemCode()
-      .then(code => { if (active) setNextItemCode(code); })
-      .catch(() => { if (active) setNextItemCode(''); });
-    return () => { active = false; };
   }, [showAddProductModal]);
 
   // Transferencia: busca por codigo ou nome (como no PDV). Enter com codigo exato, resultado unico
@@ -530,6 +525,11 @@ export default function EstoqueView({
       try {
         await registerSerializedStockEntry(selectedStockEntryProduct.id, serializedEntryUnitId, units, movementReason);
         setStockEntrySuccess(`${units.length} unidade(s) serializada(s) registrada(s) para ${selectedStockEntryProduct.name}.`);
+        setLabelRequest({
+          title: `Imprimir ${units.length} etiqueta${units.length === 1 ? '' : 's'}?`,
+          product: selectedStockEntryProduct,
+          serials: units.map(unit => unit.serialNumber),
+        });
         setSerializedEntryUnits([emptySerializedDraft()]);
         setSerializedApplyAllCost('');
         setStockEntryReason('Reposição de estoque');
@@ -568,6 +568,12 @@ export default function EstoqueView({
         movementReason
       );
       setStockEntrySuccess(`Entrada registrada para ${selectedStockEntryProduct.name} em ${requestedEntries.length} loja(s), custo unitário ${formatMoney(unitCost)}.`);
+      const labelCount = requestedEntries.reduce((sum, entry) => sum + entry.qty, 0);
+      setLabelRequest({
+        title: `Imprimir ${labelCount} etiqueta${labelCount === 1 ? '' : 's'}?`,
+        product: selectedStockEntryProduct,
+        quantity: labelCount,
+      });
       setStockEntryQuantities(Object.fromEntries(stores.map(store => [store.unitId, ''])));
       setStockEntryUnitCost('');
       setStockEntryReason('Reposição de estoque');
@@ -577,6 +583,9 @@ export default function EstoqueView({
       setStockEntrySubmitting(false);
     }
   };
+
+  // Etiquetas: depois da entrada ("Imprimir N etiquetas?") e reimpressao pela lista.
+  const [labelRequest, setLabelRequest] = useState<LabelRequest | null>(null);
 
   // Edicao direto na lista: erro do banco aparece acima dos produtos.
   const [inlineError, setInlineError] = useState('');
@@ -838,6 +847,9 @@ export default function EstoqueView({
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
                           )}
+                          <button type="button" onClick={() => setLabelRequest({ title: 'Imprimir etiquetas', product: p })} title="Imprimir etiquetas" aria-label={`Imprimir etiquetas de ${p.name}`} className="p-1 text-slate-500 rounded hover:bg-slate-100">
+                            <Tag className="w-3.5 h-3.5" />
+                          </button>
                           {(!p.ncm || !p.icmsOrigin || !(p.csosn || p.icmsCst)) && <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-100" title="Sem os dados fiscais a NFC-e é recusada: edite o produto">DADOS FISCAIS PENDENTES</span>}
                         </h3>
                         <p className="text-xs text-slate-400 font-mono mt-0.5">Código: {p.sku}</p>
@@ -1605,12 +1617,12 @@ export default function EstoqueView({
                   <label className="font-bold text-slate-700">Código do Produto</label>
                   <input
                     type="text"
-                    placeholder={nextItemCode ? `Automático: ${nextItemCode}` : 'Automático'}
+                    placeholder="Automático (gerado ao salvar)"
                     value={newProdSku}
                     onChange={(e) => setNewProdSku(sanitizeItemCode(e.target.value))}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                   />
-                  <p className="text-[10px] text-slate-400">Deixe em branco para gerar o próximo número. Só letras, números e hífen.</p>
+                  <p className="text-[10px] text-slate-400">Deixe em branco para o sistema gerar um código (6 ou 7 números, começando com 7 ou 9). Só letras, números e hífen.</p>
                 </div>
                 <div className="space-y-1">
                   <label className="font-bold text-slate-700">Categoria</label>
@@ -1800,6 +1812,9 @@ export default function EstoqueView({
             </form>
           </div>
         </div>
+      )}
+      {labelRequest && (
+        <LabelPrintModal request={labelRequest} storeConfigs={storeConfigs} onClose={() => setLabelRequest(null)} />
       )}
     </div>
   );

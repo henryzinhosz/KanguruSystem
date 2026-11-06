@@ -1,4 +1,4 @@
-﻿import { FormEvent, useEffect, useRef, useState } from 'react';
+﻿import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft,
   CircleAlert,
@@ -926,9 +926,9 @@ export function App() {
       : `Unidade ${serialUnit.serialNumber} adicionada ao carrinho.`);
   }
 
-  function addSelectedSerialUnit() {
-    if (!serialProduct || !selectedSerialUnitId) return;
-    const serialUnit = serialUnits.find((unit) => unit.serialUnitId === selectedSerialUnitId);
+  function addSelectedSerialUnit(unitId: string | null = selectedSerialUnitId) {
+    if (!serialProduct || !unitId) return;
+    const serialUnit = serialUnits.find((unit) => unit.serialUnitId === unitId);
     if (!serialUnit) return;
 
     addSerialUnitToCart(serialProduct, serialUnit);
@@ -2915,7 +2915,8 @@ export function App() {
           error={serialUnitsError}
           onSelect={setSelectedSerialUnitId}
           onClose={closeSerialUnitModal}
-          onConfirm={addSelectedSerialUnit}
+          onConfirm={() => addSelectedSerialUnit()}
+          onPick={(unitId) => addSelectedSerialUnit(unitId)}
         />
       )}
       {adminApprovalOpen && (
@@ -3494,7 +3495,11 @@ interface SerialUnitModalProps {
   onSelect: (serialUnitId: string) => void;
   onClose: () => void;
   onConfirm: () => void;
+  onPick: (serialUnitId: string) => void;
 }
+
+// Busca do serial: so letras e numeros, sem diferenciar maiusculas (o leitor pode mandar hifen/espaco).
+const serialKey = (value: string | null | undefined) => (value ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
 function SerialUnitModal({
   product,
@@ -3505,7 +3510,25 @@ function SerialUnitModal({
   onSelect,
   onClose,
   onConfirm,
+  onPick,
 }: SerialUnitModalProps) {
+  const [query, setQuery] = useState('');
+  const key = serialKey(query);
+  const filtered = key
+    ? units.filter((unit) => serialKey(unit.serialNumber).includes(key) || serialKey(unit.imei).includes(key))
+    : units;
+  const exact = key
+    ? units.find((unit) => serialKey(unit.serialNumber) === key || serialKey(unit.imei) === key)
+    : undefined;
+
+  // Enter (ou o leitor, que digita e aperta Enter): serial exato ou um unico resultado vai direto ao carrinho.
+  function handleSearchKey(event: ReactKeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const target = exact ?? (filtered.length === 1 ? filtered[0] : undefined);
+    if (target) onPick(target.serialUnitId);
+  }
+
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="serial-unit-modal" role="dialog" aria-modal="true" aria-labelledby="serial-unit-title">
@@ -3518,16 +3541,28 @@ function SerialUnitModal({
             <X size={20} />
           </button>
         </div>
-        <p className="modal-copy">Escolha a unidade fisica que sera adicionada ao carrinho.</p>
+        <p className="modal-copy">Digite ou bipe o serial (ou IMEI) da unidade que está com o cliente.</p>
+        {!loading && !error && units.length > 0 && (
+          <input
+            className="serial-search-input"
+            autoFocus
+            value={query}
+            placeholder={`Serial ou IMEI (${units.length} disponível(is))`}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={handleSearchKey}
+          />
+        )}
         {loading ? (
           <p className="empty-state">Buscando unidades disponiveis...</p>
         ) : error ? (
           <p className="notice">{error}</p>
         ) : units.length === 0 ? (
           <p className="empty-state">Nenhuma unidade disponivel em estoque nesta loja.</p>
+        ) : filtered.length === 0 ? (
+          <p className="notice">Serial "{query.trim()}" não existe entre as unidades disponíveis deste produto nesta loja.</p>
         ) : (
           <div className="serial-unit-list">
-            {units.map((unit) => (
+            {filtered.map((unit) => (
               <label className="serial-unit-option" key={unit.serialUnitId}>
                 <input
                   type="radio"
