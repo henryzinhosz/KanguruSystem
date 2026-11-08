@@ -94,6 +94,7 @@ import {
 } from '../offline/offline';
 import { emitLocalNfce, getComunicadorPort, setComunicadorPort } from '../offline/comunicador';
 import { OfflineCustomerModal } from './OfflineCustomerModal';
+import { CpfPromptModal } from './CpfPromptModal';
 import type { PosSaleReceipt } from '../services/supabase/sales';
 import { printClosingReport, printManagerialReport, type ManagerialReport } from './cashReportPrint';
 import { printSaleReceipt } from './receiptPrint';
@@ -471,6 +472,10 @@ export function App() {
   const [nfseConfig, setNfseConfig] = useState<PosNfseConfig | null>(null);
   const [nfceProblem, setNfceProblem] = useState<{ saleId: string; change: number; status: NfceStatus; message: string | null } | null>(null);
   const fiscalChoiceRef = useRef<FiscalChoice>('NAO_FISCAL');
+  // "CPF na nota?": CPF avulso desta tentativa de finalizar (nao cria cadastro).
+  const [cpfPromptOpen, setCpfPromptOpen] = useState(false);
+  const saleCpfOnlyRef = useRef<string | null>(null);
+  const cpfAskedRef = useRef(false);
   // Troca/devolucao (2.9): venda aberta no modal e saldo de vale-troca do cliente da venda.
   const [returnSaleId, setReturnSaleId] = useState<string | null>(null);
   const [customerCredit, setCustomerCredit] = useState(0);
@@ -985,7 +990,12 @@ export function App() {
   }
 
   async function finalizeSale(fiscal?: FiscalChoice) {
-    if (fiscal) fiscalChoiceRef.current = fiscal;
+    if (fiscal) {
+      fiscalChoiceRef.current = fiscal;
+      // Novo clique em finalizar: o CPF avulso vale so para esta tentativa.
+      saleCpfOnlyRef.current = null;
+      cpfAskedRef.current = false;
+    }
     if (!cashSession || cart.length === 0) return;
     if (cart.some((item) => item.backorder)) {
       setMessage('Itens de encomenda (sem estoque) só podem ser reservados.');
@@ -1007,6 +1017,10 @@ export function App() {
     const needsApproval = cartHasOverLimitDiscount();
     if (needsApproval && isOffline()) {
       setMessage('Sem internet não dá para liberar desconto acima do limite (a senha é conferida no servidor). Ajuste o desconto.');
+      return;
+    }
+    if (fiscalChoiceRef.current === 'NFCE' && !saleCustomer && !cpfAskedRef.current && cart.some((item) => item.itemType === 'PRODUCT')) {
+      setCpfPromptOpen(true);
       return;
     }
     if (needsApproval && !adminApprovalOpen) {
@@ -1058,7 +1072,7 @@ export function App() {
         grossAmount,
         feeAmount: 0,
         netAmount: grossAmount,
-        clientCpf: saleCustomer?.cpf ?? null,
+        clientCpf: saleCustomer?.cpf ?? saleCpfOnlyRef.current,
         clientName: saleCustomer?.name ?? null,
         timestamp: new Date().toISOString(),
         status: 'CONCLUIDA',
@@ -1165,7 +1179,7 @@ export function App() {
       cashSessionId: snapshot.cash.id,
       sellerCode: saleSeller.code,
       sellerName: saleSeller.name,
-      clientCpf: saleCustomer?.cpf ?? null,
+      clientCpf: saleCustomer?.cpf ?? saleCpfOnlyRef.current,
       clientName: saleCustomer?.name ?? null,
       items,
       payments: applied.map((line) => ({ paymentMethod: line.paymentMethod, amount: Number(line.amount.toFixed(2)) })),
@@ -1352,6 +1366,13 @@ export function App() {
       return;
     }
     void printSaleReceipt(last.receipt, (await getSnapshot())?.store ?? null, last.changeAmount);
+  }
+
+  function answerCpfPrompt(cpf: string | null) {
+    saleCpfOnlyRef.current = cpf;
+    cpfAskedRef.current = true;
+    setCpfPromptOpen(false);
+    void finalizeSale();
   }
 
   async function confirmDiscountApproval() {
@@ -1942,6 +1963,10 @@ export function App() {
     if (screen !== 'sale') return;
     function onKey(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
+      if (cpfPromptOpen) {
+        setCpfPromptOpen(false);
+        return;
+      }
       if (serialProduct || adminApprovalOpen || customerPickerOpen || customerHistoryOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
       if (catalogItems.length > 0 || query) {
         setCatalogItems([]);
@@ -3007,6 +3032,13 @@ export function App() {
         </aside>
       </section>
       {nfceModal}
+      {cpfPromptOpen && (
+        <CpfPromptModal
+          onConfirm={(cpf) => answerCpfPrompt(cpf)}
+          onSkip={() => answerCpfPrompt(null)}
+          onClose={() => setCpfPromptOpen(false)}
+        />
+      )}
       {offlineCustomerOpen && (
         <OfflineCustomerModal
           onConfirm={(customer) => {

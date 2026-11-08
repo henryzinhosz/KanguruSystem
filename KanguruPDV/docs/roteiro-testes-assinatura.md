@@ -14,7 +14,7 @@ Guardado em 2026-11-08 a pedido do usuário, para retomar depois.
 1. Na aba **Cobrança** (UCP › ficha do cliente), registrar as mensalidades em aberto (outubro e novembro) e ver o ERP e o PDV do notebook liberarem.
 2. Voltar a CBEX para isenta: marcar **Isento** e clicar em **Salvar cobrança**.
 3. Reativar o PC da loja: UCP › ficha › **Terminais PDV**, gerar código para a loja Park Shopping e digitar no PDV da loja. Entra como terminal novo e usa a senha Gerente da loja.
-4. Informar o nome do terminal novo e qual dos antigos era o da loja, para desativar o antigo por comando (o UCP não tem botão para isso).
+4. Excluir os terminais antigos em UCP › ficha › **Terminais PDV** › **Terminais ativados** › **Excluir** (depende da migration 20261125).
 
 ## Melhoria proposta (aguarda aprovação)
 

@@ -24,6 +24,7 @@ import {
   PlatformTenantDetails,
   SubscriptionStatus,
   PosTerminalActivation,
+  PlatformPosTerminal,
   PdvOperator,
   PdvOperatorPermissions,
   SerializedStockEntryUnit,
@@ -820,6 +821,18 @@ export const supabaseService = {
     });
     if (error) throw error;
     return (data || []).map(mapPosTerminalActivation);
+  },
+
+  async getPlatformPosTerminals(tenantId: string): Promise<PlatformPosTerminal[]> {
+    const { data, error } = await supabase.rpc('platform_list_pos_terminals', { p_tenant_id: tenantId });
+    if (error) throw error;
+    return (data || []) as PlatformPosTerminal[];
+  },
+
+  async deletePlatformPosTerminal(terminalId: string): Promise<{ mode: 'APAGADO' | 'DESATIVADO'; closedCash: number }> {
+    const { data, error } = await supabase.rpc('platform_delete_pos_terminal', { p_terminal_id: terminalId });
+    if (error) throw error;
+    return data;
   },
 
   async getPlatformPdvOperators(tenantId: string): Promise<PdvOperator[]> {

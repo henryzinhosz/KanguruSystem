@@ -13,6 +13,7 @@ import {
   Network,
   Search,
   Store,
+  Trash2,
   UserRound,
   Users,
   X
@@ -21,7 +22,7 @@ import type { LucideIcon } from 'lucide-react';
 import { Wallet } from 'lucide-react';
 import BillingPanel from './BillingPanel';
 import { getTenantBilling, setTenantSubscriptionManual, syncPlatformSubscriptions } from '../db/billing';
-import { PdvOperator, PlatformTenant, PlatformTenantDetails, PosTerminalActivation, PosTerminalActivationStatus, StoreNfceStatus, SubscriptionStatus } from '../types';
+import { PdvOperator, PlatformPosTerminal, PlatformTenant, PlatformTenantDetails, PosTerminalActivation, PosTerminalActivationStatus, StoreNfceStatus, SubscriptionStatus } from '../types';
 import { supabaseService } from '../db/supabaseService';
 import NetworkAdminPanel from './NetworkAdminPanel';
 import { platformListNetworks, type PlatformNetwork } from '../db/network';
@@ -102,6 +103,11 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
   const [isCreatingActivation, setIsCreatingActivation] = useState(false);
   const [isActivationFormOpen, setIsActivationFormOpen] = useState(false);
   const [terminalActivations, setTerminalActivations] = useState<PosTerminalActivation[]>([]);
+  const [posTerminals, setPosTerminals] = useState<PlatformPosTerminal[]>([]);
+  const [isLoadingTerminals, setIsLoadingTerminals] = useState(false);
+  const [terminalsError, setTerminalsError] = useState<string | null>(null);
+  const [terminalToDelete, setTerminalToDelete] = useState<PlatformPosTerminal | null>(null);
+  const [isDeletingTerminal, setIsDeletingTerminal] = useState(false);
   const [pdvOperators, setPdvOperators] = useState<PdvOperator[]>([]);
   const [isLoadingPdvOperators, setIsLoadingPdvOperators] = useState(false);
   const [pdvOperatorsError, setPdvOperatorsError] = useState<string | null>(null);
@@ -152,6 +158,51 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
       setActivationHistoryError(getErrorMessage(activationError, 'Não foi possível carregar o histórico de ativações.'));
     } finally {
       setIsLoadingActivations(false);
+    }
+  };
+
+  const loadPosTerminals = async (tenantId: string) => {
+    setIsLoadingTerminals(true);
+    setTerminalsError(null);
+    try {
+      setPosTerminals(await supabaseService.getPlatformPosTerminals(tenantId));
+    } catch (terminalsLoadError) {
+      setTerminalsError(getErrorMessage(terminalsLoadError, 'Não foi possível carregar os terminais.'));
+    } finally {
+      setIsLoadingTerminals(false);
+    }
+  };
+
+  // Recarrega antes de perguntar: o aviso de caixa aberto precisa estar em dia.
+  const askDeleteTerminal = async (terminal: PlatformPosTerminal) => {
+    if (!selectedTenant) return;
+    setError(null);
+    setSuccess(null);
+    try {
+      const fresh = await supabaseService.getPlatformPosTerminals(selectedTenant.tenant.id);
+      setPosTerminals(fresh);
+      setTerminalToDelete(fresh.find(item => item.id === terminal.id) ?? null);
+    } catch (refreshError) {
+      setError(getErrorMessage(refreshError, 'Não foi possível conferir o terminal.'));
+    }
+  };
+
+  const handleDeleteTerminal = async () => {
+    if (!selectedTenant || !terminalToDelete) return;
+    const { id, name } = terminalToDelete;
+    setIsDeletingTerminal(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await supabaseService.deletePlatformPosTerminal(id);
+      setTerminalToDelete(null);
+      setSuccess(`Terminal ${name} excluído.${result.closedCash > 0 ? ' O caixa que estava aberto foi fechado sem contagem.' : ''}`);
+      await loadPosTerminals(selectedTenant.tenant.id);
+    } catch (deleteError) {
+      setTerminalToDelete(null);
+      setError(getErrorMessage(deleteError, 'Não foi possível excluir o terminal.'));
+    } finally {
+      setIsDeletingTerminal(false);
     }
   };
 
@@ -216,6 +267,9 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
       setStatusDraft(details.tenant.subscriptionStatus || 'ATIVO');
       setActivationForm({ unitId: details.stores[0]?.unitId || '', terminalLabel: '', expiresInMinutes: 15 });
       setTerminalActivations([]);
+      setPosTerminals([]);
+      setTerminalsError(null);
+      setTerminalToDelete(null);
       setPdvOperators([]);
       setActivationHistoryError(null);
       setPdvOperatorsError(null);
@@ -224,6 +278,7 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
       setIsActivationFormOpen(false);
       setDetailTab('lojas');
       void loadTerminalActivations(tenantId);
+      void loadPosTerminals(tenantId);
       void loadPdvOperators(tenantId);
       setStoreFiscal([]);
       setFocusForm(null);
@@ -499,7 +554,7 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
             <div className="flex flex-wrap gap-1 border-b border-slate-200">
               {DETAIL_TABS.map(tab => {
                 const Icon = tab.icon;
-                const count = tab.id === 'lojas' ? selectedTenant.stores.length : tab.id === 'terminais' ? terminalActivations.length : tab.id === 'usuarios' ? selectedTenant.users.length : pdvOperators.length;
+                const count = tab.id === 'lojas' ? selectedTenant.stores.length : tab.id === 'terminais' ? posTerminals.length : tab.id === 'usuarios' ? selectedTenant.users.length : pdvOperators.length;
                 return (
                   <button key={tab.id} type="button" onClick={() => setDetailTab(tab.id)} className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-2.5 font-bold ${detailTab === tab.id ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
                     <Icon className="h-4 w-4" />{tab.name}<span className="rounded bg-slate-100 px-1.5 text-[10px] text-slate-600">{count}</span>
@@ -613,6 +668,46 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
 
                 <section className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
                   <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                    <h4 className="text-sm font-bold text-slate-900">Terminais ativados</h4>
+                    <button type="button" onClick={() => void loadPosTerminals(selectedTenant.tenant.id)} disabled={isLoadingTerminals} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 disabled:opacity-50" title="Atualizar terminais" aria-label="Atualizar terminais">
+                      <RefreshCw className={`h-4 w-4 ${isLoadingTerminals ? 'animate-spin' : ''}`} />
+                    </button>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-left">
+                      <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-2">Terminal</th><th className="px-4 py-2">Loja</th><th className="px-4 py-2">Ativado em</th><th className="px-4 py-2">Último uso</th><th className="px-4 py-2">Caixa</th><th className="px-4 py-2" aria-label="Ações"></th></tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {isLoadingTerminals && posTerminals.length === 0 && <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400"><LoaderCircle className="mr-2 inline h-4 w-4 animate-spin" />Carregando terminais...</td></tr>}
+                        {!isLoadingTerminals && posTerminals.length === 0 && !terminalsError && <tr><td colSpan={6} className="px-4 py-6 text-center text-slate-400">Nenhum terminal ativado para este cliente.</td></tr>}
+                        {posTerminals.map(terminal => {
+                          const store = selectedTenant.stores.find(item => item.unitId === terminal.unitId);
+                          return (
+                            <tr key={terminal.id}>
+                              <td className="px-4 py-2 font-bold text-slate-800">{terminal.name}</td>
+                              <td className="px-4 py-2 text-slate-600">{store?.tradeName || store?.legalName || terminal.unitId}</td>
+                              <td className="px-4 py-2 text-slate-600">{formatDateTime(terminal.activatedAt)}</td>
+                              <td className="px-4 py-2 text-slate-600">{formatDateTime(terminal.lastUsedAt)}</td>
+                              <td className="px-4 py-2">
+                                {terminal.openCashAt
+                                  ? <span className="inline-flex rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-700">Aberto desde {formatDateTime(terminal.openCashAt)}</span>
+                                  : <span className="inline-flex rounded-md border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">Fechado</span>}
+                              </td>
+                              <td className="px-4 py-2 text-right">
+                                <button type="button" onClick={() => void askDeleteTerminal(terminal)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-2.5 py-1 font-bold text-rose-700 transition hover:bg-rose-50">
+                                  <Trash2 className="h-3.5 w-3.5" />Excluir
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {terminalsError && <p className="px-4 py-2 text-rose-700">{terminalsError}</p>}
+                </section>
+
+                <section className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
                     <h4 className="text-sm font-bold text-slate-900">Histórico de códigos</h4>
                     <button type="button" onClick={() => void loadTerminalActivations(selectedTenant.tenant.id)} disabled={isLoadingActivations} className="flex h-8 w-8 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 disabled:opacity-50" title="Atualizar histórico" aria-label="Atualizar histórico">
                       <RefreshCw className={`h-4 w-4 ${isLoadingActivations ? 'animate-spin' : ''}`} />
@@ -685,6 +780,29 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
           </div>
         )}
       </main>
+
+      {terminalToDelete && selectedTenant && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
+          <div role="dialog" aria-modal="true" aria-labelledby="delete-terminal-title" className="bg-white rounded-xl shadow-xl w-full max-w-md text-xs">
+            <div className="p-4 border-b border-slate-100">
+              <h3 id="delete-terminal-title" className="text-sm font-bold text-slate-900">Excluir o terminal {terminalToDelete.name}?</h3>
+              <p className="text-slate-500">Último uso: {formatDateTime(terminalToDelete.lastUsedAt)}</p>
+            </div>
+            <ul className="list-disc space-y-2 py-4 pl-8 pr-4 text-slate-700">
+              <li>O aparelho perde a ativação e pede um código novo ao abrir o PDV.</li>
+              {terminalToDelete.openCashAt && <li className="font-bold text-rose-700">O caixa aberto desde {formatDateTime(terminalToDelete.openCashAt)} será fechado sem contagem. As vendas desse caixa só poderão ser desfeitas por Trocar/Devolver.</li>}
+              <li>Vendas feitas sem internet e ainda não enviadas por esse aparelho não sobem depois da exclusão.</li>
+              <li>As vendas e os relatórios antigos continuam guardados.</li>
+            </ul>
+            <div className="flex justify-end gap-2 border-t border-slate-100 p-4">
+              <button type="button" onClick={() => setTerminalToDelete(null)} disabled={isDeletingTerminal} className="rounded-lg px-3 py-2 font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-60">Cancelar</button>
+              <button type="button" onClick={() => void handleDeleteTerminal()} disabled={isDeletingTerminal} className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-3 py-2 font-bold text-white transition hover:bg-rose-700 disabled:opacity-60">
+                {isDeletingTerminal && <LoaderCircle className="h-4 w-4 animate-spin" />}Excluir terminal
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCreate && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4">
