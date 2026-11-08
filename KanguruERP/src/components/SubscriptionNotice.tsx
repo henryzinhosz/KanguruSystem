@@ -39,8 +39,8 @@ export function SubscriptionOverdueBanner({ state }: { state: SubscriptionState 
   return (
     <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 text-sm text-amber-900 flex flex-wrap items-center gap-x-2 gap-y-1" role="alert">
       <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-      <strong>Mensalidade de {formatCompetence(state.competence)} em atraso</strong>
-      <span>Venceu em {formatBillingDate(state.dueDate)}. Regularize até {formatBillingDate(state.blockAfter)} para evitar o bloqueio do sistema.</span>
+      <strong>{state.competence ? `Mensalidade de ${formatCompetence(state.competence)} em atraso` : 'Mensalidade em atraso'}</strong>
+      {state.dueDate && <span>Venceu em {formatBillingDate(state.dueDate)}. Regularize até {formatBillingDate(state.blockAfter)} para evitar o bloqueio do sistema.</span>}
       <span className="font-semibold">{SUPPORT_PHONE} · {SUPPORT_EMAIL}</span>
     </div>
   );

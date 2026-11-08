@@ -11,9 +11,10 @@ interface TopBarProps {
   sessionNumber: number | null;
   operator: string | null;
   leading?: ReactNode;
+  notice?: ReactNode;
 }
 
-export function TopBar({ storeName, subtitle, cashNumber, cashDate, sessionNumber, operator, leading }: TopBarProps) {
+export function TopBar({ storeName, subtitle, cashNumber, cashDate, sessionNumber, operator, leading, notice }: TopBarProps) {
   const { offline, pending } = useOfflineState();
   const [now, setNow] = useState(() => new Date());
 
@@ -40,6 +41,7 @@ export function TopBar({ storeName, subtitle, cashNumber, cashDate, sessionNumbe
         {cashDate && <span><small>Caixa de</small> <b>{cashDate}</b></span>}
         {sessionNumber != null && <span><small>Abertura nº</small> <b>{String(sessionNumber).padStart(2, '0')}</b></span>}
         {operator && <span><small>Operador</small> <b>{operator}</b></span>}
+        {notice}
         <span className={`top-bar-status${offline ? ' is-offline' : ''}`}>
           <i aria-hidden="true" />
           {offline ? 'Offline' : 'Online'}

@@ -2122,10 +2122,15 @@ export function App() {
     );
   }
 
-  const overdueStrip = subscription?.status === 'ATRASADO' ? (
-    <div className="subscription-overdue" role="alert">
-      Mensalidade vencida em {formatSubscriptionDate(subscription.dueDate)}. Regularize até {formatSubscriptionDate(subscription.blockAfter)} para evitar o bloqueio. Suporte: {SUPPORT_PHONE}
-    </div>
+  // Aviso de atraso fica na barra superior, sem cobrir os botoes da venda.
+  const overdueNotice = subscription?.status === 'ATRASADO' ? (
+    <span
+      className="top-bar-overdue"
+      role="alert"
+      title={`${subscription.dueDate ? `Venceu em ${formatSubscriptionDate(subscription.dueDate)}. ` : ''}Suporte: ${SUPPORT_PHONE} / ${SUPPORT_EMAIL}`}
+    >
+      Mensalidade em atraso{subscription.blockAfter ? ` · regularize até ${formatSubscriptionDate(subscription.blockAfter)}` : ''}
+    </span>
   ) : null;
 
   if (screen === 'cash-open') {
@@ -2612,6 +2617,7 @@ export function App() {
   }
 
   const topBarProps = {
+    notice: overdueNotice,
     storeName: terminal?.tradeName ?? terminal?.unitId ?? '',
     cashNumber: cashSession?.cashNumber ?? null,
     cashDate: cashSession ? new Date(cashSession.openedAt).toLocaleDateString('pt-BR') : null,
@@ -2623,7 +2629,6 @@ export function App() {
     return (
       <main className="sale-shell menu-shell">
         <TopBar {...topBarProps} subtitle="Kanguru PDV" />
-        {overdueStrip}
         {message && <div className="menu-notice"><Notice message={message} /></div>}
         <HomeMenu
           offline={offlineNow}
@@ -2699,7 +2704,6 @@ export function App() {
 
   return (
     <main className="sale-shell sale-shell-fit">
-      {overdueStrip}
       <TopBar
         {...topBarProps}
         subtitle={reservationMode ? 'Nova reserva' : 'Nova venda'}
@@ -2984,7 +2988,7 @@ export function App() {
                     <CreditCard size={20} />
                     {nfceEmitting ? 'Emitindo...' : 'Nota fiscal'}
                     {!fiscalReady
-                      ? <small>não configurada</small>
+                      ? (cart.length > 0 ? <small>não configurada</small> : null)
                       : (cartHasProduct ? nfceConfig?.environment : nfseConfig?.environment) === 'homologacao' && <small>teste</small>}
                   </button>
                   <button
