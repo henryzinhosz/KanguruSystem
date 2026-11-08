@@ -1,5 +1,6 @@
 ﻿import { FormEvent, KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from 'react';
 import { findProductWarranty, loadProductWarranties } from '../services/supabase/warranties';
+import { SUPPORT_EMAIL, SUPPORT_PHONE, formatSubscriptionDate, loadPosSubscription, readCachedSubscription, type PosSubscriptionState } from '../services/supabase/subscription';
 import {
   ArrowLeft,
   CircleAlert,
@@ -160,6 +161,9 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 interface CartItem extends PosCatalogItem {
   quantity: number;
   discountPercent: number;
+  // Desconto digitado em reais (vale para a linha inteira); a porcentagem e calculada a partir dele.
+  discountValue?: number | null;
+  discountMode?: 'PERCENT' | 'VALUE';
   serialUnit?: PosSerialUnit;
   // Encomenda: sem estoque agora; so pode ser reservado.
   backorder?: boolean;
@@ -192,6 +196,10 @@ function errorMessage(error: unknown): string {
   const discountLimitError = message.match(/Discount exceeds the store limit of ([\d.]+) percent/i);
   if (discountLimitError) {
     return `Desconto bloqueado. O limite deste item é ${discountLimitError[1]}%.`;
+  }
+
+  if (message.includes('SUBSCRIPTION_BLOCKED')) {
+    return `Assinatura bloqueada. Fale com o suporte: ${SUPPORT_PHONE} ou ${SUPPORT_EMAIL}.`;
   }
 
   if (message.includes('Manager password is not configured')) {
@@ -342,6 +350,18 @@ function warrantyLabel(months: number | null, sku?: string): string {
   return `${months} ${months === 1 ? 'mes' : 'meses'} de garantia`;
 }
 
+// Porcentagem equivalente a um desconto em reais na linha (6 casas: o total da linha fica exato no centavo).
+function percentFromValue(item: CartItem, value: number): number {
+  const lineGross = item.sellPrice * item.quantity;
+  if (lineGross <= 0) return 0;
+  return Math.round((Math.min(value, lineGross) / lineGross) * 100 * 1000000) / 1000000;
+}
+
+// Quantidade mudou com desconto em R$: os reais ficam, a porcentagem acompanha.
+function refreshValueDiscount(item: CartItem): CartItem {
+  return item.discountMode === 'VALUE' ? { ...item, discountPercent: percentFromValue(item, item.discountValue ?? 0) } : item;
+}
+
 function discountedLineTotal(item: CartItem): number {
   return Math.round((item.sellPrice * item.quantity * (100 - item.discountPercent) / 100 + Number.EPSILON) * 100) / 100;
 }
@@ -366,6 +386,7 @@ export function App() {
   const [screen, setScreen] = useState<Screen>('loading');
   const [terminal, setTerminal] = useState<TerminalContext | null>(null);
   const [cashSession, setCashSession] = useState<CashSession | null>(null);
+  const [subscription, setSubscription] = useState<PosSubscriptionState | null>(() => readCachedSubscription());
   const [activationCode, setActivationCode] = useState<string>('');
   const [terminalName, setTerminalName] = useState('Caixa 01');
   const [password, setPassword] = useState('');
@@ -875,7 +896,7 @@ export function App() {
       }
 
       return current.map((item) =>
-        item === existing ? { ...item, quantity: item.quantity + 1 } : item
+        item === existing ? refreshValueDiscount({ ...item, quantity: item.quantity + 1 }) : item
       );
     });
   }
@@ -884,7 +905,7 @@ export function App() {
     setCart((current) => {
       const existing = current.find((item) => item.id === product.id && item.backorder);
       if (!existing) return [...current, { ...product, quantity: 1, discountPercent: 0, backorder: true }];
-      return current.map((item) => (item === existing ? { ...item, quantity: item.quantity + 1 } : item));
+      return current.map((item) => (item === existing ? refreshValueDiscount({ ...item, quantity: item.quantity + 1 }) : item));
     });
   }
 
@@ -894,7 +915,7 @@ export function App() {
         if (item.id !== productId || item.itemType !== itemType || item.workOrderId) return [item];
         const quantity = item.quantity + change;
         if (quantity <= 0) return [];
-        return item.itemType === 'PRODUCT' && !item.backorder && quantity > item.availableQuantity ? [item] : [{ ...item, quantity }];
+        return item.itemType === 'PRODUCT' && !item.backorder && quantity > item.availableQuantity ? [item] : [refreshValueDiscount({ ...item, quantity })];
       })
     );
   }
@@ -903,7 +924,26 @@ export function App() {
     if (!Number.isFinite(value) || value < 0) return;
     setMessage(null);
     setCart((current) => current.map((item) =>
-      item.id === itemId && item.itemType === itemType ? { ...item, discountPercent: value } : item
+      item.id === itemId && item.itemType === itemType ? { ...item, discountPercent: value, discountValue: null, discountMode: 'PERCENT' } : item
+    ));
+  }
+
+  function updateItemDiscountValue(itemId: string, itemType: PosCatalogItem['itemType'], value: number) {
+    if (!Number.isFinite(value) || value < 0) return;
+    setMessage(null);
+    setCart((current) => current.map((item) => {
+      if (item.id !== itemId || item.itemType !== itemType) return item;
+      const capped = Math.min(value, Math.round(item.sellPrice * item.quantity * 100) / 100);
+      return { ...item, discountMode: 'VALUE', discountValue: capped, discountPercent: percentFromValue(item, capped) };
+    }));
+  }
+
+  // Trocar R$ <-> % zera o desconto da linha, para nao reinterpretar o numero digitado.
+  function setItemDiscountMode(itemId: string, itemType: PosCatalogItem['itemType'], mode: 'PERCENT' | 'VALUE') {
+    setCart((current) => current.map((item) =>
+      item.id === itemId && item.itemType === itemType && (item.discountMode ?? 'PERCENT') !== mode
+        ? { ...item, discountMode: mode, discountValue: null, discountPercent: 0 }
+        : item
     ));
   }
 
@@ -1947,6 +1987,19 @@ export function App() {
   const fiscalReady = cartHasProduct ? nfceConfig?.configured === true : cart.length > 0 && nfseConfig?.ready === true;
   const reservationDepositAmount = valueAsNumber(reservationDeposit);
 
+  // Assinatura da empresa: confere a cada troca de tela e a cada 10 minutos.
+  useEffect(() => {
+    if (!terminal) return;
+    let active = true;
+    const load = () => loadPosSubscription().then((state) => { if (active) setSubscription(state); });
+    void load();
+    const timer = window.setInterval(load, 10 * 60 * 1000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [terminal, screen]);
+
   useEffect(() => {
     if (!conversionReservation || !terminal) return;
     const productIds = Array.from(new Set(conversionReservation.items
@@ -2048,6 +2101,32 @@ export function App() {
       </AuthFrame>
     );
   }
+
+  // Bloqueada: nada novo, nunca interrompe venda em andamento e sempre deixa fechar o caixa.
+  const subscriptionBlocked = subscription?.status === 'BLOQUEADO' || subscription?.status === 'CANCELADO';
+  const operationInProgress = ((screen === 'sale' || screen === 'new-reservation') && cart.length > 0)
+    || busy || nfceEmitting || Boolean(nfceProblem) || Boolean(conversionReservation);
+  if (subscriptionBlocked && screen !== 'cash-close' && !operationInProgress) {
+    return (
+      <main className="subscription-block">
+        <section>
+          <h1>{subscription?.status === 'CANCELADO' ? 'Assinatura cancelada' : 'Assinatura bloqueada'}</h1>
+          <p>Este PDV não pode fazer novas vendas. Fale com o suporte para regularizar:</p>
+          <p className="subscription-contact">{SUPPORT_PHONE}<br />{SUPPORT_EMAIL}</p>
+          {message && <p className="notice">{message}</p>}
+          {cashSession && (
+            <button className="primary-action" type="button" onClick={() => void openClosing()}>Fechar caixa</button>
+          )}
+        </section>
+      </main>
+    );
+  }
+
+  const overdueStrip = subscription?.status === 'ATRASADO' ? (
+    <div className="subscription-overdue" role="alert">
+      Mensalidade vencida em {formatSubscriptionDate(subscription.dueDate)}. Regularize até {formatSubscriptionDate(subscription.blockAfter)} para evitar o bloqueio. Suporte: {SUPPORT_PHONE}
+    </div>
+  ) : null;
 
   if (screen === 'cash-open') {
     return (
@@ -2544,6 +2623,7 @@ export function App() {
     return (
       <main className="sale-shell menu-shell">
         <TopBar {...topBarProps} subtitle="Kanguru PDV" />
+        {overdueStrip}
         {message && <div className="menu-notice"><Notice message={message} /></div>}
         <HomeMenu
           offline={offlineNow}
@@ -2619,6 +2699,7 @@ export function App() {
 
   return (
     <main className="sale-shell sale-shell-fit">
+      {overdueStrip}
       <TopBar
         {...topBarProps}
         subtitle={reservationMode ? 'Nova reserva' : 'Nova venda'}
@@ -2724,15 +2805,35 @@ export function App() {
                         {item.serialUnit.imei && <small>IMEI: {item.serialUnit.imei}</small>}
                       </>
                     ) : null}
-                    <label className="cart-discount-label">
-                      Desconto (%) <small className="discount-limit">limite {item.maxItemDiscountPercent}%</small>
-                      <ValueInput
-                        aria-label={`Desconto percentual de ${item.name}`}
-                        placeholder="0"
-                        value={item.discountPercent || null}
-                        onValueChange={(value) => updateItemDiscount(item.id, item.itemType, Math.min(100, value ?? 0))}
-                      />
-                    </label>
+                    <div className="cart-discount-label">
+                      <span>
+                        Desconto <small className="discount-limit">limite {item.maxItemDiscountPercent}%</small>
+                        {item.discountMode === 'VALUE' && item.discountPercent > 0 && (
+                          <small className="discount-limit"> = {item.discountPercent.toFixed(2).replace('.', ',')}%</small>
+                        )}
+                      </span>
+                      <span className="discount-input">
+                        <span className="discount-mode" role="group" aria-label="Tipo de desconto">
+                          <button type="button" className={item.discountMode === 'VALUE' ? 'active' : ''} title="Desconto em reais" onClick={() => setItemDiscountMode(item.id, item.itemType, 'VALUE')}>R$</button>
+                          <button type="button" className={item.discountMode !== 'VALUE' ? 'active' : ''} title="Desconto em porcentagem" onClick={() => setItemDiscountMode(item.id, item.itemType, 'PERCENT')}>%</button>
+                        </span>
+                        {item.discountMode === 'VALUE' ? (
+                          <ValueInput
+                            aria-label={`Desconto em reais de ${item.name}`}
+                            placeholder="0,00"
+                            value={item.discountValue || null}
+                            onValueChange={(value) => updateItemDiscountValue(item.id, item.itemType, value ?? 0)}
+                          />
+                        ) : (
+                          <ValueInput
+                            aria-label={`Desconto percentual de ${item.name}`}
+                            placeholder="0"
+                            value={item.discountPercent || null}
+                            onValueChange={(value) => updateItemDiscount(item.id, item.itemType, Math.min(100, value ?? 0))}
+                          />
+                        )}
+                      </span>
+                    </div>
                   </div>
                   {item.workOrderId ? null : item.serialUnit ? (
                     <button

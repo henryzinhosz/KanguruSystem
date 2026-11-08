@@ -18,7 +18,25 @@ if (!hasConfiguredEnv) {
   console.warn('[SECURITY] VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY is missing. Using a hardcoded fallback anon key is insecure and should only be used for local development.');
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Login vale so enquanto a aba/o aplicativo estiver aberto (fechou ou desligou, pede login de novo).
+// F5 continua logado. Sessoes antigas guardadas de forma permanente sao apagadas aqui.
+if (typeof window !== 'undefined') {
+  try {
+    Object.keys(window.localStorage)
+      .filter(key => key.startsWith('sb-') && key.endsWith('-auth-token'))
+      .forEach(key => window.localStorage.removeItem(key));
+  } catch {
+    // sem acesso ao armazenamento: nada a limpar
+  }
+}
+
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    storage: typeof window !== 'undefined' ? window.sessionStorage : undefined,
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+});
 
 export function getSupabaseConfig() {
   return {

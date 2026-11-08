@@ -40,6 +40,9 @@ import {
   Megaphone
 } from 'lucide-react';
 
+import { isBlockedStatus, useSubscriptionState } from './db/billing';
+import { SubscriptionBlockedScreen, SubscriptionOverdueBanner } from './components/SubscriptionNotice';
+
 export default function App() {
   const {
     currentUser,
@@ -85,6 +88,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'balanco' | 'servicos' | 'clientes' | 'vendas' | 'financeiro' | 'admin' | 'configuracoes' | 'comunicados'>('dashboard');
   const [attentionOpen, setAttentionOpen] = useState(false);
   const insights = useFranchiseeInsights(currentUser, products, inventory, sales, storeConfigs);
+  const subscription = useSubscriptionState(currentUser?.tenantId);
 
   if (!currentUser) {
     return <LoginScreen accessError={authProfileError} />;
@@ -119,6 +123,19 @@ export default function App() {
         />
         <UcpView />
       </div>
+    );
+  }
+
+  // Assinatura bloqueada/cancelada: so a tela de aviso (o banco tambem nega o acesso aos dados).
+  if (subscription && isBlockedStatus(subscription.status)) {
+    return (
+      <SubscriptionBlockedScreen
+        status={subscription.status}
+        onLogout={() => {
+          void supabase.auth.signOut();
+          setCurrentUser(null);
+        }}
+      />
     );
   }
 
@@ -192,6 +209,8 @@ export default function App() {
       {insights.pendingImportant && (
         <ImportantAnnouncementModal announcement={insights.pendingImportant} onConfirmed={insights.reloadAnnouncements} />
       )}
+
+      {subscription?.status === 'ATRASADO' && <SubscriptionOverdueBanner state={subscription} />}
 
       <div className="flex-1 flex flex-col md:flex-row">
         {/* Sidebar Left Navigation Rail */}

@@ -488,6 +488,11 @@ export default function EstoqueView({
     setShowAddProductModal(false);
   };
 
+  // Custo da entrada: em branco usa o custo do cadastro do produto (se houver).
+  const registeredEntryCost = selectedStockEntryProduct && selectedStockEntryProduct.costPrice > 0 ? selectedStockEntryProduct.costPrice : null;
+  const entryCostOf = (text: string): number | null => (text.trim() ? parseMoneyInput(text) : registeredEntryCost);
+  const entryCostHint = registeredEntryCost !== null ? `Custo do cadastro: ${formatMoney(registeredEntryCost)}` : '0,00';
+
   const handleStockEntrySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setStockEntryError('');
@@ -506,11 +511,11 @@ export default function EstoqueView({
         .filter(unit => unit.serialNumber || unit.imei || unit.unitCost);
       const missingSerial = drafts.some(unit => !unit.serialNumber);
       const serials = drafts.map(unit => unit.serialNumber.toLocaleLowerCase());
-      const invalidCost = drafts.some(unit => parseMoneyInput(unit.unitCost) === null);
+      const invalidCost = drafts.some(unit => entryCostOf(unit.unitCost) === null);
       const units: SerializedStockEntryUnit[] = drafts.map(unit => ({
         serialNumber: unit.serialNumber,
         imei: unit.imei || undefined,
-        unitCost: parseMoneyInput(unit.unitCost) ?? undefined
+        unitCost: entryCostOf(unit.unitCost) ?? undefined
       }));
 
       if (!serializedEntryUnitId || !stores.some(store => store.unitId === serializedEntryUnitId)) {
@@ -526,7 +531,7 @@ export default function EstoqueView({
         return;
       }
       if (invalidCost) {
-        setStockEntryError('Informe o custo de compra de cada unidade (valor em reais, até 2 casas decimais).');
+        setStockEntryError('Este produto não tem custo no cadastro. Informe o custo de compra de cada unidade (valor em reais, até 2 casas decimais).');
         return;
       }
 
@@ -562,9 +567,9 @@ export default function EstoqueView({
       return;
     }
 
-    const unitCost = parseMoneyInput(stockEntryUnitCost);
+    const unitCost = entryCostOf(stockEntryUnitCost);
     if (unitCost === null) {
-      setStockEntryError('Informe o custo unitário da compra (valor em reais, até 2 casas decimais).');
+      setStockEntryError('Este produto não tem custo no cadastro. Informe o custo unitário da compra (valor em reais, até 2 casas decimais).');
       return;
     }
 
@@ -1156,7 +1161,8 @@ export default function EstoqueView({
                           <ValueInput
                             value={parseMoneyInput(unit.unitCost)}
                             onValueChange={(value) => setSerializedEntryUnits(previous => previous.map((current, currentIndex) => currentIndex === index ? { ...current, unitCost: value == null ? '' : String(value) } : current))}
-                            placeholder="0,00"
+                            placeholder={registeredEntryCost !== null ? formatMoney(registeredEntryCost) : '0,00'}
+                            title={entryCostHint}
                             aria-label="Custo de compra da unidade"
                             className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono text-right"
                           />
@@ -1189,10 +1195,10 @@ export default function EstoqueView({
                   <ValueInput
                     value={parseMoneyInput(stockEntryUnitCost)}
                     onValueChange={(value) => setStockEntryUnitCost(value == null ? '' : String(value))}
-                    placeholder="Ex: 11,00"
+                    placeholder={entryCostHint === '0,00' ? 'Ex: 11,00' : entryCostHint}
                     className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none font-mono"
                   />
-                  <p className="text-[10px] text-slate-400">Cada loja que receber recalcula o próprio custo médio.</p>
+                  <p className="text-[10px] text-slate-400">Em branco, usa o custo do cadastro. Cada loja que receber recalcula o próprio custo médio.</p>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left border-separate border-spacing-y-2">
@@ -1209,7 +1215,7 @@ export default function EstoqueView({
                         const currentQty = getUnitStock(selectedStockEntryProduct.id, store.unitId);
                         const currentCost = getStoreCost(selectedStockEntryProduct, store.unitId);
                         const addQty = parseInt(stockEntryQuantities[store.unitId] || '0', 10) || 0;
-                        const entryCost = parseMoneyInput(stockEntryUnitCost);
+                        const entryCost = entryCostOf(stockEntryUnitCost);
                         const baseQty = Math.max(0, currentQty);
                         // Mesma conta do servidor (apply_store_cost_entry), so para pre-visualizar.
                         const projectedCost = entryCost !== null && addQty > 0
@@ -1273,10 +1279,10 @@ export default function EstoqueView({
                     <p className="text-sm font-semibold text-slate-900">
                       Custo total da compra: {(() => {
                         if (selectedStockEntryProduct.isSerialized) {
-                          const costs = serializedEntryUnits.filter(unit => unit.serialNumber.trim()).map(unit => parseMoneyInput(unit.unitCost));
+                          const costs = serializedEntryUnits.filter(unit => unit.serialNumber.trim()).map(unit => entryCostOf(unit.unitCost));
                           return costs.some(cost => cost === null) ? '—' : formatMoney(costs.reduce<number>((sum, cost) => sum + (cost ?? 0), 0));
                         }
-                        const entryCost = parseMoneyInput(stockEntryUnitCost);
+                        const entryCost = entryCostOf(stockEntryUnitCost);
                         const totalQty = stores.reduce((sum, store) => sum + (parseInt(stockEntryQuantities[store.unitId] || '0', 10) || 0), 0);
                         return entryCost === null ? '—' : formatMoney(entryCost * totalQty);
                       })()}
