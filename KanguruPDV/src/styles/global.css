@@ -2018,3 +2018,88 @@ small {
   max-height: 46vh;
   overflow-y: auto;
 }
+
+/* Desconto em R$ ou % na linha do carrinho */
+.cart-discount-label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.cart-discount-label .discount-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.cart-discount-label .discount-input input {
+  width: 76px;
+}
+
+.discount-mode {
+  display: inline-flex;
+  border: 1px solid #d0dacd;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.discount-mode button {
+  min-height: 34px;
+  min-width: 30px;
+  padding: 0 0.4rem;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  color: #647366;
+  font-size: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.discount-mode button.active {
+  background: #285e3a;
+  color: #fff;
+}
+
+/* Assinatura: bloqueio e aviso de atraso */
+.subscription-block {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: #1c2b21;
+}
+
+.subscription-block section {
+  width: min(440px, 100%);
+  padding: 2rem;
+  border-radius: 10px;
+  background: #fff;
+  text-align: center;
+}
+
+.subscription-block h1 {
+  margin: 0 0 0.6rem;
+  color: #b04a2a;
+  font-size: 1.5rem;
+}
+
+.subscription-contact {
+  margin: 1rem 0;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.subscription-overdue {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  padding: 0.4rem 0.8rem;
+  background: #f6dfa8;
+  color: #6a4a00;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+}

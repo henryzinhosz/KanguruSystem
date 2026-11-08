@@ -18,6 +18,9 @@ import {
   X
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { Wallet } from 'lucide-react';
+import BillingPanel from './BillingPanel';
+import { getTenantBilling, setTenantSubscriptionManual, syncPlatformSubscriptions } from '../db/billing';
 import { PdvOperator, PlatformTenant, PlatformTenantDetails, PosTerminalActivation, PosTerminalActivationStatus, StoreNfceStatus, SubscriptionStatus } from '../types';
 import { supabaseService } from '../db/supabaseService';
 import NetworkAdminPanel from './NetworkAdminPanel';
@@ -59,7 +62,7 @@ const activationStatusClassName: Record<PosTerminalActivationStatus, string> = {
 };
 
 type UcpSection = 'clientes' | 'redes';
-type DetailTab = 'lojas' | 'terminais' | 'usuarios' | 'vendedores';
+type DetailTab = 'lojas' | 'cobranca' | 'terminais' | 'usuarios' | 'vendedores';
 
 const UCP_NAV: { id: UcpSection; name: string; icon: LucideIcon; description: string }[] = [
   { id: 'clientes', name: 'Clientes', icon: Building2, description: 'Franqueados que usam o sistema: assinatura, lojas, PDVs e acessos.' },
@@ -68,6 +71,7 @@ const UCP_NAV: { id: UcpSection; name: string; icon: LucideIcon; description: st
 
 const DETAIL_TABS: { id: DetailTab; name: string; icon: LucideIcon }[] = [
   { id: 'lojas', name: 'Lojas e notas', icon: Store },
+  { id: 'cobranca', name: 'Cobrança', icon: Wallet },
   { id: 'terminais', name: 'Terminais PDV', icon: KeyRound },
   { id: 'usuarios', name: 'Usuários do ERP', icon: UserRound },
   { id: 'vendedores', name: 'Vendedores do PDV', icon: Users },
@@ -123,6 +127,8 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
     setIsLoading(true);
     setError(null);
     try {
+      // Situacao calculada pela cobranca (sem a migration 20261122 a chamada so nao faz nada).
+      await syncPlatformSubscriptions().catch(() => undefined);
       setTenants(await supabaseService.getPlatformTenants());
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Não foi possível carregar os clientes.');
@@ -296,20 +302,26 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
     setError(null);
     setSuccess(null);
     try {
-      await supabaseService.updatePlatformSubscriptionStatus(selectedTenant.tenant.id, statusDraft);
-      setSelectedTenant({
-        ...selectedTenant,
-        tenant: { ...selectedTenant.tenant, subscriptionStatus: statusDraft }
-      });
-      setTenants(current => current.map(tenant => (
-        tenant.id === selectedTenant.tenant.id ? { ...tenant, subscriptionStatus: statusDraft } : tenant
-      )));
-      setSuccess('Status da assinatura atualizado.');
+      await setTenantSubscriptionManual(selectedTenant.tenant.id, statusDraft);
+      // Quem tem cobranca configurada pode voltar para a situacao calculada (ex.: mensalidade em aberto).
+      const finalStatus = (await getTenantBilling(selectedTenant.tenant.id).catch(() => null))?.status ?? statusDraft;
+      applyTenantStatus(selectedTenant.tenant.id, finalStatus);
+      setSuccess(finalStatus === statusDraft
+        ? 'Status da assinatura atualizado.'
+        : `Este cliente tem mensalidade em aberto: a situação ficou ${finalStatus}. Registre o pagamento na aba Cobrança.`);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : 'Não foi possível atualizar a assinatura.');
     } finally {
       setIsSavingStatus(false);
     }
+  };
+
+  const applyTenantStatus = (tenantId: string, status: SubscriptionStatus | null) => {
+    setStatusDraft(status || 'ATIVO');
+    setSelectedTenant(current => (current && current.tenant.id === tenantId
+      ? { ...current, tenant: { ...current.tenant, subscriptionStatus: status } }
+      : current));
+    setTenants(current => current.map(tenant => (tenant.id === tenantId ? { ...tenant, subscriptionStatus: status } : tenant)));
   };
 
   const networkNameOf = (tenantId: string) => networks.find(network => network.tenantIds.includes(tenantId))?.name ?? null;
@@ -539,6 +551,10 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
                   })}
                 </ul>
               </section>
+            )}
+
+            {detailTab === 'cobranca' && (
+              <BillingPanel tenantId={selectedTenant.tenant.id} onStatusChange={status => applyTenantStatus(selectedTenant.tenant.id, status)} />
             )}
 
             {detailTab === 'terminais' && (
