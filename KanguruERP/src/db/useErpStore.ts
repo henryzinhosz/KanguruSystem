@@ -389,7 +389,12 @@ export function useErpStore() {
     }
 
     if (useSupabase) {
-      await supabaseService.processSaleCancellation(saleId, approvedByAdminName || currentUser.name);
+      try {
+        await supabaseService.processSaleCancellation(saleId, approvedByAdminName || currentUser.name);
+      } catch (error) {
+        // Ja estornada (outra aba ou outro usuario): o resultado e o esperado, so atualiza a tela.
+        if (!/already cancelled/i.test((error as { message?: string })?.message ?? '')) throw error;
+      }
       await loadAllFromSupabase();
     }
     return 'CANCELADA';

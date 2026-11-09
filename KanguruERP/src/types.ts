@@ -107,6 +107,15 @@ export interface PosTerminalActivation {
   status: PosTerminalActivationStatus;
 }
 
+export interface PlatformPosTerminal {
+  id: string;
+  unitId: string;
+  name: string;
+  activatedAt: string | null;
+  lastUsedAt: string | null;
+  openCashAt: string | null;
+}
+
 export interface PlatformTenant {
   id: string;
   legalName: string | null;

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   User, 
   UserRole, 
@@ -216,6 +216,22 @@ export default function FinanceiroView({
     } catch (error) {
       setSaleError(error instanceof Error ? error.message : 'Não foi possível cancelar a NFS-e.');
       return false;
+    }
+  };
+
+  // Um estorno por vez: cancelar a nota na Sefaz leva alguns segundos e o botao continuava
+  // clicavel, entao um segundo clique estornava de novo e mostrava erro junto com o sucesso.
+  const refundLock = useRef(false);
+  const [refundingSaleId, setRefundingSaleId] = useState<string | null>(null);
+  const runRefund = async (saleId: string, action: () => Promise<void>) => {
+    if (refundLock.current) return;
+    refundLock.current = true;
+    setRefundingSaleId(saleId);
+    try {
+      await action();
+    } finally {
+      refundLock.current = false;
+      setRefundingSaleId(null);
     }
   };
 
@@ -734,21 +750,23 @@ export default function FinanceiroView({
                             {isCompleted && (s.returns || []).length === 0 && !s.cashClosed && (
                               <button
                                 type="button"
-                                onClick={() => void handleCancelSale(s.id)}
-                                className="px-2.5 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold rounded-lg border border-rose-200 transition text-[10px]"
+                                disabled={refundingSaleId !== null}
+                                onClick={() => void runRefund(s.id, () => handleCancelSale(s.id))}
+                                className="px-2.5 py-1 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold rounded-lg border border-rose-200 transition text-[10px] disabled:opacity-50 disabled:cursor-not-allowed"
                               >
-                                Estornar
+                                {refundingSaleId === s.id ? 'Estornando...' : 'Estornar'}
                               </button>
                             )}
                             {isCancelPending && (
                               isAdmin ? (
                                 <button
                                   type="button"
-                                  onClick={() => void handleApproveCancelSale(s.id)}
-                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition text-[10px] shadow-sm flex items-center justify-center mx-auto"
+                                  disabled={refundingSaleId !== null}
+                                  onClick={() => void runRefund(s.id, () => handleApproveCancelSale(s.id))}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition text-[10px] shadow-sm flex items-center justify-center mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                   <Check className="w-3 h-3 mr-0.5" />
-                                  Aprovar
+                                  {refundingSaleId === s.id ? 'Aprovando...' : 'Aprovar'}
                                 </button>
                               ) : (
                                 <span className="text-[9px] text-amber-600 font-semibold block">Aguardando Admin</span>

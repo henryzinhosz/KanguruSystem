@@ -4,7 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 // - SUPER_ADMIN (UCP): cria o dono (OWNER) de qualquer rede e troca senha/ativa qualquer login.
 // - Dono da rede: cria gerentes (MANAGER) da propria rede, troca senha e ativa/desativa gerentes.
 // Acoes: create { networkId?, role, name, email, password } | set_password { authUid, password }
-//        | set_active { authUid, active }
+//        | set_active { authUid, active } | delete { authUid } (so a plataforma)
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -20,7 +20,7 @@ const json = (body: Record<string, unknown>, status = 200) =>
 const MIN_PASSWORD = 8;
 
 type Payload = {
-  action?: 'create' | 'set_password' | 'set_active';
+  action?: 'create' | 'set_password' | 'set_active' | 'delete';
   networkId?: string;
   role?: 'OWNER' | 'MANAGER';
   name?: string;
@@ -139,6 +139,16 @@ Deno.serve(async (request) => {
     if (dbError) return json({ error: 'Não foi possível alterar o login.' }, 400);
     const { error } = await service.auth.admin.updateUserById(target.auth_uid, { ban_duration: active ? 'none' : '876000h' });
     if (error) return json({ error: 'Login marcado, mas o bloqueio falhou. Tente de novo.' }, 400);
+    return json({ ok: true });
+  }
+
+  if (payload.action === 'delete') {
+    // So a plataforma (UCP) apaga o login de vez; a linha de network_users sai junto.
+    if (!isSuperAdmin) return json({ error: 'Só a plataforma pode excluir logins da rede.' }, 403);
+    const target = await loadTarget(payload.authUid);
+    if (!target) return json({ error: 'Login não encontrado nesta rede.' }, 404);
+    const { error } = await service.auth.admin.deleteUser(target.auth_uid);
+    if (error) return json({ error: 'Não foi possível excluir o login.' }, 400);
     return json({ ok: true });
   }
 

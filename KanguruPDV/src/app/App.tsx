@@ -94,6 +94,7 @@ import {
 } from '../offline/offline';
 import { emitLocalNfce, getComunicadorPort, setComunicadorPort } from '../offline/comunicador';
 import { OfflineCustomerModal } from './OfflineCustomerModal';
+import { CpfPromptModal } from './CpfPromptModal';
 import type { PosSaleReceipt } from '../services/supabase/sales';
 import { printClosingReport, printManagerialReport, type ManagerialReport } from './cashReportPrint';
 import { printSaleReceipt } from './receiptPrint';
@@ -471,6 +472,10 @@ export function App() {
   const [nfseConfig, setNfseConfig] = useState<PosNfseConfig | null>(null);
   const [nfceProblem, setNfceProblem] = useState<{ saleId: string; change: number; status: NfceStatus; message: string | null } | null>(null);
   const fiscalChoiceRef = useRef<FiscalChoice>('NAO_FISCAL');
+  // "CPF na nota?": CPF avulso desta tentativa de finalizar (nao cria cadastro).
+  const [cpfPromptOpen, setCpfPromptOpen] = useState(false);
+  const saleCpfOnlyRef = useRef<string | null>(null);
+  const cpfAskedRef = useRef(false);
   // Troca/devolucao (2.9): venda aberta no modal e saldo de vale-troca do cliente da venda.
   const [returnSaleId, setReturnSaleId] = useState<string | null>(null);
   const [customerCredit, setCustomerCredit] = useState(0);
@@ -985,7 +990,12 @@ export function App() {
   }
 
   async function finalizeSale(fiscal?: FiscalChoice) {
-    if (fiscal) fiscalChoiceRef.current = fiscal;
+    if (fiscal) {
+      fiscalChoiceRef.current = fiscal;
+      // Novo clique em finalizar: o CPF avulso vale so para esta tentativa.
+      saleCpfOnlyRef.current = null;
+      cpfAskedRef.current = false;
+    }
     if (!cashSession || cart.length === 0) return;
     if (cart.some((item) => item.backorder)) {
       setMessage('Itens de encomenda (sem estoque) só podem ser reservados.');
@@ -1007,6 +1017,10 @@ export function App() {
     const needsApproval = cartHasOverLimitDiscount();
     if (needsApproval && isOffline()) {
       setMessage('Sem internet não dá para liberar desconto acima do limite (a senha é conferida no servidor). Ajuste o desconto.');
+      return;
+    }
+    if (fiscalChoiceRef.current === 'NFCE' && !saleCustomer && !cpfAskedRef.current && cart.some((item) => item.itemType === 'PRODUCT')) {
+      setCpfPromptOpen(true);
       return;
     }
     if (needsApproval && !adminApprovalOpen) {
@@ -1058,7 +1072,7 @@ export function App() {
         grossAmount,
         feeAmount: 0,
         netAmount: grossAmount,
-        clientCpf: saleCustomer?.cpf ?? null,
+        clientCpf: saleCustomer?.cpf ?? saleCpfOnlyRef.current,
         clientName: saleCustomer?.name ?? null,
         timestamp: new Date().toISOString(),
         status: 'CONCLUIDA',
@@ -1165,7 +1179,7 @@ export function App() {
       cashSessionId: snapshot.cash.id,
       sellerCode: saleSeller.code,
       sellerName: saleSeller.name,
-      clientCpf: saleCustomer?.cpf ?? null,
+      clientCpf: saleCustomer?.cpf ?? saleCpfOnlyRef.current,
       clientName: saleCustomer?.name ?? null,
       items,
       payments: applied.map((line) => ({ paymentMethod: line.paymentMethod, amount: Number(line.amount.toFixed(2)) })),
@@ -1352,6 +1366,13 @@ export function App() {
       return;
     }
     void printSaleReceipt(last.receipt, (await getSnapshot())?.store ?? null, last.changeAmount);
+  }
+
+  function answerCpfPrompt(cpf: string | null) {
+    saleCpfOnlyRef.current = cpf;
+    cpfAskedRef.current = true;
+    setCpfPromptOpen(false);
+    void finalizeSale();
   }
 
   async function confirmDiscountApproval() {
@@ -1942,6 +1963,10 @@ export function App() {
     if (screen !== 'sale') return;
     function onKey(event: KeyboardEvent) {
       if (event.key !== 'Escape') return;
+      if (cpfPromptOpen) {
+        setCpfPromptOpen(false);
+        return;
+      }
       if (serialProduct || adminApprovalOpen || customerPickerOpen || customerHistoryOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
       if (catalogItems.length > 0 || query) {
         setCatalogItems([]);
@@ -2122,10 +2147,15 @@ export function App() {
     );
   }
 
-  const overdueStrip = subscription?.status === 'ATRASADO' ? (
-    <div className="subscription-overdue" role="alert">
-      Mensalidade vencida em {formatSubscriptionDate(subscription.dueDate)}. Regularize até {formatSubscriptionDate(subscription.blockAfter)} para evitar o bloqueio. Suporte: {SUPPORT_PHONE}
-    </div>
+  // Aviso de atraso fica na barra superior, sem cobrir os botoes da venda.
+  const overdueNotice = subscription?.status === 'ATRASADO' ? (
+    <span
+      className="top-bar-overdue"
+      role="alert"
+      title={`${subscription.dueDate ? `Venceu em ${formatSubscriptionDate(subscription.dueDate)}. ` : ''}Suporte: ${SUPPORT_PHONE} / ${SUPPORT_EMAIL}`}
+    >
+      Mensalidade em atraso{subscription.blockAfter ? ` · regularize até ${formatSubscriptionDate(subscription.blockAfter)}` : ''}
+    </span>
   ) : null;
 
   if (screen === 'cash-open') {
@@ -2612,6 +2642,7 @@ export function App() {
   }
 
   const topBarProps = {
+    notice: overdueNotice,
     storeName: terminal?.tradeName ?? terminal?.unitId ?? '',
     cashNumber: cashSession?.cashNumber ?? null,
     cashDate: cashSession ? new Date(cashSession.openedAt).toLocaleDateString('pt-BR') : null,
@@ -2623,7 +2654,6 @@ export function App() {
     return (
       <main className="sale-shell menu-shell">
         <TopBar {...topBarProps} subtitle="Kanguru PDV" />
-        {overdueStrip}
         {message && <div className="menu-notice"><Notice message={message} /></div>}
         <HomeMenu
           offline={offlineNow}
@@ -2699,7 +2729,6 @@ export function App() {
 
   return (
     <main className="sale-shell sale-shell-fit">
-      {overdueStrip}
       <TopBar
         {...topBarProps}
         subtitle={reservationMode ? 'Nova reserva' : 'Nova venda'}
@@ -2984,7 +3013,7 @@ export function App() {
                     <CreditCard size={20} />
                     {nfceEmitting ? 'Emitindo...' : 'Nota fiscal'}
                     {!fiscalReady
-                      ? <small>não configurada</small>
+                      ? (cart.length > 0 ? <small>não configurada</small> : null)
                       : (cartHasProduct ? nfceConfig?.environment : nfseConfig?.environment) === 'homologacao' && <small>teste</small>}
                   </button>
                   <button
@@ -3003,6 +3032,13 @@ export function App() {
         </aside>
       </section>
       {nfceModal}
+      {cpfPromptOpen && (
+        <CpfPromptModal
+          onConfirm={(cpf) => answerCpfPrompt(cpf)}
+          onSkip={() => answerCpfPrompt(null)}
+          onClose={() => setCpfPromptOpen(false)}
+        />
+      )}
       {offlineCustomerOpen && (
         <OfflineCustomerModal
           onConfirm={(customer) => {

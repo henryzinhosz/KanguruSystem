@@ -2090,16 +2090,12 @@ small {
   line-height: 1.6;
 }
 
-.subscription-overdue {
-  position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 40;
-  padding: 0.4rem 0.8rem;
+.top-bar-overdue {
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
   background: #f6dfa8;
   color: #6a4a00;
-  font-size: 0.8rem;
-  font-weight: 600;
-  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
 }

@@ -205,6 +205,8 @@ Deno.serve(async (request) => {
       .eq('cpf', cpf)
       .maybeSingle();
     tomador.razao_social_tomador = String(customer?.name ?? sale.client_name ?? '').slice(0, 150) || undefined;
+    // So o CPF (janela "CPF na nota?"): a NFS-e sai sem identificar o cliente, para nao correr risco de recusa.
+    if (!tomador.razao_social_tomador) delete tomador.cpf_tomador;
     if (customer?.email) tomador.email_tomador = String(customer.email).slice(0, 80);
     const phone = digits(customer?.phone);
     if (phone.length >= 6) tomador.telefone_tomador = phone.slice(0, 20);
