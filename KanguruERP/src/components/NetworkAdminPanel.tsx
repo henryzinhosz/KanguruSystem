@@ -103,7 +103,12 @@ export default function NetworkAdminPanel({ tenants }: { tenants: PlatformTenant
                       const password = window.prompt(`Nova senha para ${user.displayName} (mínimo 8 caracteres):`);
                       if (password) void run(() => manageNetworkUser({ action: 'set_password', authUid: user.authUid, password }), 'Senha trocada.');
                     }} className="inline-flex items-center gap-1 font-bold text-blue-700 hover:underline"><KeyRound className="h-3.5 w-3.5" />Senha</button>
-                    <button type="button" disabled={busy} onClick={() => void run(() => manageNetworkUser({ action: 'set_active', authUid: user.authUid, active: !user.isActive }), user.isActive ? 'Login desativado.' : 'Login reativado.')} className={`font-bold hover:underline ${user.isActive ? 'text-rose-700' : 'text-emerald-700'}`}>{user.isActive ? 'Desativar' : 'Reativar'}</button>
+                    <button type="button" disabled={busy} onClick={() => void run(() => manageNetworkUser({ action: 'set_active', authUid: user.authUid, active: !user.isActive }), user.isActive ? 'Login desativado.' : 'Login reativado.')} className={`font-bold hover:underline ${user.isActive ? 'text-orange-600' : 'text-emerald-700'}`}>{user.isActive ? 'Desativar' : 'Reativar'}</button>
+                    <button type="button" disabled={busy} onClick={() => {
+                      if (window.confirm(`Excluir o login de ${user.displayName} (${user.email})? Isso não pode ser desfeito. Para só bloquear o acesso, use Desativar.`)) {
+                        void run(() => manageNetworkUser({ action: 'delete', authUid: user.authUid }), 'Login excluído.');
+                      }
+                    }} className="font-bold text-red-600 hover:underline">Excluir</button>
                   </span>
                 </div>
               ))}

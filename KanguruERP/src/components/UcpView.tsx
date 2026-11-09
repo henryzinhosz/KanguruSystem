@@ -742,7 +742,7 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
                         <UserRound className="h-4 w-4 text-slate-400 shrink-0" />
                         <div className="min-w-0 flex-1">
                           <span className="block truncate font-bold text-slate-800">{user.email || user.authUid}</span>
-                          <span className="text-slate-500">{store?.tradeName || store?.legalName || user.unitId || 'Sem loja vinculada'}</span>
+                          <span className="text-slate-500">{store?.tradeName || store?.legalName || user.unitId || (user.role === 'ADMIN' ? 'Todas as lojas' : 'Sem loja vinculada')}</span>
                         </div>
                         <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-700">{roleLabel[user.role] ?? user.role}</span>
                       </li>
