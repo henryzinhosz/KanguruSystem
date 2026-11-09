@@ -16,7 +16,7 @@ Guardado em 2026-11-08 a pedido do usuário, para retomar depois.
 3. Reativar o PC da loja: UCP › ficha › **Terminais PDV**, gerar código para a loja Park Shopping e digitar no PDV da loja. Entra como terminal novo e usa a senha Gerente da loja.
 4. Excluir os terminais antigos em UCP › ficha › **Terminais PDV** › **Terminais ativados** › **Excluir** (depende da migration 20261125).
 
-## Melhoria proposta (aguarda aprovação)
+## Melhoria (aprovada e implementada em 2026-11-08, migration 20261126 e PDV 0.2.26)
 
 Causa da perda da chave ainda não comprovada. Hipótese: o servidor recusa uma chave antiga reapresentada depois da troca, por exemplo se o programa fechar logo depois de trocar a chave (numa atualização).
 

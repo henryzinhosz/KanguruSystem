@@ -546,6 +546,7 @@ export function App() {
       setTerminal(context);
       setCashNumber(context.displayName);
       setActivationCode('');
+      terminalAuth.clearRefusal();
       await routeToUnlock(true);
     } catch (error) {
       setMessage(errorMessage(error));
@@ -2051,6 +2052,9 @@ export function App() {
         <Brand />
         <h1>Ativar terminal</h1>
         <p>Digite o codigo fornecido para vincular este dispositivo a uma loja.</p>
+        {terminalAuth.lastRefusal() && (
+          <p className="field-error">Este computador perdeu a ativação. Peça um código de reativação ao suporte para voltar ao mesmo terminal. Motivo técnico: {terminalAuth.lastRefusal()}</p>
+        )}
         <form onSubmit={handleActivation}>
           <label>
             Nome do terminal
@@ -2060,6 +2064,7 @@ export function App() {
               maxLength={80}
               required
             />
+            <small>Com código de reativação o nome é ignorado: volta o terminal de antes.</small>
           </label>
           <label>
             Codigo de ativacao

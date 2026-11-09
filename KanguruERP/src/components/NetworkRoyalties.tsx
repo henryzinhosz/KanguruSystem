@@ -2,7 +2,7 @@ import { FormEvent, Fragment, useEffect, useState } from 'react';
 import { CheckCircle2, Clock, Landmark, Plus, Printer, Settings2, Trash2, Undo2, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { formatMoney, shiftMonthKey, toLocalDateKey } from '../db/finance';
-import { getRoyaltyReport, saveRoyaltyRule, setRoyaltyPaid, type RoyaltyReportRow, type RoyaltyRule, type RoyaltyTier } from '../db/network';
+import { getRoyaltyReport, saveRoyaltyRule, setRoyaltyPaid, setRoyaltyWaived, type RoyaltyReportRow, type RoyaltyRule, type RoyaltyTier } from '../db/network';
 import ValueInput from './ValueInput';
 import { Dropdown } from './NetworkFilters';
 
@@ -61,7 +61,7 @@ export default function NetworkRoyalties({ networkName }: { networkName: string 
 
   const total = rows.reduce((sum, row) => sum + row.royalty, 0);
   const paid = rows.filter(row => row.paid).reduce((sum, row) => sum + row.royalty, 0);
-  const pending = rows.filter(row => !row.paid && row.rule).reduce((sum, row) => sum + row.royalty, 0);
+  const pending = rows.filter(row => !row.paid && !row.waived && row.rule).reduce((sum, row) => sum + row.royalty, 0);
   const base = rows.reduce((sum, row) => sum + row.base, 0);
   const monthOptions = Array.from({ length: 13 }, (_, index) => shiftMonthKey(currentMonth, -index)).map(key => ({
     value: key,
@@ -79,10 +79,32 @@ export default function NetworkRoyalties({ networkName }: { networkName: string 
     }
   };
 
+  const waiveCharge = async (row: RoyaltyReportRow) => {
+    if (!window.confirm(`Excluir a cobrança de ${formatMoney(row.royalty)} de ${row.name} em ${monthName(month)}?`)) return;
+    try {
+      await setRoyaltyWaived(row.tenantId, month, true);
+      setMessage('Cobrança excluída.');
+      await load();
+    } catch (actionError) {
+      setError(errorText(actionError));
+    }
+  };
+
+  const restoreCharge = async (row: RoyaltyReportRow) => {
+    if (!window.confirm(`Voltar a cobrar ${row.name} em ${monthName(month)}?`)) return;
+    try {
+      await setRoyaltyWaived(row.tenantId, month, false);
+      setMessage('Cobrança restaurada.');
+      await load();
+    } catch (actionError) {
+      setError(errorText(actionError));
+    }
+  };
+
   const printReport = () => {
     const lines = rows.map(row => `<tr><td>${escapeHtml(row.name)}<br/><small>${escapeHtml(describeRule(row.paidRule || row.rule))}</small></td>
       <td class="num">${formatMoney(row.base)}</td><td class="num">${formatMoney(row.royalty)}</td>
-      <td>${row.paid ? `Pago em ${new Date(`${row.paidAt}T12:00:00`).toLocaleDateString('pt-BR')}` : row.rule ? 'Pendente' : 'Sem regra'}</td></tr>`).join('');
+      <td>${row.paid ? `Pago em ${new Date(`${row.paidAt}T12:00:00`).toLocaleDateString('pt-BR')}` : row.waived ? 'Cobrança excluída' : row.rule ? 'Pendente' : 'Sem regra'}</td></tr>`).join('');
     const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><title>Repasse ${monthName(month)}</title>
       <style>@page{size:A4;margin:14mm}body{font-family:Arial,sans-serif;font-size:11px;color:#111}h1{font-size:16px;margin:0}
       table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border-bottom:1px solid #ddd;padding:5px;text-align:left;vertical-align:top}
@@ -142,6 +164,7 @@ export default function NetworkRoyalties({ networkName }: { networkName: string 
                   <td className="p-2">
                     {row.paid
                       ? <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold" title={[row.notes, row.markedByName && `por ${row.markedByName}`].filter(Boolean).join(' · ')}>Pago em {new Date(`${row.paidAt}T12:00:00`).toLocaleDateString('pt-BR')}</span>
+                      : row.waived ? <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-bold" title={row.waivedByName ? `por ${row.waivedByName}` : undefined}>Cobrança excluída</span>
                       : row.rule ? <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 font-bold">Pendente</span>
                         : <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-500 font-bold">Sem regra</span>}
                   </td>
@@ -149,7 +172,14 @@ export default function NetworkRoyalties({ networkName }: { networkName: string 
                     <div className="flex justify-end gap-2 whitespace-nowrap">
                       {row.paid
                         ? <button type="button" onClick={() => void undoPayment(row)} className="inline-flex items-center gap-1 font-bold text-slate-600 hover:underline"><Undo2 className="w-3.5 h-3.5" />Desfazer</button>
-                        : row.rule && month !== currentMonth && <button type="button" onClick={() => setPaying(row)} className="inline-flex items-center gap-1 font-bold text-emerald-700 hover:underline"><CheckCircle2 className="w-3.5 h-3.5" />Marcar pago</button>}
+                        : row.waived
+                          ? <button type="button" onClick={() => void restoreCharge(row)} className="inline-flex items-center gap-1 font-bold text-slate-600 hover:underline"><Undo2 className="w-3.5 h-3.5" />Desfazer</button>
+                          : row.rule && month !== currentMonth && (
+                            <>
+                              <button type="button" onClick={() => setPaying(row)} className="inline-flex items-center gap-1 font-bold text-emerald-700 hover:underline"><CheckCircle2 className="w-3.5 h-3.5" />Marcar pago</button>
+                              <button type="button" onClick={() => void waiveCharge(row)} title="Excluir a cobrança" aria-label="Excluir a cobrança" className="text-rose-600 hover:text-rose-800"><Trash2 className="w-4 h-4" /></button>
+                            </>
+                          )}
                     </div>
                   </td>
                 </tr>

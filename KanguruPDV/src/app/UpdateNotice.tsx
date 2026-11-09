@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { check, type Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
+import { terminalAuth } from '../services/supabase/auth';
 
 // O App informa aqui se o aviso pode aparecer (nao pode no meio de uma venda).
 let updateAllowed = true;
@@ -70,6 +71,7 @@ export function UpdateNotice({ canShow }: { canShow: boolean }) {
     let total = 0;
     let received = 0;
     try {
+      await terminalAuth.prepareForRestart();
       await update.downloadAndInstall((event) => {
         if (event.event === 'Started') total = event.data.contentLength ?? 0;
         if (event.event === 'Progress') {
@@ -79,6 +81,7 @@ export function UpdateNotice({ canShow }: { canShow: boolean }) {
       });
       await relaunch();
     } catch (error) {
+      terminalAuth.resumeAfterFailedRestart();
       setErrorText(error instanceof Error ? error.message : String(error));
       setStage('error');
     }

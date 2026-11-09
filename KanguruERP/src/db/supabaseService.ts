@@ -823,6 +823,18 @@ export const supabaseService = {
     return (data || []).map(mapPosTerminalActivation);
   },
 
+  async createPlatformPosTerminalReactivation(terminalId: string, expiresInMinutes = 15): Promise<{ code: string; activation: PosTerminalActivation }> {
+    const { data, error } = await supabase.rpc('platform_create_pos_terminal_reactivation', {
+      p_terminal_id: terminalId,
+      p_expires_in_minutes: expiresInMinutes
+    });
+    if (error) throw error;
+    if (!data?.code || !data?.activation) {
+      throw new Error('Resposta inválida ao gerar o código de reativação.');
+    }
+    return { code: data.code, activation: mapPosTerminalActivation(data.activation) };
+  },
+
   async getPlatformPosTerminals(tenantId: string): Promise<PlatformPosTerminal[]> {
     const { data, error } = await supabase.rpc('platform_list_pos_terminals', { p_tenant_id: tenantId });
     if (error) throw error;
