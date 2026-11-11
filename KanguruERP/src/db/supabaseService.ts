@@ -1932,7 +1932,10 @@ export const supabaseService = {
       workOrderTerms: c.work_order_terms || undefined,
       workOrderDeliveryTerms: c.work_order_delivery_terms || undefined,
       instagram: c.instagram || undefined,
-      exchangeDays: c.exchange_days == null ? undefined : Number(c.exchange_days)
+      exchangeDays: c.exchange_days == null ? undefined : Number(c.exchange_days),
+      quoteMinMargin: c.quote_min_margin == null ? undefined : Number(c.quote_min_margin),
+      quoteInstallmentMarkup: c.quote_installment_markup == null ? undefined : Number(c.quote_installment_markup),
+      quoteValidDays: c.quote_valid_days == null ? undefined : Number(c.quote_valid_days)
     }));
   },
 
@@ -1954,6 +1957,9 @@ export const supabaseService = {
       work_order_terms: c.workOrderTerms?.trim() || null,
       work_order_delivery_terms: c.workOrderDeliveryTerms?.trim() || null,
       instagram: c.instagram?.trim() || null,
+      ...(c.quoteMinMargin != null ? { quote_min_margin: Math.max(0, Math.min(1000, c.quoteMinMargin)) } : {}),
+      ...(c.quoteInstallmentMarkup != null ? { quote_installment_markup: Math.max(0, Math.min(100, c.quoteInstallmentMarkup)) } : {}),
+      ...(c.quoteValidDays != null ? { quote_valid_days: Math.max(1, Math.min(60, Math.round(c.quoteValidDays))) } : {}),
       ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {}),
       // Antes da migration 20261111 a coluna nao existe: so envia quando foi lida do banco.
       ...(c.cardFeeTable !== undefined ? { card_fee_table: c.cardFeeTable } : {}),

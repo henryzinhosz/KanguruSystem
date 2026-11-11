@@ -36,6 +36,16 @@ fn clear_device_session() -> Result<(), String> {
     }
 }
 
+// Endereco fixo: abre o Boa Dica no navegador padrao (nenhum dado de fora entra no comando).
+#[tauri::command]
+fn open_boadica() -> Result<(), String> {
+    std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", "https://www.boadica.com.br/"])
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_sql::Builder::new().build())
@@ -45,6 +55,7 @@ fn main() {
             save_device_session,
             load_device_session,
             clear_device_session,
+            open_boadica,
             raw_printer::list_printers,
             raw_printer::print_raw
         ])

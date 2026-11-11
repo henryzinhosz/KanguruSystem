@@ -46,6 +46,9 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   cityIbgeCode: '',
   simplesNacionalOption: '3',
   exchangeDays: 7,
+  quoteMinMargin: 30,
+  quoteInstallmentMarkup: 13,
+  quoteValidDays: 3,
   cashDifferenceAlert: 10,
   fixedCost: 0,
   maxItemDiscountPercent: 0,
@@ -205,6 +208,9 @@ export default function ConfiguracoesView({
       cityIbgeCode: store.cityIbgeCode || '',
       simplesNacionalOption: store.simplesNacionalOption || '3',
       exchangeDays: store.exchangeDays ?? 7,
+      quoteMinMargin: store.quoteMinMargin ?? 30,
+      quoteInstallmentMarkup: store.quoteInstallmentMarkup ?? 13,
+      quoteValidDays: store.quoteValidDays ?? 3,
       cashDifferenceAlert: store.cashDifferenceAlert ?? 10,
       fixedCost: store.fixedCost,
       maxItemDiscountPercent: store.maxItemDiscountPercent,
@@ -609,6 +615,31 @@ function StoreFields({ form, onChange, section }: {
           decimals={0}
           value={form.exchangeDays ?? 7}
           onValueChange={value => onChange('exchangeDays', Math.min(365, Math.max(0, value ?? 0)))}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Margem mínima do orçamento de PC (%) <span className="font-normal text-slate-400">(abaixo dela, o PDV pede a senha Gerente)</span>
+        <ValueInput
+          value={form.quoteMinMargin ?? 30}
+          onValueChange={value => onChange('quoteMinMargin', Math.min(1000, Math.max(0, value ?? 0)))}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Acréscimo no 12x do orçamento (%) <span className="font-normal text-slate-400">(valor que o cliente paga a mais em 12x; o vendedor pode mudar no orçamento)</span>
+        <ValueInput
+          value={form.quoteInstallmentMarkup ?? 13}
+          onValueChange={value => onChange('quoteInstallmentMarkup', Math.min(100, Math.max(0, value ?? 0)))}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Validade do orçamento (dias)
+        <ValueInput
+          decimals={0}
+          value={form.quoteValidDays ?? 3}
+          onValueChange={value => onChange('quoteValidDays', Math.min(60, Math.max(1, value ?? 1)))}
           className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
         />
       </label>
