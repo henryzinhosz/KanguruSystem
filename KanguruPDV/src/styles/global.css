@@ -2099,3 +2099,35 @@ small {
   font-weight: 700;
   white-space: nowrap;
 }
+
+/* Orcamento de PC */
+.qt-tabs { display: flex; gap: 0.4rem; margin: 0.4rem 0 0.2rem; }
+.qt-tabs button { padding: 0.45rem 0.9rem; border: 1px solid #c5d3c1; border-radius: 6px; background: #fff; font-weight: 700; color: #4f5a52; cursor: pointer; }
+.qt-tabs button.is-active { background: #24452c; border-color: #24452c; color: #fff; }
+.qt-row-wrap { display: flex; align-items: center; gap: 0.5rem; }
+.qt-row-wrap .wo-row { flex: 1; }
+.qt-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.6rem; margin: 0.4rem 0 0.8rem; }
+.qt-span-2 { grid-column: span 2; }
+.qt-table { display: grid; gap: 0.4rem; }
+.qt-line { display: grid; grid-template-columns: 130px minmax(160px, 1fr) 56px 104px 80px 110px 76px; gap: 0.4rem; align-items: start; }
+.qt-head { font-size: 0.72rem; font-weight: 700; color: #5c7360; text-transform: uppercase; }
+.qt-line.is-below input { border-color: #c0392b; }
+.qt-below { grid-column: 1 / -1; }
+.qt-part { position: relative; }
+.qt-stock { display: grid; padding: 0.35rem 0; font-weight: 700; }
+.qt-stock small { color: #5c7360; font-weight: 400; }
+.qt-suggest { position: absolute; z-index: 5; top: 100%; left: 0; right: 0; background: #fff; box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18); }
+.qt-na { padding: 0.5rem 0; color: #5c7360; }
+.qt-actions { display: flex; gap: 0.2rem; }
+.qt-add { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin: 0.6rem 0; }
+.qt-add .wo-service-search { flex: 1; min-width: 240px; margin: 0; }
+.qt-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0.6rem 0; }
+.qt-buttons { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin-top: 0.6rem; }
+.qt-danger { color: #a33; margin-left: auto; }
+@media (max-width: 900px) {
+  .qt-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .qt-line { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .qt-head { display: none; }
+  .qt-part { grid-column: 1 / -1; }
+  .qt-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

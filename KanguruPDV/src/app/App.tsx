@@ -50,6 +50,7 @@ import { ReceiptsPanel } from './ReceiptsPanel';
 import { ReturnModal, type ReturnDone } from './ReturnModal';
 import { TradeInPanel, type TradeInDone } from './TradeInPanel';
 import { WorkOrdersPanel, type WorkOrderCharge } from './WorkOrdersPanel';
+import { QuotesPanel } from './QuotesPanel';
 import { deliverWorkOrder, getWorkOrder } from '../services/supabase/workOrders';
 import { printWorkOrder } from './workOrderPrint';
 import { getCustomerCreditBalance } from '../services/supabase/returns';
@@ -144,6 +145,7 @@ type Screen =
   | 'warranty'
   | 'trade-in'
   | 'work-orders'
+  | 'quotes'
   | 'cash-movement'
   | 'cash-close';
 type PaymentMethod = PaymentMethodKey;
@@ -451,6 +453,8 @@ export function App() {
   // Ordem de Servico: vendedor da tela, OS a reabrir e cobranca em andamento na venda.
   const [workOrderSellerCode, setWorkOrderSellerCode] = useState('');
   const [workOrderSeller, setWorkOrderSeller] = useState<PosSeller | null>(null);
+  const [quoteSellerCode, setQuoteSellerCode] = useState('');
+  const [quoteSeller, setQuoteSeller] = useState<PosSeller | null>(null);
   const [workOrdersKey, setWorkOrdersKey] = useState(0);
   const [workOrderFocus, setWorkOrderFocus] = useState<string | null>(null);
   const [workOrderCharge, setWorkOrderCharge] = useState<WorkOrderCharge | null>(null);
@@ -546,6 +550,7 @@ export function App() {
       setTerminal(context);
       setCashNumber(context.displayName);
       setActivationCode('');
+      terminalAuth.clearRefusal();
       await routeToUnlock(true);
     } catch (error) {
       setMessage(errorMessage(error));
@@ -1303,6 +1308,9 @@ export function App() {
       case 'work-orders':
         openWorkOrders(null);
         break;
+      case 'quotes':
+        setScreen('quotes');
+        break;
       case 'receipts':
         if (offlineNow) void reprintLastOfflineReceipt();
         else setScreen('receipts');
@@ -2051,6 +2059,9 @@ export function App() {
         <Brand />
         <h1>Ativar terminal</h1>
         <p>Digite o codigo fornecido para vincular este dispositivo a uma loja.</p>
+        {terminalAuth.lastRefusal() && (
+          <p className="field-error">Este computador perdeu a ativação. Peça um código de reativação ao suporte para voltar ao mesmo terminal. Motivo técnico: {terminalAuth.lastRefusal()}</p>
+        )}
         <form onSubmit={handleActivation}>
           <label>
             Nome do terminal
@@ -2060,6 +2071,7 @@ export function App() {
               maxLength={80}
               required
             />
+            <small>Com código de reativação o nome é ignorado: volta o terminal de antes.</small>
           </label>
           <label>
             Codigo de ativacao
@@ -2362,6 +2374,41 @@ export function App() {
           loadStore={loadStoreProfile}
           onPaidCash={() => void openCashDrawer()}
           onDone={(result) => void finishTradeIn(result)}
+        />
+      </main>
+    );
+  }
+
+  if (screen === 'quotes') {
+    return (
+      <main className="sale-shell">
+        <header className="sale-header">
+          <div>
+            <Brand compact />
+            <div>
+              <strong>Orçamentos de PC</strong>
+              <span>{terminal?.tradeName ?? terminal?.unitId}</span>
+            </div>
+          </div>
+          <div className="header-actions">
+            <button className="text-action reservation-back" type="button" onClick={() => setScreen('menu')}>
+              Voltar ao menu
+            </button>
+          </div>
+        </header>
+        <QuotesPanel
+          seller={quoteSeller}
+          sellerSlot={(
+            <SellerCodeField
+              label="Código do vendedor"
+              value={quoteSellerCode}
+              seller={quoteSeller}
+              disabled={false}
+              onValue={setQuoteSellerCode}
+              onSeller={setQuoteSeller}
+            />
+          )}
+          loadStore={loadStoreProfile}
         />
       </main>
     );

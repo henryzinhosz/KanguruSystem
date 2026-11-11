@@ -283,6 +283,8 @@ export interface RoyaltyReportRow {
   notes: string | null;
   markedByName: string | null;
   paidRule: RoyaltyRule | null;
+  waived: boolean;
+  waivedByName: string | null;
 }
 
 const timeZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo';
@@ -311,6 +313,15 @@ export async function setRoyaltyPaid(tenantId: string, month: string, paid: bool
     p_paid_at: paidAt || null,
     p_notes: notes || null,
     p_tz: timeZone(),
+  });
+  if (error) throw error;
+}
+
+export async function setRoyaltyWaived(tenantId: string, month: string, waived: boolean): Promise<void> {
+  const { error } = await supabase.rpc('network_set_royalty_waived', {
+    p_tenant_id: tenantId,
+    p_month: month,
+    p_waived: waived,
   });
   if (error) throw error;
 }

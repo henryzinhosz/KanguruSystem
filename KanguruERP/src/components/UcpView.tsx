@@ -108,6 +108,7 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
   const [terminalsError, setTerminalsError] = useState<string | null>(null);
   const [terminalToDelete, setTerminalToDelete] = useState<PlatformPosTerminal | null>(null);
   const [isDeletingTerminal, setIsDeletingTerminal] = useState(false);
+  const [reactivatingTerminalId, setReactivatingTerminalId] = useState<string | null>(null);
   const [pdvOperators, setPdvOperators] = useState<PdvOperator[]>([]);
   const [isLoadingPdvOperators, setIsLoadingPdvOperators] = useState(false);
   const [pdvOperatorsError, setPdvOperatorsError] = useState<string | null>(null);
@@ -184,6 +185,24 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
       setTerminalToDelete(fresh.find(item => item.id === terminal.id) ?? null);
     } catch (refreshError) {
       setError(getErrorMessage(refreshError, 'Não foi possível conferir o terminal.'));
+    }
+  };
+
+  const handleReactivateTerminal = async (terminal: PlatformPosTerminal) => {
+    if (!selectedTenant) return;
+    setReactivatingTerminalId(terminal.id);
+    setError(null);
+    setSuccess(null);
+    try {
+      const result = await supabaseService.createPlatformPosTerminalReactivation(terminal.id);
+      setGeneratedActivationCode(result.code);
+      setCopiedActivationCode(false);
+      setTerminalActivations(current => [result.activation, ...current]);
+      setSuccess(`Código de reativação do terminal ${terminal.name} gerado (vale 15 minutos). Digite-o no PDV: o computador volta para este mesmo terminal e, se outro computador estiver usando, ele perde o acesso.`);
+    } catch (reactivateError) {
+      setError(getErrorMessage(reactivateError, 'Não foi possível gerar o código de reativação.'));
+    } finally {
+      setReactivatingTerminalId(null);
     }
   };
 
@@ -692,10 +711,15 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
                                   ? <span className="inline-flex rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-700">Aberto desde {formatDateTime(terminal.openCashAt)}</span>
                                   : <span className="inline-flex rounded-md border border-slate-200 bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">Fechado</span>}
                               </td>
-                              <td className="px-4 py-2 text-right">
-                                <button type="button" onClick={() => void askDeleteTerminal(terminal)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-2.5 py-1 font-bold text-rose-700 transition hover:bg-rose-50">
-                                  <Trash2 className="h-3.5 w-3.5" />Excluir
-                                </button>
+                              <td className="px-4 py-2">
+                                <div className="flex justify-end gap-2">
+                                  <button type="button" onClick={() => void handleReactivateTerminal(terminal)} disabled={reactivatingTerminalId !== null} title="Gera um código para o computador voltar a este mesmo terminal" className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 px-2.5 py-1 font-bold text-blue-700 transition hover:bg-blue-50 disabled:opacity-50">
+                                    {reactivatingTerminalId === terminal.id ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}Reativar
+                                  </button>
+                                  <button type="button" onClick={() => void askDeleteTerminal(terminal)} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-2.5 py-1 font-bold text-rose-700 transition hover:bg-rose-50">
+                                    <Trash2 className="h-3.5 w-3.5" />Excluir
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );

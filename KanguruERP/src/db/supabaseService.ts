@@ -823,6 +823,18 @@ export const supabaseService = {
     return (data || []).map(mapPosTerminalActivation);
   },
 
+  async createPlatformPosTerminalReactivation(terminalId: string, expiresInMinutes = 15): Promise<{ code: string; activation: PosTerminalActivation }> {
+    const { data, error } = await supabase.rpc('platform_create_pos_terminal_reactivation', {
+      p_terminal_id: terminalId,
+      p_expires_in_minutes: expiresInMinutes
+    });
+    if (error) throw error;
+    if (!data?.code || !data?.activation) {
+      throw new Error('Resposta inválida ao gerar o código de reativação.');
+    }
+    return { code: data.code, activation: mapPosTerminalActivation(data.activation) };
+  },
+
   async getPlatformPosTerminals(tenantId: string): Promise<PlatformPosTerminal[]> {
     const { data, error } = await supabase.rpc('platform_list_pos_terminals', { p_tenant_id: tenantId });
     if (error) throw error;
@@ -1920,7 +1932,10 @@ export const supabaseService = {
       workOrderTerms: c.work_order_terms || undefined,
       workOrderDeliveryTerms: c.work_order_delivery_terms || undefined,
       instagram: c.instagram || undefined,
-      exchangeDays: c.exchange_days == null ? undefined : Number(c.exchange_days)
+      exchangeDays: c.exchange_days == null ? undefined : Number(c.exchange_days),
+      quoteMinMargin: c.quote_min_margin == null ? undefined : Number(c.quote_min_margin),
+      quoteInstallmentMarkup: c.quote_installment_markup == null ? undefined : Number(c.quote_installment_markup),
+      quoteValidDays: c.quote_valid_days == null ? undefined : Number(c.quote_valid_days)
     }));
   },
 
@@ -1942,6 +1957,9 @@ export const supabaseService = {
       work_order_terms: c.workOrderTerms?.trim() || null,
       work_order_delivery_terms: c.workOrderDeliveryTerms?.trim() || null,
       instagram: c.instagram?.trim() || null,
+      ...(c.quoteMinMargin != null ? { quote_min_margin: Math.max(0, Math.min(1000, c.quoteMinMargin)) } : {}),
+      ...(c.quoteInstallmentMarkup != null ? { quote_installment_markup: Math.max(0, Math.min(100, c.quoteInstallmentMarkup)) } : {}),
+      ...(c.quoteValidDays != null ? { quote_valid_days: Math.max(1, Math.min(60, Math.round(c.quoteValidDays))) } : {}),
       ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {}),
       // Antes da migration 20261111 a coluna nao existe: so envia quando foi lida do banco.
       ...(c.cardFeeTable !== undefined ? { card_fee_table: c.cardFeeTable } : {}),

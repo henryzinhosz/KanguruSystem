@@ -4,6 +4,7 @@ import {
   BanknoteArrowUp,
   ChartLine,
   ClipboardList,
+  FileText,
   Gamepad2,
   Inbox,
   Lock,
@@ -21,7 +22,7 @@ import {
 // atalhos de teclado (F1, 1-0) e sub-menus em janela numerada.
 
 export type MenuAction =
-  | 'sale' | 'trade-in' | 'work-orders' | 'reservations' | 'returns' | 'warranty' | 'receipts' | 'new-reservation'
+  | 'sale' | 'trade-in' | 'work-orders' | 'quotes' | 'reservations' | 'returns' | 'warranty' | 'receipts' | 'new-reservation'
   | 'sangria' | 'suprimento' | 'partial' | 'drawer'
   | 'open-cash' | 'close-cash' | 'reprint-opening' | 'lock'
   | 'product-lookup' | 'today-sales' | 'seller-report'
@@ -85,6 +86,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
   const tiles: { key: string; action: MenuAction; disabled: boolean }[] = [
     { key: '1', action: 'trade-in', disabled: offline || !cashOpen },
     { key: '0', action: 'work-orders', disabled: offline },
+    { key: 'o', action: 'quotes', disabled: offline },
     { key: '2', action: 'reservations', disabled: offline || !cashOpen },
     { key: '3', action: 'returns', disabled: offline || !cashOpen },
     { key: '4', action: 'warranty', disabled: offline },
@@ -150,6 +152,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
           {tile('warranty', 'green', <ShieldCheck size={28} strokeWidth={1.8} />, 'Garantia', '4', offline)}
           {tile('trade-in', 'green', <Gamepad2 size={28} strokeWidth={1.8} />, 'Troca Gamer', '1', offline || !cashOpen)}
           {tile('work-orders', 'green', <Wrench size={28} strokeWidth={1.8} />, 'Ordem de serviço', '0', offline)}
+          {tile('quotes', 'green', <FileText size={28} strokeWidth={1.8} />, 'Orçamento de PC', 'O', offline, false, true)}
         </div>
       </section>
       <section className="menu-side">

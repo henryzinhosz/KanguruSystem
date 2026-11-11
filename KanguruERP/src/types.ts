@@ -529,6 +529,9 @@ export interface StoreConfig {
   workOrderDeliveryTerms?: string;
   instagram?: string; // perfil da loja (QR code do cupom)
   exchangeDays?: number; // prazo de troca em dias (2.9; padrao 7)
+  quoteMinMargin?: number; // margem minima do orcamento de PC (%); abaixo pede senha Gerente
+  quoteInstallmentMarkup?: number; // acrescimo no 12x do orcamento (%)
+  quoteValidDays?: number; // validade padrao do orcamento (dias)
   // NFS-e Nacional: inscricao municipal, municipio (IBGE) e opcao do Simples (1 nao optante, 2 MEI, 3 ME/EPP).
   municipalRegistration?: string;
   cityIbgeCode?: string;
