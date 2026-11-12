@@ -627,14 +627,6 @@ function StoreFields({ form, onChange, section }: {
         />
       </label>
       <label className="block text-xs font-bold text-slate-700">
-        Acréscimo no 12x do orçamento (%) <span className="font-normal text-slate-400">(valor que o cliente paga a mais em 12x; o vendedor pode mudar no orçamento)</span>
-        <ValueInput
-          value={form.quoteInstallmentMarkup ?? 13}
-          onValueChange={value => onChange('quoteInstallmentMarkup', Math.min(100, Math.max(0, value ?? 0)))}
-          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
-        />
-      </label>
-      <label className="block text-xs font-bold text-slate-700">
         Validade do orçamento (dias)
         <ValueInput
           decimals={0}

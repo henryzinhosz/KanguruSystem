@@ -144,7 +144,7 @@ Deno.serve(async (request) => {
   const productIds = Array.from(new Set(items.map((item) => String(item.productId))));
   const { data: products } = await db
     .from('products')
-    .select('id, name, ncm, cest, icms_origin, icms_cst, csosn, icms_rate, tax_burden_percent')
+    .select('id, name, ncm, cest, icms_origin, icms_cst, csosn, icms_rate, tax_burden_percent, invoice_details')
     .eq('tenant_id', terminal.tenant_id)
     .in('id', productIds);
   const productMap = new Map(((products ?? []) as Product[]).map((product) => [product.id, product]));
@@ -190,6 +190,8 @@ Deno.serve(async (request) => {
     };
     if (gross - lineTotal > 0.004) focusItem.valor_desconto = round2(gross - lineTotal);
     if (product.cest) focusItem.cest = String(product.cest).replace(/\D/g, '');
+    // PC montado (orcamento de PC): pecas e valores no detalhe do item (infAdProd, ate 500).
+    if (product.invoice_details) focusItem.informacoes_adicionais_item = String(product.invoice_details).slice(0, 500);
     // Regime normal com ICMS proprio (CST 00/20): base = valor do item.
     if (!product.csosn && ['00', '20'].includes(String(product.icms_cst))) {
       const rate = Number(product.icms_rate ?? 0);

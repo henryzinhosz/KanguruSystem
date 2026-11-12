@@ -2131,3 +2131,4 @@ small {
   .qt-part { grid-column: 1 / -1; }
   .qt-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.qt-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
