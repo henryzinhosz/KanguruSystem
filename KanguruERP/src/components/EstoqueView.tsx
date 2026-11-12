@@ -25,7 +25,7 @@ import ValueInput from './ValueInput';
 import LabelPrintModal, { LabelRequest } from './LabelPrintModal';
 
 // Categorias de produto (lista da loja; 2026-11-06).
-const PRODUCT_CATEGORIES = ['Carregadores', 'Cabos', 'Adaptadores', 'Fones', 'Periféricos', 'Videogames', 'Geek', 'Peças', 'Computadores', 'Cards', 'Outros'];
+const PRODUCT_CATEGORIES = ['Carregadores', 'Cabos', 'Adaptadores', 'Fones', 'Periféricos', 'Videogames', 'Geek', 'Peças', 'Computadores', 'PCs montados', 'Cards', 'Outros'];
 
 // Estoque minimo padrao quando o produto nao tem um definido (mesmo valor do Dashboard).
 const DEFAULT_MIN_STOCK = 2;

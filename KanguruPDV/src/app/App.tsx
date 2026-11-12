@@ -51,6 +51,7 @@ import { ReturnModal, type ReturnDone } from './ReturnModal';
 import { TradeInPanel, type TradeInDone } from './TradeInPanel';
 import { WorkOrdersPanel, type WorkOrderCharge } from './WorkOrdersPanel';
 import { QuotesPanel } from './QuotesPanel';
+import type { QuoteConversion } from '../services/supabase/quotes';
 import { deliverWorkOrder, getWorkOrder } from '../services/supabase/workOrders';
 import { printWorkOrder } from './workOrderPrint';
 import { getCustomerCreditBalance } from '../services/supabase/returns';
@@ -1528,6 +1529,30 @@ export function App() {
     return null;
   }
 
+  // Orcamento convertido: o PC (cadastro com 1 unidade) e as pecas do estoque vao para o carrinho.
+  async function startQuoteSale(conversion: QuoteConversion): Promise<string | null> {
+    if (!cashSession) return 'Abra o caixa para vender o orçamento.';
+    if (cart.length > 0) return 'Há uma venda em andamento: finalize ou limpe o carrinho antes de vender o orçamento.';
+    const pc = (await searchPosItems(conversion.sku)).find((item) => item.itemType === 'PRODUCT' && item.id === conversion.productId);
+    if (!pc) return 'Não foi possível carregar o computador no caixa. Clique em "Ir para a venda" de novo.';
+    const items: CartItem[] = [{ ...pc, quantity: 1, discountPercent: 0 }];
+    const skipped: string[] = [];
+    for (const line of conversion.stockLines) {
+      const found = line.sku ? (await searchPosItems(line.sku)).find((item) => item.id === line.productId) : undefined;
+      if (!found || found.requiresUnitSelection) {
+        skipped.push(found?.name ?? line.sku ?? 'peça do estoque');
+        continue;
+      }
+      items.push({ ...found, quantity: line.quantity, discountPercent: 0 });
+    }
+    setCart(items);
+    setPaymentLines([]);
+    if (conversion.quote.sellerCode) setSaleSellerCode(conversion.quote.sellerCode);
+    setScreen('sale');
+    setMessage(`Orçamento nº ${conversion.quote.quoteNumber} no caixa: escolha a forma de pagamento e finalize.${skipped.length ? ` Adicione pela busca (escolhendo o serial): ${skipped.join(', ')}.` : ''}`);
+    return null;
+  }
+
   function cancelWorkOrderCharge() {
     const number = workOrderCharge?.order.orderNumber;
     setCart((current) => current.filter((item) => !item.workOrderId));
@@ -2409,6 +2434,7 @@ export function App() {
             />
           )}
           loadStore={loadStoreProfile}
+          onConvert={startQuoteSale}
         />
       </main>
     );

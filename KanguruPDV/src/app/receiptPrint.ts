@@ -1,3 +1,4 @@
+import { itemDetails, loadItemDetails } from '../services/supabase/itemDetails';
 import QRCode from 'qrcode';
 import { findProductWarranty, warrantyText } from '../services/supabase/warranties';
 
@@ -91,7 +92,8 @@ function buildNfceHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null, l
   const itemRows = items.map((item, index) => `
     <div class="mono">${String(index + 1).padStart(3, '0')} ${e(item.itemSku)} ${e(item.itemName.toUpperCase())}</div>
     <div class="mono row item-values"><span>${qty(item.quantity)} UN &nbsp;X ${money(item.unitPrice)}(${money(itemTax(item.lineTotal))})</span><span>${money(item.lineTotal)}</span></div>
-    ${item.serials.length ? `<div class="mono item-values">S/N ${e(item.serials.join(', '))}</div>` : ''}`).join('');
+    ${item.serials.length ? `<div class="mono item-values">S/N ${e(item.serials.join(', '))}</div>` : ''}
+    ${itemDetails(item.itemSku) ? `<div class="mono item-values">${e(itemDetails(item.itemSku) ?? '')}</div>` : ''}`).join('');
 
   const storeLines = [
     `<div class="issuer-name">${e((store?.legalName || store?.tradeName || '').toUpperCase())}</div>`,
@@ -223,6 +225,7 @@ export function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null
     <div class="row"><span>${String(index + 1).padStart(3, '0')} ${e(item.itemName.toUpperCase())}</span><span>${money(item.lineTotal)}</span></div>
     <div class="sub">${money(item.quantity)} x R$ ${money(item.unitPrice)} R$${item.discountPercent > 0 ? ` &nbsp;(desc. ${money(item.discountPercent)}%)` : ''}</div>
     ${item.serials.length ? `<div class="sub">S/N ${e(item.serials.join(', '))}</div>` : ''}
+    ${itemDetails(item.itemSku) ? `<div class="sub">${e(itemDetails(item.itemSku) ?? '')}</div>` : ''}
     ${item.itemType === 'PRODUCT' && itemWarranty(item.itemSku) ? `<div class="sub">Garantia: ${e(itemWarranty(item.itemSku) ?? '')}</div>` : ''}`).join('');
 
   const storeLines = [
@@ -305,6 +308,8 @@ export function buildHtml(receipt: PosSaleReceipt, store: PosStoreProfile | null
 
 // Iframe invisivel; imprime depois que logo e QR carregarem (limite de 3 s).
 export async function printSaleReceipt(receipt: PosSaleReceipt, store: PosStoreProfile | null, changeAmount = 0) {
+  // Pecas do PC montado (orcamento) saem abaixo do item.
+  await loadItemDetails(receipt.items.map((item) => item.itemSku));
   // Impressora termica escolhida neste PC: imprime direto; senao (ou se falhar) janela do Windows.
   if (await printReceiptDirect(receipt, store, changeAmount)) return;
   // NFC-e autorizada: QR code de consulta da Sefaz; Nao Fiscal: Instagram da loja.

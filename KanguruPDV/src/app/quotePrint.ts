@@ -13,9 +13,9 @@ const escapeHtml = (value: string) =>
 
 const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
 
-// Parcelado em 12x: total com o acrescimo definido no orcamento.
-export function installmentPlan(total: number, markup: number) {
-  const installmentTotal = round2(total * (1 + markup / 100));
+// Parcelado em 12x: mesma conta da venda (taxa da tabela do ERP repassada, a loja recebe o total).
+export function installmentPlan(total: number, rate: number) {
+  const installmentTotal = rate > 0 && rate < 100 ? round2(total / (1 - rate / 100)) : total;
   return { installmentTotal, installment: round2(installmentTotal / 12) };
 }
 
@@ -36,8 +36,8 @@ export async function copyText(text: string): Promise<void> {
   if (!copied) throw new Error('Não foi possível copiar o texto.');
 }
 
-export function quoteWhatsappText(quote: QuoteRecord, store: PosStoreProfile | null): string {
-  const plan = installmentPlan(quote.totalPrice, quote.installmentMarkup);
+export function quoteWhatsappText(quote: QuoteRecord, store: PosStoreProfile | null, rate: number): string {
+  const plan = installmentPlan(quote.totalPrice, rate);
   const lines = quote.items.map((item) => {
     const quantity = item.quantity > 1 ? `${item.quantity}x ` : '';
     return `• ${item.partType}: ${quantity}${item.description} — ${currency.format(item.lineTotal)}`;
@@ -54,9 +54,9 @@ export function quoteWhatsappText(quote: QuoteRecord, store: PosStoreProfile | n
   ].join('\n');
 }
 
-function buildQuoteHtml(quote: QuoteRecord, store: PosStoreProfile | null, logo: string): string {
+function buildQuoteHtml(quote: QuoteRecord, store: PosStoreProfile | null, logo: string, rate: number): string {
   const e = escapeHtml;
-  const plan = installmentPlan(quote.totalPrice, quote.installmentMarkup);
+  const plan = installmentPlan(quote.totalPrice, rate);
   const storeLines = [
     store?.legalName ? `<strong>${e(store.legalName)}</strong>` : '',
     [store?.tradeName, store?.cnpj ? `CNPJ ${store.cnpj}` : ''].filter(Boolean).map((part) => e(String(part))).join(' · '),
@@ -119,6 +119,6 @@ function buildQuoteHtml(quote: QuoteRecord, store: PosStoreProfile | null, logo:
 </html>`;
 }
 
-export async function printQuote(quote: QuoteRecord, store: PosStoreProfile | null) {
-  await printHtmlDocument(buildQuoteHtml(quote, store, new URL(logoUrl, window.location.href).href));
+export async function printQuote(quote: QuoteRecord, store: PosStoreProfile | null, rate: number) {
+  await printHtmlDocument(buildQuoteHtml(quote, store, new URL(logoUrl, window.location.href).href, rate));
 }

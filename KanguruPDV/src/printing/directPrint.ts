@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { itemWarranty } from '../app/receiptPrint';
+import { itemDetails } from '../services/supabase/itemDetails';
 import type { PosSaleReceipt } from '../services/supabase/sales';
 import type { PosStoreProfile } from '../services/supabase/terminal';
 import { formatReceiptNumber, instagramUrl } from '../app/receiptPrint';
@@ -110,6 +111,8 @@ async function davVia(doc: EscPos, receipt: PosSaleReceipt, store: PosStoreProfi
     doc.pair(`${String(index + 1).padStart(3, '0')} ${item.itemName.toUpperCase()}`, money(item.lineTotal));
     doc.line(`  ${money(item.quantity)} x R$ ${money(item.unitPrice)}${item.discountPercent > 0 ? ` (desc. ${money(item.discountPercent)}%)` : ''}`);
     if (item.serials.length) doc.line(`  S/N ${item.serials.join(', ')}`);
+    const parts = itemDetails(item.itemSku);
+    if (parts) doc.line(`  ${parts}`);
     const warranty = item.itemType === 'PRODUCT' ? itemWarranty(item.itemSku) : null;
     if (warranty) doc.line(`  Garantia: ${warranty}`);
   });
@@ -174,6 +177,8 @@ async function buildNfce(receipt: PosSaleReceipt, store: PosStoreProfile | null,
       doc.line(`${String(index + 1).padStart(3, '0')} ${item.itemSku} ${item.itemName.toUpperCase()}`.slice(0, COLUMNS));
       doc.pair(`   ${item.quantity.toLocaleString('pt-BR', { minimumFractionDigits: 3 })} UN X ${money(item.unitPrice)}(${money(itemTax)})`, money(item.lineTotal));
       if (item.serials.length) doc.line(`   S/N ${item.serials.join(', ')}`);
+      const parts = itemDetails(item.itemSku);
+      if (parts) doc.line(`   ${parts}`);
     });
     doc.rule().bold(true);
     doc.pair('QTD. TOTAL DE ITENS', String(items.length).padStart(3, '0'));

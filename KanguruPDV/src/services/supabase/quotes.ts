@@ -26,7 +26,7 @@ export interface QuoteRecord {
   quoteId: string;
   kind: QuoteKind;
   quoteNumber: number | null;
-  status: 'ABERTO' | 'CANCELADO';
+  status: 'ABERTO' | 'CONVERTIDO' | 'VENDIDO' | 'CANCELADO';
   title: string;
   customerName: string | null;
   customerPhone: string | null;
@@ -39,8 +39,18 @@ export interface QuoteRecord {
   sellerCode: string | null;
   sellerName: string | null;
   marginApproved: boolean;
+  productId: string | null;
+  saleId: string | null;
+  soldAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface QuoteConversion {
+  quote: QuoteRecord;
+  productId: string;
+  sku: string;
+  stockLines: Array<{ productId: string; sku: string | null; quantity: number }>;
 }
 
 export interface QuoteSettings {
@@ -129,6 +139,17 @@ export async function saveQuote(input: SaveQuoteInput): Promise<SaveQuoteResult>
 export async function cancelQuote(quoteId: string): Promise<void> {
   const { error } = await supabase.rpc('cancel_pos_quote', { p_quote_id: quoteId });
   if (error) throw error;
+}
+
+export async function convertQuote(quoteId: string): Promise<QuoteConversion> {
+  const { data, error } = await supabase.rpc('convert_pos_quote', { p_quote_id: quoteId });
+  if (error) throw error;
+  const result = data as QuoteConversion;
+  return {
+    ...result,
+    quote: mapQuote(result.quote),
+    stockLines: (result.stockLines ?? []).map((line) => ({ ...line, quantity: Number(line.quantity) })),
+  };
 }
 
 export async function searchPartSuggestions(query: string): Promise<PartSuggestion[]> {
