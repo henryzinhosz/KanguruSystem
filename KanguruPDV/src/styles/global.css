@@ -1864,6 +1864,25 @@ small {
 .trade-in-customer span { display: grid; flex: 1; }
 .trade-in-customer small { color: #64748b; }
 @media (max-width: 640px) { .trade-in-grid { grid-template-columns: 1fr; } }
+/* Troca Gamer: escolha Videogame/iPhone e avaliacao do iPhone (2026-11-17) */
+.trade-in-device { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin: 1rem 0 0.4rem; }
+.trade-in-device button { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; min-height: 54px; border: 1px solid #94a3b8; border-radius: 12px; color: #334155; background: #ffffff; font: 700 1rem var(--font-sans); cursor: pointer; }
+.trade-in-device button.is-active { border-color: var(--accent); color: #ffffff; background: var(--accent); }
+.trade-in-grid > label { align-content: start; }
+.trade-in-label { display: block; margin: 1rem 0 0.45rem; color: #475569; font-size: 0.85rem; font-weight: 700; }
+.trade-in-grades { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; }
+.trade-in-grades button { display: grid; gap: 0.3rem; align-content: start; padding: 0.75rem 0.85rem; border: 1px solid #94a3b8; border-radius: 12px; color: #0f172a; background: #ffffff; text-align: left; font-family: var(--font-sans); cursor: pointer; }
+.trade-in-grades button small { color: #64748b; font-size: 0.78rem; line-height: 1.35; }
+.trade-in-grades button.is-active { border-color: var(--accent); background: #eff6ff; box-shadow: 0 0 0 2px rgb(37 99 235 / 25%); }
+.trade-in-checklist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem 1rem; padding: 0.75rem 0.9rem; border: 1px solid #cbd5e1; border-radius: 12px; background: #f8fafc; }
+.trade-in-check { display: flex; align-items: center; gap: 0.55rem; margin: 0; color: #0f172a; font-weight: 600; cursor: pointer; }
+.trade-in-check input { width: 20px; min-height: 20px; height: 20px; flex: none; margin: 0; padding: 0; accent-color: var(--accent); }
+.trade-in-offer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem 1rem; align-items: end; margin-top: 1rem; padding: 0.9rem 1rem; border: 1px solid #bfdbfe; border-radius: 12px; background: #eff6ff; }
+.trade-in-offer small { display: block; color: #475569; font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.trade-in-offer strong { color: #0f172a; font: 800 1.45rem var(--font-mono); }
+.trade-in-offer .text-action { grid-column: 1 / -1; justify-self: start; display: inline-flex; align-items: center; gap: 0.4rem; }
+.trade-in-hint { color: #64748b; font-size: 0.8rem; font-weight: 600; }
+@media (max-width: 640px) { .trade-in-grades, .trade-in-checklist, .trade-in-offer { grid-template-columns: 1fr; } }
 
 /* Cancelamento de reserva com sinal: forma da devolucao */
 .cancel-refund-options {

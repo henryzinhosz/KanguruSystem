@@ -49,6 +49,7 @@ const EMPTY_STORE: Omit<StoreConfig, 'unitId'> = {
   quoteMinMargin: 30,
   quoteInstallmentMarkup: 13,
   quoteValidDays: 3,
+  tradeInCreditBonus: 10,
   cashDifferenceAlert: 10,
   fixedCost: 0,
   maxItemDiscountPercent: 0,
@@ -211,6 +212,7 @@ export default function ConfiguracoesView({
       quoteMinMargin: store.quoteMinMargin ?? 30,
       quoteInstallmentMarkup: store.quoteInstallmentMarkup ?? 13,
       quoteValidDays: store.quoteValidDays ?? 3,
+      tradeInCreditBonus: store.tradeInCreditBonus ?? 10,
       cashDifferenceAlert: store.cashDifferenceAlert ?? 10,
       fixedCost: store.fixedCost,
       maxItemDiscountPercent: store.maxItemDiscountPercent,
@@ -615,6 +617,14 @@ function StoreFields({ form, onChange, section }: {
           decimals={0}
           value={form.exchangeDays ?? 7}
           onValueChange={value => onChange('exchangeDays', Math.min(365, Math.max(0, value ?? 0)))}
+          className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
+        />
+      </label>
+      <label className="block text-xs font-bold text-slate-700">
+        Bônus do vale-troca na Troca Gamer de iPhone (%) <span className="font-normal text-slate-400">(o cliente que aceita vale recebe o valor da tabela + este bônus)</span>
+        <ValueInput
+          value={form.tradeInCreditBonus ?? 10}
+          onValueChange={value => onChange('tradeInCreditBonus', Math.min(100, Math.max(0, value ?? 0)))}
           className="mt-1 w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none focus:ring-1 focus:ring-blue-500 font-medium"
         />
       </label>

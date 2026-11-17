@@ -13,14 +13,18 @@ import {
   TradeInApproval,
   StoreConfig
 } from '../types';
-import { Coins } from 'lucide-react';
+import { Coins, Smartphone } from 'lucide-react';
+import IphoneTablePanel from './IphoneTablePanel';
 import ValueInput from './ValueInput';
 import { sanitizeItemCode } from '../db/itemCode';
 import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fiscal';
 
-// Dados fiscais padrao da Troca Gamer (so videogames), informados pelo usuario em 2026-10-28.
-// CFOP 5102 sai sozinho na NFC-e (CSOSN 102). O franqueado pode alterar na aprovacao.
+// Dados fiscais padrao da Troca Gamer, informados pelo usuario em 2026-10-28 (videogame) e
+// 2026-11-17 (iPhone: NCM 8517.13.00, mesmo CSOSN). CFOP 5102 sai sozinho na NFC-e (CSOSN 102).
+// O franqueado pode alterar na aprovacao.
 const TRADE_FISCAL_DEFAULTS = { ncm: '9504.50.00', origin: '0', csosn: '102', cst: '', cest: '', icmsRate: 0, icmsReduction: 0, taxBurden: 26.87 };
+const PHONE_NCM = '8517.13.00';
+const isPhoneTrade = (trade: TradeIn) => trade.deviceType === 'IPHONE';
 
 interface VendasViewProps {
   currentUser: User;
@@ -67,6 +71,7 @@ export default function VendasView({
   const [approveError, setApproveError] = useState('');
   const [listError, setListError] = useState('');
   const [approveSaving, setApproveSaving] = useState(false);
+  const [phoneTableOpen, setPhoneTableOpen] = useState(false);
 
   // Open Approval details
   const handleOpenApproval = (trade: TradeIn) => {
@@ -77,7 +82,7 @@ export default function VendasView({
     setApproveWarranty(3);
     setApproveSerial(trade.serialNumber || '');
     setApproveImei(trade.imei || '');
-    setApproveNcm(TRADE_FISCAL_DEFAULTS.ncm);
+    setApproveNcm(isPhoneTrade(trade) ? PHONE_NCM : TRADE_FISCAL_DEFAULTS.ncm);
     setApproveOrigin(TRADE_FISCAL_DEFAULTS.origin);
     setApproveCsosn(TRADE_FISCAL_DEFAULTS.csosn);
     setApproveCst(TRADE_FISCAL_DEFAULTS.cst);
@@ -99,7 +104,7 @@ export default function VendasView({
     const imei = approveImei.replace(/\s/g, '');
     if (!name) return setApproveError('Informe o nome do produto.');
     if (approveSellPrice <= 0) return setApproveError('Informe o preço de venda.');
-    if (!serial) return setApproveError('Informe o número de série do videogame.');
+    if (!serial) return setApproveError('Informe o número de série do aparelho.');
     if (imei && !/^\d{15}$/.test(imei)) return setApproveError('IMEI inválido: são 15 números.');
     const fiscalError = productFiscalError({
       ncm: approveNcm.trim(),
@@ -133,7 +138,7 @@ export default function VendasView({
       });
       setTradeToApprove(null);
     } catch (err) {
-      setApproveError((err as { message?: string })?.message || 'Não foi possível estocar o videogame.');
+      setApproveError((err as { message?: string })?.message || 'Não foi possível estocar o aparelho.');
     } finally {
       setApproveSaving(false);
     }
@@ -153,12 +158,19 @@ export default function VendasView({
         <div className="space-y-1">
           <h2 className="text-base font-black text-slate-800 uppercase tracking-wider flex items-center">
             <Coins className="w-5 h-5 text-blue-600 mr-2" />
-            Troca Gamer (Compra de Videogames Usados)
+            Troca Gamer (Compra de Videogames e iPhones Usados)
           </h2>
-          <p className="text-xs text-slate-400">Os vendedores registram a troca no PDV (com o termo impresso). Aqui você confere os dados e estoca o videogame.</p>
+          <p className="text-xs text-slate-400">Os vendedores registram a troca no PDV (com o termo impresso). Aqui você confere os dados e estoca o aparelho.</p>
         </div>
         {isAdmin && (
           <div className="flex items-center space-x-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setPhoneTableOpen(true)}
+              className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg px-3 py-1.5 transition"
+            >
+              <Smartphone className="w-3.5 h-3.5" />Tabela de iPhone
+            </button>
             <span className="text-xs font-semibold text-slate-500 font-sans">Visão:</span>
             <select
               id="tradein-store-filter"
@@ -205,6 +217,12 @@ export default function VendasView({
                         <span className="text-[10px] text-slate-500 font-mono block">S/N: {trade.serialNumber}{trade.imei ? ` · IMEI: ${trade.imei}` : ''}</span>
                       )}
                       {trade.accessories && <span className="text-[10px] text-slate-500 block">Itens: {trade.accessories}</span>}
+                      {trade.evaluation && (
+                        <span className="text-[10px] text-slate-500 block">
+                          iPhone · estado {trade.evaluation.grade} · bateria {trade.evaluation.battery}% · tabela R$ {trade.evaluation.tableValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          {trade.evaluation.aboveTable && <span className="ml-1 font-bold text-amber-700">(acima da tabela, com senha Gerente)</span>}
+                        </span>
+                      )}
                       <span className="text-[10px] text-slate-400 font-medium block">
                         {new Date(trade.timestamp).toLocaleString('pt-BR')} · Estado: {trade.condition}
                         {trade.staffName && ` · Vendedor: ${trade.staffCode ? `${trade.staffCode} - ` : ''}${trade.staffName}`}
@@ -274,6 +292,8 @@ export default function VendasView({
         </div>
       </div>
 
+      {phoneTableOpen && <IphoneTablePanel onClose={() => setPhoneTableOpen(false)} />}
+
       {/* Used Item Approval and estocagem definition modal */}
       {tradeToApprove && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -328,7 +348,7 @@ export default function VendasView({
               </div>
 
               <div className="space-y-2 border-t border-slate-100 pt-3">
-                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Dados fiscais (já preenchidos para videogame; altere se precisar)</span>
+                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider block">Dados fiscais (já preenchidos para {isPhoneTrade(tradeToApprove) ? 'celular' : 'videogame'}; altere se precisar)</span>
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1.5">
                     <label className="font-bold text-slate-700">NCM</label>
