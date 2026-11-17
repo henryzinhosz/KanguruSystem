@@ -37,10 +37,10 @@ export function TopBar({ storeName, subtitle, cashNumber, cashDate, sessionNumbe
         </div>
       </div>
       <div className="top-bar-info">
-        {cashNumber && <span><small>PDV</small> <b>{cashNumber}</b></span>}
-        {cashDate && <span><small>Caixa de</small> <b>{cashDate}</b></span>}
-        {sessionNumber != null && <span><small>Abertura nº</small> <b>{String(sessionNumber).padStart(2, '0')}</b></span>}
-        {operator && <span><small>Operador</small> <b>{operator}</b></span>}
+        {cashNumber && <span className="top-bar-field"><small>PDV</small><b>{cashNumber}</b></span>}
+        {cashDate && <span className="top-bar-field"><small>Caixa de</small><b>{cashDate}</b></span>}
+        {sessionNumber != null && <span className="top-bar-field"><small>Abertura nº</small><b>{String(sessionNumber).padStart(2, '0')}</b></span>}
+        {operator && <span className="top-bar-field"><small>Operador</small><b>{operator}</b></span>}
         {notice}
         <span className={`top-bar-status${offline ? ' is-offline' : ''}`}>
           <i aria-hidden="true" />

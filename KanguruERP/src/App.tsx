@@ -263,8 +263,8 @@ export default function App() {
 
           {/* Footer of Sidebar */}
           <div className="p-4 bg-slate-950/80 border-t border-slate-900 text-xs text-slate-500 font-mono text-center hidden md:block">
-            <p>Vortex ERP © 2026</p>
-            <p className="mt-0.5 opacity-80">v1.1.0 — Professional Polish</p>
+            <p>Kanguru ERP © 2026</p>
+            <p className="mt-0.5 opacity-80">Kanguru Sistemas</p>
           </div>
         </aside>
 

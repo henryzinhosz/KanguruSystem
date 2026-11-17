@@ -49,6 +49,21 @@ interface HomeMenuProps {
 
 const OFFLINE_BLOCK = 'Indisponível sem internet';
 
+// Linha de explicacao embaixo de cada botao do menu (visual estilo ERP).
+const TILE_HINTS: Partial<Record<MenuAction, string>> = {
+  sale: 'Bipe o código ou busque o produto',
+  reservations: 'Sinal, encomenda e voucher',
+  returns: 'Vale-troca, dinheiro ou Pix',
+  warranty: 'Por serial, IMEI ou CPF',
+  'trade-in': 'Compra de usados',
+  'work-orders': 'Entrada, andamento e entrega',
+  quotes: 'Peças, margem, WhatsApp e PDF',
+  sangria: 'Retirada da gaveta',
+  suprimento: 'Entrada de troco',
+  partial: 'Resumo sem fechar',
+  receipts: 'Reimprimir, NFC-e e NFS-e',
+};
+
 export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction, onRequestSettings }: HomeMenuProps) {
   const [group, setGroup] = useState<Group | null>(null);
 
@@ -135,54 +150,72 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
       title={disabled ? (offline ? OFFLINE_BLOCK : 'Abra o caixa primeiro') : undefined}
       onClick={() => run(action)}
     >
-      <span className="menu-tile-top">{icon}<kbd>{shortcut}</kbd></span>
-      <span className="menu-tile-label">{label}</span>
-      {big && <span className="menu-tile-sub">Bipe o código ou busque o produto</span>}
+      {wide ? (
+        <>
+          <span className="menu-tile-icon" aria-hidden="true">{icon}</span>
+          <span className="menu-tile-text">
+            <span className="menu-tile-label">{label}</span>
+            {TILE_HINTS[action] && <span className="menu-tile-sub">{TILE_HINTS[action]}</span>}
+          </span>
+          <kbd>{shortcut}</kbd>
+        </>
+      ) : (
+        <>
+          <span className="menu-tile-top"><span className="menu-tile-icon" aria-hidden="true">{icon}</span><kbd>{shortcut}</kbd></span>
+          <span className="menu-tile-text">
+            <span className="menu-tile-label">{label}</span>
+            {TILE_HINTS[action] && <span className="menu-tile-sub">{TILE_HINTS[action]}</span>}
+          </span>
+        </>
+      )}
     </button>
   );
+
 
   return (
     <div className="home-menu">
       <section>
         <p className="menu-group-label">Venda</p>
         <div className="menu-grid menu-grid-sale">
-          {tile('sale', 'green', <ShoppingCart size={44} strokeWidth={1.8} />, 'Nova venda', 'F1', !cashOpen, true)}
-          {tile('reservations', 'green', <ClipboardList size={28} strokeWidth={1.8} />, 'Reservas', '2', offline || !cashOpen)}
-          {tile('returns', 'green', <RotateCcw size={28} strokeWidth={1.8} />, 'Trocas e devoluções', '3', offline || !cashOpen)}
-          {tile('warranty', 'green', <ShieldCheck size={28} strokeWidth={1.8} />, 'Garantia', '4', offline)}
-          {tile('trade-in', 'green', <Gamepad2 size={28} strokeWidth={1.8} />, 'Troca Gamer', '1', offline || !cashOpen)}
-          {tile('work-orders', 'green', <Wrench size={28} strokeWidth={1.8} />, 'Ordem de serviço', '0', offline)}
-          {tile('quotes', 'green', <FileText size={28} strokeWidth={1.8} />, 'Orçamento de PC', 'O', offline, false, true)}
+          {tile('sale', 'green', <ShoppingCart size={34} strokeWidth={1.8} />, 'Nova venda', 'F1', !cashOpen, true)}
+          {tile('reservations', 'green', <ClipboardList size={22} strokeWidth={1.8} />, 'Reservas', '2', offline || !cashOpen)}
+          {tile('returns', 'green', <RotateCcw size={22} strokeWidth={1.8} />, 'Trocas e devoluções', '3', offline || !cashOpen)}
+          {tile('warranty', 'green', <ShieldCheck size={22} strokeWidth={1.8} />, 'Garantia', '4', offline)}
+          {tile('trade-in', 'green', <Gamepad2 size={22} strokeWidth={1.8} />, 'Troca Gamer', '1', offline || !cashOpen)}
+          {tile('work-orders', 'green', <Wrench size={22} strokeWidth={1.8} />, 'Ordem de serviço', '0', offline)}
+          {tile('quotes', 'green', <FileText size={22} strokeWidth={1.8} />, 'Orçamento de PC', 'O', offline, false, true)}
         </div>
       </section>
       <section className="menu-side">
         <div>
           <p className="menu-group-label">Caixa</p>
           <div className="menu-grid menu-grid-two">
-            {tile('sangria', 'blue', <BanknoteArrowDown size={26} strokeWidth={1.8} />, 'Sangria', '6', !cashOpen)}
-            {tile('suprimento', 'blue', <BanknoteArrowUp size={26} strokeWidth={1.8} />, 'Suprimento', '7', !cashOpen)}
-            {tile('partial', 'blue', <ChartLine size={26} strokeWidth={1.8} />, 'Caixa parcial', '8', offline || !cashOpen)}
+            {tile('sangria', 'blue', <BanknoteArrowDown size={22} strokeWidth={1.8} />, 'Sangria', '6', !cashOpen)}
+            {tile('suprimento', 'blue', <BanknoteArrowUp size={22} strokeWidth={1.8} />, 'Suprimento', '7', !cashOpen)}
+            {tile('partial', 'blue', <ChartLine size={22} strokeWidth={1.8} />, 'Caixa parcial', '8', offline || !cashOpen)}
             <button type="button" className="menu-tile tone-blue" disabled={!drawerAvailable} title={drawerAvailable ? undefined : 'Escolha a impressora em Configurações › Impressora'} onClick={() => run('drawer')}>
-              <span className="menu-tile-top"><Inbox size={26} strokeWidth={1.8} /><kbd>9</kbd></span>
-              <span className="menu-tile-label">Abrir gaveta</span>
-              {!drawerAvailable && <span className="menu-tile-sub">escolha a impressora</span>}
+              <span className="menu-tile-top"><span className="menu-tile-icon" aria-hidden="true"><Inbox size={22} strokeWidth={1.8} /></span><kbd>9</kbd></span>
+              <span className="menu-tile-text">
+                <span className="menu-tile-label">Abrir gaveta</span>
+                <span className="menu-tile-sub">{drawerAvailable ? 'Gaveta da impressora' : 'Escolha a impressora'}</span>
+              </span>
             </button>
-            {tile('receipts', 'blue', <Receipt size={26} strokeWidth={1.8} />, 'Cupons e notas', '5', false, false, true)}
+            {tile('receipts', 'blue', <Receipt size={22} strokeWidth={1.8} />, 'Cupons e notas', '5', false, false, true)}
           </div>
         </div>
         <div>
           <p className="menu-group-label">Mais opções</p>
           <div className="menu-grid menu-grid-three">
             <button type="button" className="menu-tile tone-orange is-compact" onClick={() => setGroup('operacional')}>
-              <Lock size={26} strokeWidth={1.8} aria-hidden="true" />
+              <span className="menu-tile-icon" aria-hidden="true"><Lock size={20} strokeWidth={1.8} /></span>
               <span className="menu-tile-label">Operacional</span>
             </button>
             <button type="button" className="menu-tile tone-red is-compact" onClick={() => setGroup('consultas')}>
-              <Search size={26} strokeWidth={1.8} aria-hidden="true" />
+              <span className="menu-tile-icon" aria-hidden="true"><Search size={20} strokeWidth={1.8} /></span>
               <span className="menu-tile-label">Consultas</span>
             </button>
             <button type="button" className="menu-tile tone-purple is-compact" onClick={() => onRequestSettings(() => setGroup('config'))}>
-              <Settings size={26} strokeWidth={1.8} aria-hidden="true" />
+              <span className="menu-tile-icon" aria-hidden="true"><Settings size={20} strokeWidth={1.8} /></span>
               <span className="menu-tile-label">Configurações</span>
             </button>
           </div>
