@@ -1902,6 +1902,10 @@ small {
 
 /* Ordem de servico (lista, servicos, detalhe e cobranca no carrinho) */
 .menu-tile.is-wide { grid-column: 1 / -1; }
+/* Troca Gamer | Troca Phone lado a lado na ultima linha do menu */
+.menu-grid-pair { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.menu-grid-pair > .menu-tile.is-wide { grid-column: auto; }
+@media (max-width: 560px) { .menu-grid-pair { grid-template-columns: 1fr; } }
 .wo-detail-heading { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
 .wo-detail-heading h1 { margin-right: auto; }
 .wo-status { border-radius: 6px; padding: 0.3rem 0.55rem; color: #1d4ed8; background: #eff6ff; font: 700 0.7rem var(--font-sans); white-space: nowrap; }

@@ -451,6 +451,7 @@ export function App() {
   const [tradeSellerCode, setTradeSellerCode] = useState('');
   const [tradeSeller, setTradeSeller] = useState<PosSeller | null>(null);
   const [tradeInKey, setTradeInKey] = useState(0);
+  const [tradeDevice, setTradeDevice] = useState<'VIDEOGAME' | 'IPHONE'>('VIDEOGAME');
   // Ordem de Servico: vendedor da tela, OS a reabrir e cobranca em andamento na venda.
   const [workOrderSellerCode, setWorkOrderSellerCode] = useState('');
   const [workOrderSeller, setWorkOrderSeller] = useState<PosSeller | null>(null);
@@ -1301,6 +1302,8 @@ export function App() {
         break;
       case 'warranty': setScreen('warranty'); break;
       case 'trade-in':
+      case 'trade-phone':
+        setTradeDevice(action === 'trade-phone' ? 'IPHONE' : 'VIDEOGAME');
         setTradeInKey((key) => key + 1);
         setTradeSellerCode('');
         setTradeSeller(null);
@@ -1484,7 +1487,7 @@ export function App() {
   // Troca Gamer concluida: dinheiro abre a gaveta; "usar o vale agora" vai para a venda com o cliente.
   async function finishTradeIn(result: TradeInDone) {
     const { record } = result;
-    const text = `Troca Gamer nº ${record.tradeNumber} registrada: ${currency.format(record.amount)}.`;
+    const text = `${record.deviceType === 'IPHONE' ? 'Troca Phone' : 'Troca Gamer'} nº ${record.tradeNumber} registrada: ${currency.format(record.amount)}.`;
     if (!result.useVoucherNow) {
       setMessage(text);
       setScreen('menu');
@@ -2373,7 +2376,7 @@ export function App() {
           <div>
             <Brand compact />
             <div>
-              <strong>Troca Gamer</strong>
+              <strong>{tradeDevice === 'IPHONE' ? 'Troca Phone' : 'Troca Gamer'}</strong>
               <span>{terminal?.tradeName ?? terminal?.unitId}</span>
             </div>
           </div>
@@ -2385,6 +2388,7 @@ export function App() {
         </header>
         <TradeInPanel
           key={tradeInKey}
+          device={tradeDevice}
           seller={tradeSeller}
           sellerSlot={(
             <SellerCodeField

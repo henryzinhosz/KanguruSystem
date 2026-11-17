@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Copy, Gamepad2, Smartphone, UserRound } from 'lucide-react';
+import { Copy, UserRound } from 'lucide-react';
 import type { PosCustomer } from '../services/supabase/customers';
 import type { PosSeller } from '../services/supabase/sellers';
 import type { PosStoreProfile } from '../services/supabase/terminal';
@@ -51,6 +51,8 @@ export interface TradeInDone {
 }
 
 interface TradeInPanelProps {
+  // Troca Gamer = videogame; Troca Phone = iPhone (botoes separados no menu).
+  device: TradeInDevice;
   seller: PosSeller | null;
   sellerSlot: ReactNode;
   loadStore: () => Promise<PosStoreProfile | null>;
@@ -58,8 +60,7 @@ interface TradeInPanelProps {
   onDone: (result: TradeInDone) => void;
 }
 
-export function TradeInPanel({ seller, sellerSlot, loadStore, onPaidCash, onDone }: TradeInPanelProps) {
-  const [device, setDevice] = useState<TradeInDevice>('VIDEOGAME');
+export function TradeInPanel({ device, seller, sellerSlot, loadStore, onPaidCash, onDone }: TradeInPanelProps) {
   const [customer, setCustomer] = useState<PosCustomer | null>(null);
   const [picker, setPicker] = useState(false);
   const [customerForm, setCustomerForm] = useState<{ customer: PosCustomer | null; cpf: string } | null>(null);
@@ -87,6 +88,7 @@ export function TradeInPanel({ seller, sellerSlot, loadStore, onPaidCash, onDone
   const [checklist, setChecklist] = useState(emptyChecklist);
 
   const isPhone = device === 'IPHONE';
+  const title = isPhone ? 'Troca Phone' : 'Troca Gamer';
 
   useEffect(() => {
     if (!isPhone || phoneTable) return;
@@ -126,14 +128,6 @@ export function TradeInPanel({ seller, sellerSlot, loadStore, onPaidCash, onDone
   const ready = Boolean(customer && deviceOk && serialNumber.trim() && amount && amount > 0 && seller && imeiOk
     && (!needsPassword || password));
 
-  function switchDevice(next: TradeInDevice) {
-    if (next === device) return;
-    setDevice(next);
-    setError(null);
-    setMessage(null);
-    setAmount(null);
-    setPassword('');
-  }
 
   function pickFamily(next: string) {
     setFamily(next);
@@ -224,7 +218,7 @@ export function TradeInPanel({ seller, sellerSlot, loadStore, onPaidCash, onDone
   if (done) {
     return (
       <section className="reservations-panel trade-in-panel">
-        <h1>Troca Gamer nº {done.tradeNumber} registrada</h1>
+        <h1>{title} nº {done.tradeNumber} registrada</h1>
         <p className="modal-copy">
           {done.description} (S/N {done.serialNumber}) comprado de {done.customerName} por <strong>{currency.format(done.amount)}</strong>.
           {' '}{done.paymentMethod === 'VALE'
@@ -255,17 +249,9 @@ export function TradeInPanel({ seller, sellerSlot, loadStore, onPaidCash, onDone
 
   return (
     <section className="reservations-panel trade-in-panel">
-      <h1>Troca Gamer</h1>
-      <p className="modal-copy">Compra de aparelho usado do cliente. Ao confirmar, o termo sai impresso em duas vias e a troca vai para o ERP conferir e estocar.</p>
+      <h1>{title}</h1>
+      <p className="modal-copy">Compra de {isPhone ? 'iPhone usado' : 'videogame usado'} do cliente. Ao confirmar, o termo sai impresso em duas vias e a troca vai para o ERP conferir e estocar.</p>
 
-      <div className="trade-in-device" role="radiogroup" aria-label="O que o cliente está vendendo">
-        <button type="button" role="radio" aria-checked={!isPhone} className={!isPhone ? 'is-active' : ''} onClick={() => switchDevice('VIDEOGAME')} disabled={busy}>
-          <Gamepad2 size={20} /> Videogame
-        </button>
-        <button type="button" role="radio" aria-checked={isPhone} className={isPhone ? 'is-active' : ''} onClick={() => switchDevice('IPHONE')} disabled={busy}>
-          <Smartphone size={20} /> iPhone
-        </button>
-      </div>
 
       <h2 className="trade-in-section">Cliente</h2>
       {customer ? (

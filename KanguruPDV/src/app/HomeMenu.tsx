@@ -14,6 +14,7 @@ import {
   Settings,
   ShieldCheck,
   ShoppingCart,
+  Smartphone,
   Wrench,
   X,
 } from 'lucide-react';
@@ -22,7 +23,7 @@ import {
 // atalhos de teclado (F1, 1-0) e sub-menus em janela numerada.
 
 export type MenuAction =
-  | 'sale' | 'trade-in' | 'work-orders' | 'quotes' | 'reservations' | 'returns' | 'warranty' | 'receipts' | 'new-reservation'
+  | 'sale' | 'trade-in' | 'trade-phone' | 'work-orders' | 'quotes' | 'reservations' | 'returns' | 'warranty' | 'receipts' | 'new-reservation'
   | 'sangria' | 'suprimento' | 'partial' | 'drawer'
   | 'open-cash' | 'close-cash' | 'reprint-opening' | 'lock'
   | 'product-lookup' | 'today-sales' | 'seller-report'
@@ -55,7 +56,8 @@ const TILE_HINTS: Partial<Record<MenuAction, string>> = {
   reservations: 'Sinal, encomenda e voucher',
   returns: 'Vale-troca, dinheiro ou Pix',
   warranty: 'Por serial, IMEI ou CPF',
-  'trade-in': 'Compra de usados',
+  'trade-in': 'Compra de videogames usados',
+  'trade-phone': 'Compra de iPhones usados',
   'work-orders': 'Entrada, andamento e entrega',
   quotes: 'Peças, margem, WhatsApp e PDF',
   sangria: 'Retirada da gaveta',
@@ -102,6 +104,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
     { key: '1', action: 'trade-in', disabled: offline || !cashOpen },
     { key: '0', action: 'work-orders', disabled: offline },
     { key: 'o', action: 'quotes', disabled: offline },
+    { key: 'p', action: 'trade-phone', disabled: offline || !cashOpen },
     { key: '2', action: 'reservations', disabled: offline || !cashOpen },
     { key: '3', action: 'returns', disabled: offline || !cashOpen },
     { key: '4', action: 'warranty', disabled: offline },
@@ -181,9 +184,12 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
           {tile('reservations', 'green', <ClipboardList size={22} strokeWidth={1.8} />, 'Reservas', '2', offline || !cashOpen)}
           {tile('returns', 'green', <RotateCcw size={22} strokeWidth={1.8} />, 'Trocas e devoluções', '3', offline || !cashOpen)}
           {tile('warranty', 'green', <ShieldCheck size={22} strokeWidth={1.8} />, 'Garantia', '4', offline)}
-          {tile('trade-in', 'green', <Gamepad2 size={22} strokeWidth={1.8} />, 'Troca Gamer', '1', offline || !cashOpen)}
+          {tile('quotes', 'green', <FileText size={22} strokeWidth={1.8} />, 'Orçamento de PC', 'O', offline)}
           {tile('work-orders', 'green', <Wrench size={22} strokeWidth={1.8} />, 'Ordem de serviço', '0', offline)}
-          {tile('quotes', 'green', <FileText size={22} strokeWidth={1.8} />, 'Orçamento de PC', 'O', offline, false, true)}
+          <div className="menu-grid-pair">
+            {tile('trade-in', 'green', <Gamepad2 size={22} strokeWidth={1.8} />, 'Troca Gamer', '1', offline || !cashOpen, false, true)}
+            {tile('trade-phone', 'green', <Smartphone size={22} strokeWidth={1.8} />, 'Troca Phone', 'P', offline || !cashOpen, false, true)}
+          </div>
         </div>
       </section>
       <section className="menu-side">
