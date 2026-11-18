@@ -621,7 +621,7 @@ function StoreFields({ form, onChange, section }: {
         />
       </label>
       <label className="block text-xs font-bold text-slate-700">
-        Bônus do vale-troca na Troca Gamer de iPhone (%) <span className="font-normal text-slate-400">(o cliente que aceita vale recebe o valor da tabela + este bônus)</span>
+        Bônus do vale-troca na Troca Phone (%) <span className="font-normal text-slate-400">(o cliente que aceita vale recebe o valor da tabela + este bônus)</span>
         <ValueInput
           value={form.tradeInCreditBonus ?? 10}
           onValueChange={value => onChange('tradeInCreditBonus', Math.min(100, Math.max(0, value ?? 0)))}
