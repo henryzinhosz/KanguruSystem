@@ -153,7 +153,7 @@ export default function App() {
     { id: 'balanco', name: 'Balanço', icon: ClipboardCheck },
     { id: 'servicos', name: 'Serviços / OS', icon: Wrench },
     { id: 'clientes', name: 'Clientes', icon: Users },
-    { id: 'vendas', name: 'Troca Gamer', icon: Coins },
+    { id: 'vendas', name: 'Trocas Gerais', icon: Coins },
     { id: 'financeiro', name: 'Livro Caixa & DRE', icon: DollarSign },
     { id: 'admin', name: 'Fornecedores', icon: FileSpreadsheet },
     { id: 'configuracoes', name: 'Configurações', icon: Settings },
