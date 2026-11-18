@@ -428,7 +428,7 @@ export function useErpStore() {
       const newProduct = await addProduct({
         sku: details.sku,
         name: details.name,
-        category: 'Videogames',
+        category: trade.deviceType === 'IPHONE' ? 'Celulares' : 'Videogames',
         brand: 'Troca Gamer',
         costPrice: trade.valuationAmount,
         sellPrice: details.sellPrice,

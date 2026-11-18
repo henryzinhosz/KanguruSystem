@@ -32,3 +32,6 @@ KanguruPDV/release/
 # Planilhas de trabalho do usuario (nao versionar)
 /Lista de Produtos.xlsx
 /Conferencia fiscal - produtos.xlsx
+
+# Sistema antigo de referencia (contem dados pessoais de terceiros e senha; nunca versionar)
+/SistemaAntigo/

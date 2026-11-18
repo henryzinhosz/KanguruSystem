@@ -445,6 +445,37 @@ export interface TradeIn {
   paymentMethod?: 'VALE' | 'DINHEIRO' | 'PIX';
   staffCode?: string;
   staffName?: string;
+  // Avaliacao de iPhone (migration 20261129); vazio = videogame
+  deviceType?: 'VIDEOGAME' | 'IPHONE';
+  evaluation?: TradeInPhoneEvaluation;
+}
+
+export interface TradeInPhoneEvaluation {
+  modelName: string;
+  storage: string;
+  grade: 'A' | 'B' | 'C';
+  battery: number;
+  cashValue: number;
+  creditValue: number;
+  bonusPercent: number;
+  tableValue: number;
+  aboveTable: boolean;
+}
+
+// Tabela de avaliacao de iPhone da empresa (Troca Gamer).
+export interface TradeInPhoneModel {
+  id: string;
+  modelName: string;
+  storage: string;
+  baseValue: number;
+  gradeAPercent: number;
+  gradeBPercent: number;
+  gradeCPercent: number;
+  batteryDeduction: number;
+  isActive: boolean;
+  sortOrder: number;
+  updatedAt?: string;
+  updatedByName?: string;
 }
 
 // Dados para estocar o videogame da Troca Gamer (produto serializado + unidade com serial real).
@@ -532,6 +563,7 @@ export interface StoreConfig {
   quoteMinMargin?: number; // margem minima do orcamento de PC (%); abaixo pede senha Gerente
   quoteInstallmentMarkup?: number; // acrescimo no 12x do orcamento (%)
   quoteValidDays?: number; // validade padrao do orcamento (dias)
+  tradeInCreditBonus?: number; // bonus do vale-troca na Troca Gamer de iPhone (%; padrao 10)
   // NFS-e Nacional: inscricao municipal, municipio (IBGE) e opcao do Simples (1 nao optante, 2 MEI, 3 ME/EPP).
   municipalRegistration?: string;
   cityIbgeCode?: string;

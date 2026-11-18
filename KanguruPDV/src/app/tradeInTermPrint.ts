@@ -4,7 +4,7 @@ import { printHtmlDocument } from './receiptPrint';
 import { formatCpf } from './reservationVoucher';
 import logoUrl from '../assets/beb-games-logo.png';
 
-// Termo de compra de videogame usado (Troca Gamer), A4 em duas vias: uma fica na loja
+// Termo de compra de videogame ou iPhone usado (Troca Gamer), A4 em duas vias: uma fica na loja
 // assinada e a outra vai para o cliente. As declaracoes podem ser trocadas por loja no ERP
 // (Configuracoes; uma linha em branco separa os paragrafos).
 
@@ -40,6 +40,8 @@ function via(data: TradeInRecord, store: PosStoreProfile | null, logo: string, l
     store?.address ? e(store.address) : '',
     store?.phone ? `Telefone: ${e(store.phone)}` : '',
   ].filter(Boolean);
+  const phone = data.deviceType === 'IPHONE';
+  const evaluation = data.evaluation;
   const row = (label: string, value: string | null) =>
     `<tr><th>${label}</th><td>${value ? e(value) : '—'}</td></tr>`;
 
@@ -48,7 +50,7 @@ function via(data: TradeInRecord, store: PosStoreProfile | null, logo: string, l
     <header>
       <img src="${logo}" alt="BeB Games">
       <div class="title">
-        <h1>TERMO DE COMPRA DE VIDEOGAME USADO</h1>
+        <h1>TERMO DE COMPRA DE ${phone ? 'CELULAR' : 'VIDEOGAME'} USADO</h1>
         <div class="meta">Troca Gamer nº ${data.tradeNumber} · ${date.toLocaleString('pt-BR')}</div>
       </div>
       <div class="via">${label}</div>
@@ -70,7 +72,9 @@ function via(data: TradeInRecord, store: PosStoreProfile | null, logo: string, l
       ${row('Nº de série', data.serialNumber)}
       ${data.imei ? row('IMEI', data.imei) : ''}
       ${row('Itens que acompanham', data.accessories)}
-      ${row('Estado', data.condition)}
+      ${phone && evaluation
+        ? `${row('Estado', `${evaluation.grade} (${data.condition})`)}${row('Saúde da bateria', `${evaluation.battery}%`)}${row('Conferência', 'iCloud desconectado, Face ID/Touch ID, IMEI sem restrição, câmeras, tela e documento do dono conferidos')}`
+        : row('Estado', data.condition)}
     </table>
 
     <h2>3. Valor</h2>

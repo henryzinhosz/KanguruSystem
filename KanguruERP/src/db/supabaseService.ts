@@ -1804,7 +1804,9 @@ export const supabaseService = {
       accessories: t.accessories || undefined,
       paymentMethod: t.payment_method || undefined,
       staffCode: t.staff_code || undefined,
-      staffName: t.staff_name || undefined
+      staffName: t.staff_name || undefined,
+      deviceType: t.device_type || undefined,
+      evaluation: t.evaluation || undefined
     }));
   },
 
@@ -1935,7 +1937,8 @@ export const supabaseService = {
       exchangeDays: c.exchange_days == null ? undefined : Number(c.exchange_days),
       quoteMinMargin: c.quote_min_margin == null ? undefined : Number(c.quote_min_margin),
       quoteInstallmentMarkup: c.quote_installment_markup == null ? undefined : Number(c.quote_installment_markup),
-      quoteValidDays: c.quote_valid_days == null ? undefined : Number(c.quote_valid_days)
+      quoteValidDays: c.quote_valid_days == null ? undefined : Number(c.quote_valid_days),
+      tradeInCreditBonus: c.trade_in_credit_bonus == null ? undefined : Number(c.trade_in_credit_bonus)
     }));
   },
 
@@ -1960,6 +1963,7 @@ export const supabaseService = {
       ...(c.quoteMinMargin != null ? { quote_min_margin: Math.max(0, Math.min(1000, c.quoteMinMargin)) } : {}),
       ...(c.quoteInstallmentMarkup != null ? { quote_installment_markup: Math.max(0, Math.min(100, c.quoteInstallmentMarkup)) } : {}),
       ...(c.quoteValidDays != null ? { quote_valid_days: Math.max(1, Math.min(60, Math.round(c.quoteValidDays))) } : {}),
+      ...(c.tradeInCreditBonus != null ? { trade_in_credit_bonus: Math.max(0, Math.min(100, c.tradeInCreditBonus)) } : {}),
       ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {}),
       // Antes da migration 20261111 a coluna nao existe: so envia quando foi lida do banco.
       ...(c.cardFeeTable !== undefined ? { card_fee_table: c.cardFeeTable } : {}),
