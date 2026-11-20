@@ -488,11 +488,12 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
           categories={categories}
           tenantId={currentUser.tenantId}
           onClose={() => setEditing(null)}
-          onSaved={async text => {
+          onSaved={async (text, paid) => {
             setEditing(null);
             setError('');
             setMessage(text);
             await load();
+            if (paid) await onExpensesChanged();
           }}
         />
       )}
@@ -562,7 +563,7 @@ interface FormModalProps {
   categories: string[];
   tenantId: string | null;
   onClose: () => void;
-  onSaved: (message: string) => void | Promise<void>;
+  onSaved: (message: string, paid?: boolean) => void | Promise<void>;
 }
 
 function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClose, onSaved }: FormModalProps) {
@@ -584,6 +585,10 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
   const [amountIsTotal, setAmountIsTotal] = useState(true);
   const [monthsAhead, setMonthsAhead] = useState(3);
   const [file, setFile] = useState<File | null>(null);
+  // Gasto pago na hora: lanca a conta e ja da baixa (vira despesa nessa data).
+  const today = toLocalDateKey(new Date());
+  const [alreadyPaid, setAlreadyPaid] = useState(false);
+  const [paidAt, setPaidAt] = useState(today);
   const [removeFile, setRemoveFile] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -601,6 +606,8 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
     if (digits && ![44, 47, 48].includes(digits.length)) return setError('Código de barras inválido: são 44, 47 ou 48 números.');
     if (!bill && mode === 'PARCELADA' && (!installments || installments < 2 || installments > 48)) return setError('Informe de 2 a 48 parcelas.');
     if (file && file.size > 10 * 1024 * 1024) return setError('O anexo pode ter no máximo 10 MB.');
+    const payNow = !bill && mode === 'UNICA' && alreadyPaid;
+    if (payNow && (!paidAt || paidAt > today)) return setError('Informe a data do pagamento (não pode ser no futuro).');
 
     const input: PayableInput = {
       unitId,
@@ -639,6 +646,15 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
           attachmentNote = ` O anexo não foi salvo: ${errorText(fileError)}`;
         }
       }
+      let paidNote = '';
+      if (payNow && ids[0]) {
+        try {
+          await payPayableBill(ids[0], paidAt, amount, method || null);
+          paidNote = ' Já paga: a despesa entrou no Livro caixa.';
+        } catch (payError) {
+          paidNote = ` A conta foi lançada, mas a baixa não foi feita: ${errorText(payError)}`;
+        }
+      }
       const saved = bill
         ? 'Conta atualizada.'
         : mode === 'PARCELADA'
@@ -646,7 +662,7 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
           : mode === 'RECORRENTE'
             ? `Conta que se repete criada (${ids.length} mês${ids.length === 1 ? '' : 'es'} já lançado${ids.length === 1 ? '' : 's'}).`
             : 'Conta lançada.';
-      await onSaved(saved + attachmentNote);
+      await onSaved(saved + paidNote + attachmentNote, payNow);
     } catch (saveError) {
       setError(errorText(saveError));
     } finally {
@@ -769,6 +785,22 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
                   : `${installments}x de ${money(amount)} (total ${money(amount * installments)})`}
               </p>
             ) : null}
+          </div>
+        )}
+
+        {!bill && mode === 'UNICA' && (
+          <div className={`rounded-lg border p-3 space-y-2 ${alreadyPaid ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+            <label className="flex items-center gap-2 font-bold text-slate-700">
+              <input type="checkbox" checked={alreadyPaid} onChange={event => setAlreadyPaid(event.target.checked)} className="w-4 h-4 accent-emerald-600" />
+              Já foi paga
+            </label>
+            {alreadyPaid && (
+              <label className="block space-y-1">
+                <span className="font-bold text-slate-700">Data do pagamento</span>
+                <input type="date" value={paidAt} max={today} onChange={event => setPaidAt(event.target.value)} className={inputClass} />
+                <span className="block text-[11px] text-slate-500">A conta é lançada já paga, com a forma de pagamento escolhida acima, e entra no Livro caixa nesta data.</span>
+              </label>
+            )}
           </div>
         )}
 
