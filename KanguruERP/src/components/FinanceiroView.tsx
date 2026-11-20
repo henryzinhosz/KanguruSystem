@@ -35,10 +35,13 @@ import {
   ShoppingBag,
   Trash2,
   Printer,
-  Wallet
+  Wallet,
+  Landmark
 } from 'lucide-react';
 import PayablesPanel from './PayablesPanel';
 import ExpensesLedger from './ExpensesLedger';
+import ReceivablesPanel from './ReceivablesPanel';
+import SettlementRulesEditor from './SettlementRulesEditor';
 import { printSalesHistory } from './historyPrint';
 import { supabaseService } from '../db/supabaseService';
 import { OfflineConflictsPanel } from './OfflineConflictsPanel';
@@ -106,7 +109,7 @@ interface FinanceiroViewProps {
   initialTab?: FinanceiroTab;
 }
 
-export type FinanceiroTab = 'vendas' | 'contas' | 'despesas' | 'indicadores' | 'configs';
+export type FinanceiroTab = 'vendas' | 'contas' | 'recebimentos' | 'despesas' | 'indicadores' | 'configs';
 
 export default function FinanceiroView({
   currentUser,
@@ -433,6 +436,18 @@ export default function FinanceiroView({
           >
             <Wallet className="w-4 h-4 mr-1.5" />
             Contas a Pagar
+          </button>
+          <button
+            id="tab-financeiro-receivables"
+            onClick={() => setActiveTab('recebimentos')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeTab === 'recebimentos'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <Landmark className="w-4 h-4 mr-1.5" />
+            Recebimentos
           </button>
           <button
             id="tab-financeiro-expenses"
@@ -784,6 +799,10 @@ export default function FinanceiroView({
         </div>
       )}
 
+      {activeTab === 'recebimentos' && (
+        <ReceivablesPanel currentUser={currentUser} sales={sales} storeConfigs={storeConfigs} onOpenSettings={isAdmin ? () => setActiveTab('configs') : undefined} />
+      )}
+
       {/* 1. VIEW: Livro caixa (Saidas) */}
       {activeTab === 'despesas' && (
         <ExpensesLedger currentUser={currentUser} expenses={expenses} storeConfigs={storeConfigs} onChanged={reloadExpenses} onOpenPayables={() => setActiveTab('contas')} />
@@ -1018,6 +1037,7 @@ export default function FinanceiroView({
 
       {/* 3. VIEW: Configuração de Custos/Taxas */}
       {activeTab === 'configs' && isAdmin && (
+        <div className="space-y-6">
         <div className="max-w-xl mx-auto bg-white p-6 rounded-xl border border-slate-200 shadow-sm font-sans space-y-6">
           <div>
             <h3 className="text-base font-bold text-slate-950 uppercase tracking-tight">Configurador de Custos e Taxas Financeiras</h3>
@@ -1127,6 +1147,10 @@ export default function FinanceiroView({
               )}
             </form>
           </div>
+        </div>
+        {stores.length > 0 && (
+          <SettlementRulesEditor stores={stores} selectedUnit={selectedConfigUnit} onSelectUnit={handleConfigStoreChange} updateStoreConfig={updateStoreConfig} />
+        )}
         </div>
       )}
     </div>

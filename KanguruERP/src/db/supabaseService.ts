@@ -1402,7 +1402,7 @@ export const supabaseService = {
     const paymentsBySale = new Map<string, SalePaymentLine[]>();
     const { data: paymentRows, error: paymentsError } = await supabase
       .from('sale_payments')
-      .select('sale_id, payment_method, amount, installments')
+      .select('*')
       .order('created_at', { ascending: true });
     if (paymentsError) {
       console.warn('Nao foi possivel carregar sale_payments:', paymentsError.message);
@@ -1412,7 +1412,8 @@ export const supabaseService = {
         lines.push({
           paymentMethod: p.payment_method,
           amount: Number(p.amount),
-          installments: Number(p.installments ?? 1)
+          installments: Number(p.installments ?? 1),
+          feePercent: p.fee_percent == null ? null : Number(p.fee_percent)
         });
         paymentsBySale.set(p.sale_id, lines);
       });
@@ -1925,6 +1926,7 @@ export const supabaseService = {
       maxItemDiscountPercent: Number(c.max_item_discount_percent ?? 0),
       paymentFees: c.payment_fees,
       cardFeeTable: c.card_fee_table ?? null,
+      settlementRules: c.settlement_rules === undefined ? undefined : (c.settlement_rules ?? null),
       cashDifferenceAlert: c.cash_difference_alert === undefined ? undefined : Number(c.cash_difference_alert),
       municipalRegistration: c.municipal_registration ?? undefined,
       cityIbgeCode: c.city_ibge_code ?? undefined,
@@ -1974,6 +1976,8 @@ export const supabaseService = {
       ...(c.exchangeDays != null ? { exchange_days: Math.max(0, Math.min(365, Math.round(c.exchangeDays))) } : {}),
       // Antes da migration 20261111 a coluna nao existe: so envia quando foi lida do banco.
       ...(c.cardFeeTable !== undefined ? { card_fee_table: c.cardFeeTable } : {}),
+      // Previsao de recebimentos (migration 20261202): so envia quando a coluna ja foi lida.
+      ...(c.settlementRules !== undefined ? { settlement_rules: c.settlementRules } : {}),
       ...(c.cashDifferenceAlert !== undefined ? { cash_difference_alert: Math.max(0, c.cashDifferenceAlert) } : {}),
       // NFS-e (migration 20261113): so envia quando a coluna ja foi lida ou a tela preencheu.
       ...(c.municipalRegistration !== undefined ? { municipal_registration: c.municipalRegistration.trim() || null } : {}),
