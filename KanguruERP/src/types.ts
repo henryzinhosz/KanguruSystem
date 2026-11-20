@@ -328,6 +328,23 @@ export interface SalePaymentLine {
   paymentMethod: SalePaymentLineMethod;
   amount: number; // valor aplicado (troco nao entra; em reserva, ja sem o sinal)
   installments: number;
+  feePercent?: number | null; // taxa da maquininha gravada na venda (% ; cartao)
+}
+
+// Quando o dinheiro cai na conta, por loja (previsao de recebimentos, migration 20261202).
+// IMMEDIATE = no dia da venda; BUSINESS_DAYS = N dias uteis depois; INSTALLMENTS = credito
+// parcela por parcela (30, 60, 90 dias...).
+export interface SettlementRule {
+  mode: 'IMMEDIATE' | 'BUSINESS_DAYS' | 'INSTALLMENTS';
+  days: number;
+}
+
+export interface SettlementRules {
+  pix: SettlementRule;
+  debito: SettlementRule;
+  credito: SettlementRule;
+  businessDays: 'MON_SAT' | 'MON_FRI';
+  extraHolidays: string[]; // "MM-DD", vale todo ano
 }
 
 export const SALE_PAYMENT_METHOD_LABELS: Record<SalePaymentMethod, string> = {
@@ -568,8 +585,10 @@ export interface StoreConfig {
   municipalRegistration?: string;
   cityIbgeCode?: string;
   simplesNacionalOption?: '1' | '2' | '3';
-  // Taxas do cartao em % (calculadora de juros do PDV): debito e credito de 1x a 12x.
+  // Taxas do cartao em % (calculadora de juros do PDV): debito e credito de 1x a 21x.
   cardFeeTable?: CardFeeTable | null;
+  // Quando o dinheiro de cada forma cai na conta (nulo = padrao; undefined = coluna ainda nao existe).
+  settlementRules?: SettlementRules | null;
   // Diferenca de caixa (R$) a partir da qual o ERP mostra alerta (migration 20261118; padrao 10).
   cashDifferenceAlert?: number;
   paymentFees: {
@@ -582,7 +601,7 @@ export interface StoreConfig {
 
 export interface CardFeeTable {
   debito: number;
-  credito: number[]; // 12 valores: posicao 0 = 1x ... posicao 11 = 12x
+  credito: number[]; // ate 21 valores: posicao 0 = 1x ... posicao 20 = 21x
 }
 
 export interface Supplier {

@@ -3436,7 +3436,7 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
                     value={installments}
                     onChange={(event) => updateLine(index, { installments: Number(event.target.value), ...fillAmount(line, otherLinesCents) })}
                   >
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map((count) => {
+                    {Array.from({ length: 21 }, (_, i) => i + 1).map((count) => {
                       const countRate = cardFeeRate(cardFees, 'CREDITO', count);
                       return (
                         <option key={count} value={count}>

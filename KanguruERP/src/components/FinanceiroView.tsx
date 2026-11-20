@@ -35,10 +35,13 @@ import {
   ShoppingBag,
   Trash2,
   Printer,
-  Wallet
+  Wallet,
+  Landmark
 } from 'lucide-react';
 import PayablesPanel from './PayablesPanel';
 import ExpensesLedger from './ExpensesLedger';
+import ReceivablesPanel from './ReceivablesPanel';
+import SettlementRulesEditor from './SettlementRulesEditor';
 import { printSalesHistory } from './historyPrint';
 import { supabaseService } from '../db/supabaseService';
 import { OfflineConflictsPanel } from './OfflineConflictsPanel';
@@ -106,7 +109,7 @@ interface FinanceiroViewProps {
   initialTab?: FinanceiroTab;
 }
 
-export type FinanceiroTab = 'vendas' | 'contas' | 'despesas' | 'indicadores' | 'configs';
+export type FinanceiroTab = 'vendas' | 'contas' | 'recebimentos' | 'despesas' | 'indicadores' | 'configs';
 
 export default function FinanceiroView({
   currentUser,
@@ -302,9 +305,9 @@ export default function FinanceiroView({
   const [selectedConfigUnit, setSelectedConfigUnit] = useState<string>('');
   const [editFixedCost, setEditFixedCost] = useState<number>(10000);
   const [editPixFee, setEditPixFee] = useState('0.5');
-  // Taxas do cartao (%): debito e credito de 1x a 12x (calculadora de juros do PDV).
+  // Taxas do cartao (%): debito e credito de 1x a 21x (calculadora de juros do PDV).
   const [editDebitFee, setEditDebitFee] = useState<number | null>(null);
-  const [editCreditFees, setEditCreditFees] = useState<Array<number | null>>(() => Array(12).fill(null));
+  const [editCreditFees, setEditCreditFees] = useState<Array<number | null>>(() => Array(21).fill(null));
   const [configError, setConfigError] = useState('');
 
   useEffect(() => {
@@ -329,7 +332,7 @@ export default function FinanceiroView({
       setEditFixedCost(cfg.fixedCost);
       setEditPixFee(String((cfg.paymentFees?.PIX ?? 0) * 100));
       setEditDebitFee(cfg.cardFeeTable?.debito || null);
-      setEditCreditFees(Array.from({ length: 12 }, (_, index) => cfg.cardFeeTable?.credito?.[index] || null));
+      setEditCreditFees(Array.from({ length: 21 }, (_, index) => cfg.cardFeeTable?.credito?.[index] || null));
     }
   };
 
@@ -433,6 +436,18 @@ export default function FinanceiroView({
           >
             <Wallet className="w-4 h-4 mr-1.5" />
             Contas a Pagar
+          </button>
+          <button
+            id="tab-financeiro-receivables"
+            onClick={() => setActiveTab('recebimentos')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeTab === 'recebimentos'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <Landmark className="w-4 h-4 mr-1.5" />
+            Recebimentos
           </button>
           <button
             id="tab-financeiro-expenses"
@@ -784,6 +799,10 @@ export default function FinanceiroView({
         </div>
       )}
 
+      {activeTab === 'recebimentos' && (
+        <ReceivablesPanel currentUser={currentUser} sales={sales} storeConfigs={storeConfigs} onOpenSettings={isAdmin ? () => setActiveTab('configs') : undefined} />
+      )}
+
       {/* 1. VIEW: Livro caixa (Saidas) */}
       {activeTab === 'despesas' && (
         <ExpensesLedger currentUser={currentUser} expenses={expenses} storeConfigs={storeConfigs} onChanged={reloadExpenses} onOpenPayables={() => setActiveTab('contas')} />
@@ -1018,6 +1037,7 @@ export default function FinanceiroView({
 
       {/* 3. VIEW: Configuração de Custos/Taxas */}
       {activeTab === 'configs' && isAdmin && (
+        <div className="space-y-6">
         <div className="max-w-xl mx-auto bg-white p-6 rounded-xl border border-slate-200 shadow-sm font-sans space-y-6">
           <div>
             <h3 className="text-base font-bold text-slate-950 uppercase tracking-tight">Configurador de Custos e Taxas Financeiras</h3>
@@ -1087,7 +1107,7 @@ export default function FinanceiroView({
 
                 <div className="space-y-1.5">
                   <label className="font-bold text-slate-600 block text-[10px]">Crédito por número de parcelas (%)</label>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
                     {editCreditFees.map((value, index) => (
                       <div key={index} className="space-y-0.5">
                         <span className="text-[10px] text-slate-500 font-bold">{index + 1}x</span>
@@ -1127,6 +1147,10 @@ export default function FinanceiroView({
               )}
             </form>
           </div>
+        </div>
+        {stores.length > 0 && (
+          <SettlementRulesEditor stores={stores} selectedUnit={selectedConfigUnit} onSelectUnit={handleConfigStoreChange} updateStoreConfig={updateStoreConfig} />
+        )}
         </div>
       )}
     </div>
