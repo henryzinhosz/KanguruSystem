@@ -119,14 +119,9 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
   const [message, setMessage] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ABERTAS');
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('TODOS');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
-  const [storeFilter, setStoreFilter] = useState('');
-  const [categoryFilter, setCategoryFilter] = useState('');
-  const [supplierFilter, setSupplierFilter] = useState('');
-  const [search, setSearch] = useState('');
+  // Filtro pedido pelos cartoes do topo (vale para as duas listas).
+  const [preset, setPreset] = useState<{ status: StatusFilter; seq: number }>({ status: 'ABERTAS', seq: 0 });
+  const applyPreset = (status: StatusFilter) => setPreset(previous => ({ status, seq: previous.seq + 1 }));
 
   const [editing, setEditing] = useState<PayableBill | 'new' | null>(null);
   const [paying, setPaying] = useState<PayableBill | null>(null);
@@ -170,7 +165,8 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
   };
 
   // Cartoes do topo (lojas do filtro de loja, contas em aberto).
-  const scoped = bills.filter(bill => !storeFilter || bill.unitId === storeFilter);
+  const scoped = bills;
+  const monthEnd = `${monthOf(today)}-31`;
   const open = scoped.filter(bill => bill.status === 'PENDENTE');
   const overdue = open.filter(bill => bill.dueDate < today);
   const dueToday = open.filter(bill => bill.dueDate === today);
@@ -182,39 +178,6 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
     () => Array.from(new Set([...PAYABLE_CATEGORIES, ...bills.map(bill => bill.category)])).sort((a, b) => a.localeCompare(b, 'pt-BR')),
     [bills]
   );
-  const supplierNames = useMemo(
-    () => Array.from(new Set<string>(bills.map(bill => bill.supplierName).filter((name): name is string => Boolean(name)))).sort((a, b) => a.localeCompare(b, 'pt-BR')),
-    [bills]
-  );
-
-  const period = useMemo(() => {
-    const month = monthOf(today);
-    if (periodFilter === 'ESTE_MES') return { from: `${month}-01`, to: `${month}-31` };
-    if (periodFilter === 'PROXIMO_MES') return { from: `${shiftMonth(month, 1)}-01`, to: `${shiftMonth(month, 1)}-31` };
-    if (periodFilter === 'MES_PASSADO') return { from: `${shiftMonth(month, -1)}-01`, to: `${shiftMonth(month, -1)}-31` };
-    if (periodFilter === 'PERSONALIZADO') return { from: customFrom || '0000-01-01', to: customTo || '9999-12-31' };
-    return null;
-  }, [periodFilter, customFrom, customTo, today]);
-
-  const term = search.trim().toLowerCase();
-  const visible = scoped
-    .filter(bill => {
-      if (statusFilter === 'ABERTAS') return bill.status === 'PENDENTE';
-      if (statusFilter === 'VENCIDAS') return bill.status === 'PENDENTE' && bill.dueDate < today;
-      if (statusFilter === 'PAGAS') return bill.status === 'PAGO';
-      if (statusFilter === 'CANCELADAS') return bill.status === 'CANCELADO';
-      return true;
-    })
-    .filter(bill => !period || (bill.dueDate >= period.from && bill.dueDate <= period.to))
-    .filter(bill => !categoryFilter || bill.category === categoryFilter)
-    .filter(bill => !supplierFilter || bill.supplierName === supplierFilter)
-    .filter(bill => !term || [bill.description, bill.supplierName, bill.invoiceNumber, bill.barcode, bill.notes]
-      .some(value => (value || '').toLowerCase().includes(term)))
-    .sort((a, b) => (statusFilter === 'PAGAS'
-      ? (b.paidAt || '').localeCompare(a.paidAt || '')
-      : a.dueDate.localeCompare(b.dueDate)));
-  const visibleTotal = sum(visible);
-
   const copyText = async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -275,7 +238,7 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
             <button
               key={card.label}
               type="button"
-              onClick={() => { setStatusFilter(card.filter); setPeriodFilter('TODOS'); }}
+              onClick={() => applyPreset(card.filter)}
               className="text-left bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between hover:border-slate-300 transition"
             >
               <div>
@@ -289,7 +252,7 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
         })}
         <button
           type="button"
-          onClick={() => { setStatusFilter('PAGAS'); setPeriodFilter('TODOS'); }}
+          onClick={() => applyPreset('PAGAS')}
           className="text-left bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between hover:border-slate-300 transition"
         >
           <div>
@@ -301,7 +264,157 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
         </button>
       </div>
 
+      {error && <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg font-medium">{error}</div>}
+      {message && <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg font-medium">{message}</div>}
+
+      {([
+        { id: 'month', title: 'Contas deste mês', hint: 'Vencem até o fim deste mês (inclui as vencidas de meses anteriores).', items: bills.filter(bill => bill.dueDate <= monthEnd) },
+        { id: 'future', title: 'Contas dos próximos meses', hint: 'Vencem a partir do mês que vem.', items: bills.filter(bill => bill.dueDate > monthEnd) },
+      ]).map(section => (
+        <React.Fragment key={section.id}>
+          <BillsSection
+            title={section.title}
+            hint={section.hint}
+            bills={section.items}
+            preset={preset}
+            stores={stores}
+            storeName={storeName}
+            categories={categories}
+            today={today}
+            isAdmin={isAdmin}
+            loading={loading}
+            busyId={busyId}
+            onPay={setPaying}
+            onEdit={setEditing}
+            run={run}
+            copyText={copyText}
+            openAttachment={openAttachment}
+          />
+        </React.Fragment>
+      ))}
+
+      {editing && (
+        <PayableFormModal
+          bill={editing === 'new' ? null : editing}
+          stores={stores}
+          suppliers={suppliers}
+          categories={categories}
+          tenantId={currentUser.tenantId}
+          onClose={() => setEditing(null)}
+          onSaved={async (text, paid) => {
+            setEditing(null);
+            setError('');
+            setMessage(text);
+            await load();
+            if (paid) await onExpensesChanged();
+          }}
+        />
+      )}
+
+      {paying && (
+        <PayModal
+          bill={paying}
+          today={today}
+          onClose={() => setPaying(null)}
+          onPaid={async () => {
+            setPaying(null);
+            setError('');
+            setMessage('Conta paga: a despesa foi lançada no Livro Caixa na data do pagamento.');
+            await load();
+            await onExpensesChanged();
+          }}
+        />
+      )}
+
+      {recurrencesOpen && (
+        <RecurrencesModal
+          recurrences={recurrences}
+          stores={stores}
+          suppliers={suppliers}
+          categories={categories}
+          onClose={() => setRecurrencesOpen(false)}
+          onChanged={load}
+        />
+      )}
+    </div>
+  );
+}
+
+interface BillsSectionProps {
+  title: string;
+  hint: string;
+  bills: PayableBill[];
+  preset: { status: StatusFilter; seq: number };
+  stores: StoreConfig[];
+  storeName: (unitId: string) => string;
+  categories: string[];
+  today: string;
+  isAdmin: boolean;
+  loading: boolean;
+  busyId: string | null;
+  onPay: (bill: PayableBill) => void;
+  onEdit: (bill: PayableBill) => void;
+  run: (billId: string, action: () => Promise<void | string>, success: string, changesExpenses?: boolean) => Promise<void>;
+  copyText: (text: string, label: string) => Promise<void>;
+  openAttachment: (bill: PayableBill) => Promise<void>;
+}
+
+// Uma lista de contas com os proprios filtros (deste mes / dos proximos meses).
+function BillsSection({ title, hint, bills, preset, stores, storeName, categories, today, isAdmin, loading, busyId, onPay, onEdit, run, copyText, openAttachment }: BillsSectionProps) {
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(preset.status);
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('TODOS');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [storeFilter, setStoreFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('');
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (preset.seq === 0) return;
+    setStatusFilter(preset.status);
+    setPeriodFilter('TODOS');
+  }, [preset]);
+
+  const supplierNames = useMemo(
+    () => Array.from(new Set<string>(bills.map(bill => bill.supplierName).filter((name): name is string => Boolean(name)))).sort((a, b) => a.localeCompare(b, 'pt-BR')),
+    [bills]
+  );
+  const period = useMemo(() => {
+    const month = monthOf(today);
+    if (periodFilter === 'ESTE_MES') return { from: `${month}-01`, to: `${month}-31` };
+    if (periodFilter === 'PROXIMO_MES') return { from: `${shiftMonth(month, 1)}-01`, to: `${shiftMonth(month, 1)}-31` };
+    if (periodFilter === 'MES_PASSADO') return { from: `${shiftMonth(month, -1)}-01`, to: `${shiftMonth(month, -1)}-31` };
+    if (periodFilter === 'PERSONALIZADO') return { from: customFrom || '0000-01-01', to: customTo || '9999-12-31' };
+    return null;
+  }, [periodFilter, customFrom, customTo, today]);
+
+  const term = search.trim().toLowerCase();
+  const visible = bills
+    .filter(bill => !storeFilter || bill.unitId === storeFilter)
+    .filter(bill => {
+      if (statusFilter === 'ABERTAS') return bill.status === 'PENDENTE';
+      if (statusFilter === 'VENCIDAS') return bill.status === 'PENDENTE' && bill.dueDate < today;
+      if (statusFilter === 'PAGAS') return bill.status === 'PAGO';
+      if (statusFilter === 'CANCELADAS') return bill.status === 'CANCELADO';
+      return true;
+    })
+    .filter(bill => !period || (bill.dueDate >= period.from && bill.dueDate <= period.to))
+    .filter(bill => !categoryFilter || bill.category === categoryFilter)
+    .filter(bill => !supplierFilter || bill.supplierName === supplierFilter)
+    .filter(bill => !term || [bill.description, bill.supplierName, bill.invoiceNumber, bill.barcode, bill.notes]
+      .some(value => (value || '').toLowerCase().includes(term)))
+    .sort((a, b) => (statusFilter === 'PAGAS'
+      ? (b.paidAt || '').localeCompare(a.paidAt || '')
+      : a.dueDate.localeCompare(b.dueDate)));
+  const visibleTotal = visible.reduce((total, bill) => total + bill.amount, 0);
+
+  return (
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">{title}</h4>
+          <span className="text-[11px] text-slate-400">{hint}</span>
+        </div>
         <div className="flex flex-wrap items-end gap-2">
           <label className="space-y-1">
             <span className="block font-bold text-slate-500">Situação</span>
@@ -369,11 +482,17 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
           </label>
         </div>
 
-        {error && <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg font-medium">{error}</div>}
-        {message && <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg font-medium">{message}</div>}
-
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-slate-600">
+          <table className="w-full min-w-[900px] table-fixed text-left text-slate-600">
+            <colgroup>
+              <col className="w-[110px]" />
+              <col />
+              {stores.length > 1 && <col className="w-[160px]" />}
+              <col className="w-[170px]" />
+              <col className="w-[120px]" />
+              <col className="w-[150px]" />
+              <col className="w-[230px]" />
+            </colgroup>
             <thead className="text-[10px] text-slate-400 uppercase bg-slate-50 font-bold">
               <tr>
                 <th className="px-3 py-2">Vencimento</th>
@@ -415,7 +534,7 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
                     <td className="px-3 py-2.5">
                       <div className="flex items-center justify-end gap-1">
                         {bill.status === 'PENDENTE' && (
-                          <button type="button" disabled={busy} onClick={() => setPaying(bill)} className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50">Pagar</button>
+                          <button type="button" disabled={busy} onClick={() => onPay(bill)} className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50">Pagar</button>
                         )}
                         {bill.barcode && (
                           <IconButton title="Copiar código de barras" onClick={() => void copyText(bill.barcode!, 'Código de barras')}><Copy className="w-3.5 h-3.5" /></IconButton>
@@ -427,7 +546,7 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
                           <IconButton title={`Abrir anexo (${bill.attachmentName || 'arquivo'})`} onClick={() => void openAttachment(bill)}><Paperclip className="w-3.5 h-3.5" /></IconButton>
                         )}
                         {bill.status === 'PENDENTE' && (
-                          <IconButton title="Editar" onClick={() => setEditing(bill)}><Edit className="w-3.5 h-3.5" /></IconButton>
+                          <IconButton title="Editar" onClick={() => onEdit(bill)}><Edit className="w-3.5 h-3.5" /></IconButton>
                         )}
                         {bill.status === 'PAGO' && (
                           <IconButton
@@ -494,50 +613,6 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
         </div>
       </div>
 
-      {editing && (
-        <PayableFormModal
-          bill={editing === 'new' ? null : editing}
-          stores={stores}
-          suppliers={suppliers}
-          categories={categories}
-          tenantId={currentUser.tenantId}
-          onClose={() => setEditing(null)}
-          onSaved={async (text, paid) => {
-            setEditing(null);
-            setError('');
-            setMessage(text);
-            await load();
-            if (paid) await onExpensesChanged();
-          }}
-        />
-      )}
-
-      {paying && (
-        <PayModal
-          bill={paying}
-          today={today}
-          onClose={() => setPaying(null)}
-          onPaid={async () => {
-            setPaying(null);
-            setError('');
-            setMessage('Conta paga: a despesa foi lançada no Livro Caixa na data do pagamento.');
-            await load();
-            await onExpensesChanged();
-          }}
-        />
-      )}
-
-      {recurrencesOpen && (
-        <RecurrencesModal
-          recurrences={recurrences}
-          stores={stores}
-          suppliers={suppliers}
-          categories={categories}
-          onClose={() => setRecurrencesOpen(false)}
-          onChanged={load}
-        />
-      )}
-    </div>
   );
 }
 
