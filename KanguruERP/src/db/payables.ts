@@ -144,7 +144,8 @@ export interface PayableInput {
   notes: string;
   mode?: 'UNICA' | 'PARCELADA' | 'RECORRENTE';
   installments?: number;
-  frequency?: 'MENSAL' | 'QUINZENAL' | 'SEMANAL';
+  frequency?: 'MENSAL' | 'QUINZENAL' | 'SEMANAL' | 'PRAZO';
+  dayOffsets?: number[]; // PRAZO: dias depois da data da compra (ex.: [30, 60, 90])
   amountIsTotal?: boolean;
   monthsAhead?: number;
 }
