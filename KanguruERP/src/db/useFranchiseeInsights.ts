@@ -1,7 +1,40 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Product, Sale, StockInventory, StoreConfig, User, UserRole } from '../types';
+import { DEFAULT_MANAGER_PERMISSIONS, Product, Sale, StockInventory, StoreConfig, User, UserRole } from '../types';
 import { listErpAlerts, listMyAnnouncements, type ErpAlert, type MyAnnouncement } from './insights';
 import { computeStockAlerts } from './stockAlerts';
+import { ensurePayableRecurrences, listUrgentPayables } from './payables';
+import { toLocalDateKey } from './finance';
+
+// Contas a pagar vencidas ou vencendo ate amanha: uma linha por loja (so quem ve o Financeiro).
+async function loadPayableAlerts(): Promise<ErpAlert[]> {
+  await ensurePayableRecurrences().catch(() => 0);
+  const now = new Date();
+  const today = toLocalDateKey(now);
+  const tomorrow = toLocalDateKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1));
+  const bills = await listUrgentPayables(tomorrow);
+  const byStore = new Map<string, typeof bills>();
+  bills.forEach(bill => byStore.set(bill.unitId, [...(byStore.get(bill.unitId) ?? []), bill]));
+  const money = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  return Array.from(byStore.entries()).map(([unitId, items]) => {
+    const overdue = items.filter(bill => bill.dueDate < today);
+    const dueToday = items.filter(bill => bill.dueDate === today);
+    const dueTomorrow = items.filter(bill => bill.dueDate > today);
+    const parts = [
+      overdue.length ? `${overdue.length} vencida(s)` : '',
+      dueToday.length ? `${dueToday.length} vence(m) hoje` : '',
+      dueTomorrow.length ? `${dueTomorrow.length} vence(m) amanhã` : '',
+    ].filter(Boolean);
+    const total = items.reduce((sum, bill) => sum + bill.amount, 0);
+    return {
+      kind: 'CONTA_PAGAR' as const,
+      unitId,
+      ref: unitId,
+      title: `${parts.join(', ')} (${money(total)})`,
+      detail: items.slice(0, 4).map(bill => bill.description).join(', ') + (items.length > 4 ? '...' : ''),
+      date: null,
+    };
+  });
+}
 
 // Alertas "Precisa de atenção" e comunicados da rede para o ERP do franqueado.
 // Recarrega a cada 5 minutos; antes das migrations 20261118/20261119 fica vazio (sem erro na tela).
@@ -15,7 +48,10 @@ export function useFranchiseeInsights(
   storeConfigs: StoreConfig[]
 ) {
   const enabled = Boolean(currentUser && (currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER));
+  const seesFinance = Boolean(currentUser && (currentUser.role === UserRole.ADMIN
+    || (currentUser.permissions ?? DEFAULT_MANAGER_PERMISSIONS).financeiro));
   const [serverAlerts, setServerAlerts] = useState<ErpAlert[]>([]);
+  const [payableAlerts, setPayableAlerts] = useState<ErpAlert[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [announcements, setAnnouncements] = useState<MyAnnouncement[]>([]);
 
@@ -23,13 +59,16 @@ export function useFranchiseeInsights(
     if (!enabled) return;
     setAlertsLoading(true);
     try {
-      setServerAlerts(await listErpAlerts());
-    } catch {
-      setServerAlerts([]);
+      const [server, payables] = await Promise.all([
+        listErpAlerts().catch(() => [] as ErpAlert[]),
+        seesFinance ? loadPayableAlerts().catch(() => [] as ErpAlert[]) : Promise.resolve([] as ErpAlert[]),
+      ]);
+      setServerAlerts(server);
+      setPayableAlerts(payables);
     } finally {
       setAlertsLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, seesFinance]);
 
   const reloadAnnouncements = useCallback(async () => {
     if (!enabled) return;
@@ -43,6 +82,7 @@ export function useFranchiseeInsights(
   useEffect(() => {
     if (!enabled) {
       setServerAlerts([]);
+      setPayableAlerts([]);
       setAnnouncements([]);
       return;
     }
@@ -76,7 +116,7 @@ export function useFranchiseeInsights(
       });
   }, [enabled, storeConfigs, products, inventory, sales]);
 
-  const alerts = useMemo(() => [...stockAlerts, ...serverAlerts], [stockAlerts, serverAlerts]);
+  const alerts = useMemo(() => [...payableAlerts, ...stockAlerts, ...serverAlerts], [payableAlerts, stockAlerts, serverAlerts]);
   const unreadAnnouncements = announcements.filter(item => !item.readAt).length;
   const pendingImportant = announcements.find(item => item.priority === 'IMPORTANTE' && !item.readAt) ?? null;
 

@@ -15,7 +15,7 @@ import {
   SALE_PAYMENT_METHOD_LABELS,
   Product,
   StockInventory,
-  CardCondition, SaleServiceInvoice } from '../types';
+  CardCondition, SaleServiceInvoice, Supplier } from '../types';
 import { 
   Plus, 
   DollarSign, 
@@ -34,8 +34,10 @@ import {
   AlertCircle,
   ShoppingBag,
   Trash2,
-  Printer
+  Printer,
+  Wallet
 } from 'lucide-react';
+import PayablesPanel from './PayablesPanel';
 import { printSalesHistory } from './historyPrint';
 import { supabaseService } from '../db/supabaseService';
 import { OfflineConflictsPanel } from './OfflineConflictsPanel';
@@ -98,7 +100,13 @@ interface FinanceiroViewProps {
   addExpense: (expense: Omit<Expense, 'id' | 'operatorId' | 'operatorName' | 'timestamp'>) => Promise<void>;
   updateStoreConfig: (unitId: string, updated: Partial<StoreConfig>) => void;
   cancelSale: (saleId: string, approvedByAdminName?: string) => Promise<'PENDENTE_APROVACAO' | 'CANCELADA' | undefined>;
+  suppliers: Supplier[];
+  reloadExpenses: () => void | Promise<void>;
+  // Aba aberta ao entrar (ex.: alerta de contas vencidas abre Contas a pagar).
+  initialTab?: FinanceiroTab;
 }
+
+export type FinanceiroTab = 'vendas' | 'contas' | 'despesas' | 'indicadores' | 'configs';
 
 export default function FinanceiroView({
   currentUser,
@@ -109,7 +117,10 @@ export default function FinanceiroView({
   inventory,
   addExpense,
   updateStoreConfig,
-  cancelSale
+  cancelSale,
+  suppliers,
+  reloadExpenses,
+  initialTab
 }: FinanceiroViewProps) {
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const stores = storeConfigs.filter(store => store.unitId !== 'central');
@@ -117,7 +128,10 @@ export default function FinanceiroView({
   const storeName = (unitId: string) => stores.find(store => store.unitId === unitId)?.tradeName || unitId;
 
   // Active sub-menu: Despesas or Configuração de Custos/Taxas or Break-Even or Registro de Vendas
-  const [activeTab, setActiveTab] = useState<'vendas' | 'despesas' | 'indicadores' | 'configs'>('vendas');
+  const [activeTab, setActiveTab] = useState<FinanceiroTab>(initialTab ?? 'vendas');
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
 
   // Vendas sao registradas somente pelo PDV; aqui ficam o historico e o estorno.
   const [saleError, setSaleError] = useState('');
@@ -433,7 +447,7 @@ export default function FinanceiroView({
     <div className="space-y-6">
       {/* Sub navigation bar */}
       <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex-wrap gap-4">
-        <div className="flex space-x-2">
+        <div className="flex flex-wrap gap-2">
           <button
             id="tab-financeiro-sales"
             onClick={() => setActiveTab('vendas')}
@@ -445,6 +459,18 @@ export default function FinanceiroView({
           >
             <Receipt className="w-4 h-4 mr-1.5" />
             Histórico de Vendas
+          </button>
+          <button
+            id="tab-financeiro-payables"
+            onClick={() => setActiveTab('contas')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeTab === 'contas'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <Wallet className="w-4 h-4 mr-1.5" />
+            Contas a Pagar
           </button>
           <button
             id="tab-financeiro-expenses"
@@ -486,6 +512,10 @@ export default function FinanceiroView({
           )}
         </div>
       </div>
+
+      {activeTab === 'contas' && (
+        <PayablesPanel currentUser={currentUser} storeConfigs={storeConfigs} suppliers={suppliers} onExpensesChanged={reloadExpenses} />
+      )}
 
       {/* 0. VIEW: Registro de Vendas por Forma de Pagamento */}
       {activeTab === 'vendas' && (

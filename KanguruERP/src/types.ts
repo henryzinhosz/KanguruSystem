@@ -596,6 +596,54 @@ export interface Supplier {
   website?: string;
 }
 
+// Contas a pagar (migration 20261130). Paga = vira despesa na data do pagamento.
+export type PayableMethod = 'BOLETO' | 'PIX' | 'TRANSFERENCIA' | 'CARTAO' | 'DINHEIRO' | 'DEBITO_AUTOMATICO';
+export type PayableStatus = 'PENDENTE' | 'PAGO' | 'CANCELADO';
+
+export interface PayableBill {
+  id: string;
+  unitId: string;
+  description: string;
+  supplierId: string | null;
+  supplierName: string | null;
+  category: string;
+  amount: number;
+  dueDate: string; // AAAA-MM-DD
+  paymentMethod: PayableMethod | null;
+  barcode: string | null;
+  pixKey: string | null;
+  invoiceNumber: string | null;
+  notes: string | null;
+  attachmentPath: string | null;
+  attachmentName: string | null;
+  installmentNumber: number | null;
+  installmentTotal: number | null;
+  recurrenceId: string | null;
+  status: PayableStatus;
+  paidAt: string | null;
+  paidAmount: number | null;
+  paidMethod: PayableMethod | null;
+  paidByName: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface PayableRecurrence {
+  id: string;
+  unitId: string;
+  description: string;
+  supplierId: string | null;
+  supplierName: string | null;
+  category: string;
+  amount: number;
+  paymentMethod: PayableMethod | null;
+  pixKey: string | null;
+  notes: string | null;
+  dueDay: number;
+  monthsAhead: number;
+  isActive: boolean;
+}
+
 export interface SupplierInvoiceReminder {
   id: string;
   supplierId: string;
