@@ -400,6 +400,11 @@ export function useErpStore() {
     return 'CANCELADA';
   };
 
+  // Recarrega so as despesas (contas a pagar pagas viram despesa no banco).
+  const reloadExpenses = async () => {
+    setExpenses(await supabaseService.getExpenses());
+  };
+
   // Register Expenses
   const addExpense = async (expense: Omit<Expense, 'id' | 'operatorId' | 'operatorName' | 'timestamp'>) => {
     const newExpense: Expense = {
@@ -595,6 +600,7 @@ export function useErpStore() {
     registerTransfer,
     cancelSale,
     addExpense,
+    reloadExpenses,
     approveTradeIn,
     cancelTradeIn,
     updateWorkOrderStatus,

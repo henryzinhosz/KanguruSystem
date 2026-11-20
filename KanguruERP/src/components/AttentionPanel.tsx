@@ -1,13 +1,14 @@
-import { AlertTriangle, CalendarClock, ChevronRight, Package, ReceiptText, Wallet, WifiOff, Wrench, X } from 'lucide-react';
+import { AlertTriangle, CalendarClock, ChevronRight, Package, Receipt, ReceiptText, Wallet, WifiOff, Wrench, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ErpAlert, ErpAlertKind } from '../db/insights';
 
 // "Precisa de atenção" (desenho aprovado em 2026-11-03): pendencias das lojas num lugar so.
 // Cada alerta fica ate o problema ser resolvido (sem "dispensar").
 
-export type AttentionTarget = 'estoque' | 'servicos' | 'financeiro' | null;
+export type AttentionTarget = 'estoque' | 'servicos' | 'financeiro' | 'contas' | null;
 
 const KIND_INFO: Record<ErpAlertKind, { label: string; icon: LucideIcon; tone: string; target: AttentionTarget; hint?: string }> = {
+  CONTA_PAGAR: { label: 'Contas a pagar vencidas ou vencendo', icon: Receipt, tone: 'text-rose-600 bg-rose-50 border-rose-100', target: 'contas' },
   ESTOQUE: { label: 'Estoque baixo', icon: Package, tone: 'text-rose-600 bg-rose-50 border-rose-100', target: 'estoque' },
   OS_ATRASADA: { label: 'OS atrasadas', icon: Wrench, tone: 'text-rose-600 bg-rose-50 border-rose-100', target: 'servicos' },
   NOTA: { label: 'Notas com problema', icon: ReceiptText, tone: 'text-rose-600 bg-rose-50 border-rose-100', target: 'financeiro', hint: 'Corrija em Cupons e notas, no PDV' },
@@ -17,7 +18,7 @@ const KIND_INFO: Record<ErpAlertKind, { label: string; icon: LucideIcon; tone: s
   OFFLINE: { label: 'Vendas sem internet com divergência', icon: WifiOff, tone: 'text-amber-600 bg-amber-50 border-amber-100', target: 'financeiro' },
 };
 
-const KIND_ORDER: ErpAlertKind[] = ['ESTOQUE', 'OS_ATRASADA', 'NOTA', 'CAIXA', 'OS_PARADA', 'RESERVA', 'OFFLINE'];
+const KIND_ORDER: ErpAlertKind[] = ['CONTA_PAGAR', 'ESTOQUE', 'OS_ATRASADA', 'NOTA', 'CAIXA', 'OS_PARADA', 'RESERVA', 'OFFLINE'];
 
 interface AttentionPanelProps {
   alerts: ErpAlert[];

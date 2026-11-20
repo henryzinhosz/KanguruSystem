@@ -176,15 +176,6 @@ export default function VendasView({
         </div>
         {isAdmin && (
           <div className="flex items-center space-x-2 shrink-0">
-            {tab === 'phone' && (
-              <button
-                type="button"
-                onClick={() => setPhoneTableOpen(true)}
-                className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg px-3 py-1.5 transition"
-              >
-                <Smartphone className="w-3.5 h-3.5" />Tabela de iPhone
-              </button>
-            )}
             <span className="text-xs font-semibold text-slate-500 font-sans">Visão:</span>
             <select
               id="tradein-store-filter"
@@ -223,7 +214,18 @@ export default function VendasView({
         {/* Evaluations active and queue */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
           <div>
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">{tab === 'phone' ? 'Trocas de iPhone registradas' : 'Trocas de videogame registradas'}</h3>
+            <div className="flex flex-wrap items-center gap-3">
+              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">{tab === 'phone' ? 'Trocas de iPhone registradas' : 'Trocas de videogame registradas'}</h3>
+              {tab === 'phone' && isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setPhoneTableOpen(true)}
+                  className="inline-flex items-center gap-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg px-3 py-1.5 transition"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />Tabela de iPhone
+                </button>
+              )}
+            </div>
             <p className="text-xs text-slate-400">"Aguardando" = já paga ao cliente no PDV, falta conferir e estocar.</p>
           </div>
           {listError && <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-[11px] font-medium">{listError}</div>}

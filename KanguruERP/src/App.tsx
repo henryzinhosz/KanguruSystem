@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useErpStore } from './db/useErpStore';
 import { supabase } from './db/supabaseClient';
 import Header from './components/Header';
@@ -19,7 +19,8 @@ import ClientesView from './components/ClientesView';
 import UcpView from './components/UcpView';
 import NetworkView from './components/NetworkView';
 import BalancoPanel from './components/BalancoPanel';
-import AttentionPanel, { AttentionDrawer } from './components/AttentionPanel';
+import AttentionPanel, { AttentionDrawer, type AttentionTarget } from './components/AttentionPanel';
+import type { FinanceiroTab } from './components/FinanceiroView';
 import AnnouncementsView, { ImportantAnnouncementModal } from './components/AnnouncementsView';
 import StoreGoalsCard from './components/StoreGoalsCard';
 import { useFranchiseeInsights } from './db/useFranchiseeInsights';
@@ -70,6 +71,7 @@ export default function App() {
     loadAllFromSupabase,
     cancelSale,
     addExpense,
+    reloadExpenses,
     approveTradeIn,
     cancelTradeIn,
     updateWorkOrderStatus,
@@ -87,6 +89,19 @@ export default function App() {
   // Active Main View Tab
   const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'balanco' | 'servicos' | 'clientes' | 'vendas' | 'financeiro' | 'admin' | 'configuracoes' | 'comunicados'>('dashboard');
   const [attentionOpen, setAttentionOpen] = useState(false);
+  // Aba do Livro Caixa aberta por um alerta (contas vencidas abrem Contas a pagar).
+  const [financeiroTab, setFinanceiroTab] = useState<FinanceiroTab | undefined>(undefined);
+  const [financeiroKey, setFinanceiroKey] = useState(0);
+  const navigateFromAlert = (target: Exclude<AttentionTarget, null>) => {
+    if (target === "contas") {
+      setFinanceiroTab("contas");
+      setFinanceiroKey(key => key + 1);
+      setActiveTab("financeiro");
+      return;
+    }
+    setFinanceiroTab(undefined);
+    setActiveTab(target);
+  };
   const insights = useFranchiseeInsights(currentUser, products, inventory, sales, storeConfigs);
   const subscription = useSubscriptionState(currentUser?.tenantId);
 
@@ -202,7 +217,7 @@ export default function App() {
           alerts={insights.alerts}
           loading={insights.alertsLoading}
           storeName={attentionStoreName}
-          onNavigate={target => setActiveTab(target)}
+          onNavigate={navigateFromAlert}
           onClose={() => setAttentionOpen(false)}
         />
       )}
@@ -244,7 +259,7 @@ export default function App() {
                 <button
                   key={item.id}
                   id={`nav-${item.id}`}
-                  onClick={() => setActiveTab(item.id)}
+                  onClick={() => { setFinanceiroTab(undefined); setActiveTab(item.id); }}
                   className={`w-full flex items-center px-4 py-3 text-sm font-semibold transition-all duration-150 rounded-r-lg ${
                     isActive
                       ? 'bg-blue-600/15 text-blue-400 border-l-4 border-blue-500 font-bold'
@@ -276,7 +291,7 @@ export default function App() {
                 alerts={insights.alerts}
                 loading={insights.alertsLoading}
                 storeName={attentionStoreName}
-                onNavigate={target => setActiveTab(target)}
+                onNavigate={navigateFromAlert}
               />
               <StoreGoalsCard />
             </div>
@@ -356,7 +371,8 @@ export default function App() {
           )}
 
           {tab === 'financeiro' && (
-            <FinanceiroView 
+            <Fragment key={financeiroKey}>
+            <FinanceiroView
               currentUser={currentUser}
               expenses={expenses}
               storeConfigs={storeConfigs}
@@ -364,9 +380,13 @@ export default function App() {
               products={products}
               inventory={inventory}
               addExpense={addExpense}
+              suppliers={suppliers}
+              reloadExpenses={reloadExpenses}
+              initialTab={financeiroTab}
               updateStoreConfig={updateStoreConfig}
               cancelSale={cancelSale}
             />
+            </Fragment>
           )}
 
           {tab === 'admin' && (
