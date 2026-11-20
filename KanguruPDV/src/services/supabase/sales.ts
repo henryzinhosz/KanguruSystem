@@ -18,7 +18,7 @@ export interface PaymentLine {
   surcharge?: number;
 }
 
-// Taxas do cartao da loja (em %), configuradas no ERP: debito e credito de 1x a 12x.
+// Taxas do cartao da loja (em %), configuradas no ERP: debito e credito de 1x a 21x.
 export interface CardFeeTable {
   debito?: number | null;
   credito?: Array<number | null>;
@@ -28,7 +28,7 @@ export function cardFeeRate(table: CardFeeTable | null, method: PaymentMethodKey
   if (!table) return 0;
   const rate = method === 'DEBITO'
     ? table.debito
-    : method === 'CREDITO' && installments >= 1 && installments <= 12
+    : method === 'CREDITO' && installments >= 1 && installments <= 21
       ? table.credito?.[installments - 1]
       : null;
   return Number.isFinite(Number(rate)) && Number(rate) > 0 ? Number(rate) : 0;

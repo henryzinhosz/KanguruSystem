@@ -585,7 +585,7 @@ export interface StoreConfig {
   municipalRegistration?: string;
   cityIbgeCode?: string;
   simplesNacionalOption?: '1' | '2' | '3';
-  // Taxas do cartao em % (calculadora de juros do PDV): debito e credito de 1x a 12x.
+  // Taxas do cartao em % (calculadora de juros do PDV): debito e credito de 1x a 21x.
   cardFeeTable?: CardFeeTable | null;
   // Quando o dinheiro de cada forma cai na conta (nulo = padrao; undefined = coluna ainda nao existe).
   settlementRules?: SettlementRules | null;
@@ -601,7 +601,7 @@ export interface StoreConfig {
 
 export interface CardFeeTable {
   debito: number;
-  credito: number[]; // 12 valores: posicao 0 = 1x ... posicao 11 = 12x
+  credito: number[]; // ate 21 valores: posicao 0 = 1x ... posicao 20 = 21x
 }
 
 export interface Supplier {

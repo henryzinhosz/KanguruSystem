@@ -305,9 +305,9 @@ export default function FinanceiroView({
   const [selectedConfigUnit, setSelectedConfigUnit] = useState<string>('');
   const [editFixedCost, setEditFixedCost] = useState<number>(10000);
   const [editPixFee, setEditPixFee] = useState('0.5');
-  // Taxas do cartao (%): debito e credito de 1x a 12x (calculadora de juros do PDV).
+  // Taxas do cartao (%): debito e credito de 1x a 21x (calculadora de juros do PDV).
   const [editDebitFee, setEditDebitFee] = useState<number | null>(null);
-  const [editCreditFees, setEditCreditFees] = useState<Array<number | null>>(() => Array(12).fill(null));
+  const [editCreditFees, setEditCreditFees] = useState<Array<number | null>>(() => Array(21).fill(null));
   const [configError, setConfigError] = useState('');
 
   useEffect(() => {
@@ -332,7 +332,7 @@ export default function FinanceiroView({
       setEditFixedCost(cfg.fixedCost);
       setEditPixFee(String((cfg.paymentFees?.PIX ?? 0) * 100));
       setEditDebitFee(cfg.cardFeeTable?.debito || null);
-      setEditCreditFees(Array.from({ length: 12 }, (_, index) => cfg.cardFeeTable?.credito?.[index] || null));
+      setEditCreditFees(Array.from({ length: 21 }, (_, index) => cfg.cardFeeTable?.credito?.[index] || null));
     }
   };
 
@@ -1107,7 +1107,7 @@ export default function FinanceiroView({
 
                 <div className="space-y-1.5">
                   <label className="font-bold text-slate-600 block text-[10px]">Crédito por número de parcelas (%)</label>
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
                     {editCreditFees.map((value, index) => (
                       <div key={index} className="space-y-0.5">
                         <span className="text-[10px] text-slate-500 font-bold">{index + 1}x</span>
