@@ -38,6 +38,7 @@ import {
   Wallet
 } from 'lucide-react';
 import PayablesPanel from './PayablesPanel';
+import ExpensesLedger from './ExpensesLedger';
 import { printSalesHistory } from './historyPrint';
 import { supabaseService } from '../db/supabaseService';
 import { OfflineConflictsPanel } from './OfflineConflictsPanel';
@@ -97,7 +98,6 @@ interface FinanceiroViewProps {
   sales: Sale[];
   products: Product[];
   inventory: StockInventory[];
-  addExpense: (expense: Omit<Expense, 'id' | 'operatorId' | 'operatorName' | 'timestamp'>) => Promise<void>;
   updateStoreConfig: (unitId: string, updated: Partial<StoreConfig>) => void;
   cancelSale: (saleId: string, approvedByAdminName?: string) => Promise<'PENDENTE_APROVACAO' | 'CANCELADA' | undefined>;
   suppliers: Supplier[];
@@ -115,7 +115,6 @@ export default function FinanceiroView({
   sales,
   products,
   inventory,
-  addExpense,
   updateStoreConfig,
   cancelSale,
   suppliers,
@@ -299,14 +298,6 @@ export default function FinanceiroView({
   };
 
 
-  // Expense form state
-  const [expenseDesc, setExpenseDesc] = useState('');
-  const [expenseCat, setExpenseCat] = useState('Água/Luz');
-  const [expenseAmount, setExpenseAmount] = useState<number>(0);
-  const [expenseStore, setExpenseStore] = useState<string>('');
-  const [expenseError, setExpenseError] = useState('');
-  const [expenseSuccess, setExpenseSuccess] = useState('');
-
   // Config editing state
   const [selectedConfigUnit, setSelectedConfigUnit] = useState<string>('');
   const [editFixedCost, setEditFixedCost] = useState<number>(10000);
@@ -318,7 +309,6 @@ export default function FinanceiroView({
 
   useEffect(() => {
     if (!stores.length) return;
-    setExpenseStore(previous => stores.some(store => store.unitId === previous) ? previous : defaultStoreId);
     setSelectedConfigUnit(previous => stores.some(store => store.unitId === previous) ? previous : defaultStoreId);
   }, [storeConfigs]);
 
@@ -350,34 +340,6 @@ export default function FinanceiroView({
   const parsePercentage = (value: string) => {
     const parsed = Number(value.replace(',', '.'));
     return Number.isFinite(parsed) && parsed >= 0 ? parsed / 100 : 0;
-  };
-
-  // Submit Expense
-  const handleExpenseSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setExpenseError('');
-    setExpenseSuccess('');
-
-    if (!expenseStore || !expenseDesc || expenseAmount <= 0) {
-      setExpenseError('Preencha os dados da despesa corretamente.');
-      return;
-    }
-
-    try {
-      await addExpense({
-        description: expenseDesc,
-        category: expenseCat,
-        amount: expenseAmount,
-        unitId: expenseStore
-      });
-    } catch (error) {
-      setExpenseError(`Não foi possível salvar a despesa: ${error instanceof Error ? error.message : (error as { message?: string })?.message || 'erro no banco'}`);
-      return;
-    }
-
-    setExpenseDesc('');
-    setExpenseAmount(0);
-    setExpenseSuccess('Despesa registrada com sucesso.');
   };
 
   // Submit Store Configuration (Only available for Admins!)
@@ -482,7 +444,7 @@ export default function FinanceiroView({
             }`}
           >
             <Calculator className="w-4 h-4 mr-1.5" />
-            Registro de Despesas (Saídas)
+            Livro caixa (Saídas)
           </button>
           <button
             id="tab-financeiro-indicators"
@@ -822,147 +784,9 @@ export default function FinanceiroView({
         </div>
       )}
 
-      {/* 1. VIEW: Registro de Despesas */}
+      {/* 1. VIEW: Livro caixa (Saidas) */}
       {activeTab === 'despesas' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 font-sans">
-          {/* Form Card */}
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-1 space-y-4">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">Lançamento de Despesa</h3>
-              <p className="text-xs text-slate-400">Lance saídas variáveis de caixa (contas, manutenção, urgências).</p>
-            </div>
-
-            {expenseError && (
-              <div className="bg-rose-50 border border-rose-200 text-rose-800 p-3 rounded-lg flex items-center gap-2 text-xs">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{expenseError}</span>
-              </div>
-            )}
-
-            {expenseSuccess && (
-              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-3 rounded-lg flex items-center gap-2 text-xs">
-                <Check className="w-4 h-4 shrink-0" />
-                <span>{expenseSuccess}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleExpenseSubmit} className="space-y-4 text-xs">
-              <div className="space-y-1">
-                <label className="font-bold text-slate-700">Descrição</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Cartucho de tinta impressora"
-                  value={expenseDesc}
-                  onChange={(e) => setExpenseDesc(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700">Categoria</label>
-                  <select
-                    value={expenseCat}
-                    onChange={(e) => setExpenseCat(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2outline-none"
-                  >
-                    <option value="Água/Luz">Contas (Água/Luz)</option>
-                    <option value="Aluguel">Aluguel</option>
-                    <option value="Salários">Salários</option>
-                    <option value="Manutenção">Manutenção</option>
-                    <option value="Compras Urgentes">Compras Urgentes</option>
-                    <option value="Outros">Outros</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="font-bold text-slate-700">Vincular à Loja</label>
-                  <select
-                    value={expenseStore}
-                    onChange={(e) => setExpenseStore(e.target.value)}
-                    required
-                    disabled={stores.length === 0}
-                    className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 outline-none disabled:text-slate-400"
-                  >
-                    {stores.length === 0 && <option value="">Nenhuma loja cadastrada</option>}
-                    {stores.map(store => <option key={store.unitId} value={store.unitId}>{store.tradeName || store.unitId}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-bold text-slate-700">Valor da Saída (R$)</label>
-                <ValueInput
-                  required
-                  value={expenseAmount || null}
-                  onValueChange={(value) => setExpenseAmount(value ?? 0)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2.5 outline-none font-mono"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg transition font-bold"
-              >
-                Lançar Despesa
-              </button>
-            </form>
-          </div>
-
-          {/* Expenses Ledger Table */}
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider mb-2">Livro Caixa de Saídas</h3>
-              <p className="text-xs text-slate-400 mb-4">Veja as despesas cadastradas por data e operador.</p>
-            </div>
-
-            <div className="overflow-x-auto text-xs">
-              <table className="w-full text-left text-slate-500">
-                <thead className="text-[10px] text-slate-400 uppercase bg-slate-50 font-bold">
-                  <tr>
-                    <th className="px-3 py-2">Data/Hora</th>
-                    <th className="px-3 py-2">Loja</th>
-                    <th className="px-3 py-2">Descrição</th>
-                    <th className="px-3 py-2 text-center">Categoria</th>
-                    <th className="px-3 py-2 text-right">Valor</th>
-                    <th className="px-3 py-2">Operador</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {expenses.map(e => (
-                    <tr key={e.id} className="hover:bg-slate-50/50">
-                      <td className="px-3 py-2.5 font-mono text-[10px] text-slate-400">
-                        {new Date(e.timestamp).toLocaleString('pt-BR')}
-                      </td>
-                      <td className="px-3 py-2.5 font-medium text-slate-700">
-                        {e.unitId === 'loja_1' ? 'Loja 1' : e.unitId === 'loja_2' ? 'Loja 2' : 'Loja 3'}
-                      </td>
-                      <td className="px-3 py-2.5 text-slate-900 font-medium">
-                        {e.description}
-                      </td>
-                      <td className="px-3 py-2.5 text-center">
-                        <span className="px-2 py-0.5 bg-rose-50 text-rose-800 rounded-[4px] font-semibold text-[10px]">
-                          {e.category}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5 text-right font-bold text-rose-600 font-mono">
-                        - R$ {e.amount.toLocaleString('pt-BR')}
-                      </td>
-                      <td className="px-3 py-2.5 text-slate-500 font-sans">
-                        {e.operatorName.split(' ')[0]}
-                      </td>
-                    </tr>
-                  ))}
-                  {expenses.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="text-center text-slate-400 py-10">Nenhuma despesa lançada recentemente.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <ExpensesLedger currentUser={currentUser} expenses={expenses} storeConfigs={storeConfigs} onChanged={reloadExpenses} onOpenPayables={() => setActiveTab('contas')} />
       )}
 
       {/* 2. VIEW: Indicadores e DRE Semanal */}

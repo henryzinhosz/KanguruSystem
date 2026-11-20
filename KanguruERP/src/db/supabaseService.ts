@@ -1773,6 +1773,13 @@ export const supabaseService = {
     if (error) throw error;
   },
 
+  // Apaga uma despesa lancada a mao (so o dono, pela RLS). Conta a pagar paga sai pelo Contas a Pagar.
+  async deleteExpense(id: string): Promise<void> {
+    const { data, error } = await supabase.from('expenses').delete().eq('id', id).select('id');
+    if (error) throw error;
+    if (!data || data.length === 0) throw new Error('Sem permissão para apagar esta despesa (só o dono da empresa).');
+  },
+
   // === TRADE INS ===
   async getTradeIns(): Promise<TradeIn[]> {
     const { data, error } = await supabase

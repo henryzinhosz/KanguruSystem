@@ -379,7 +379,6 @@ export default function App() {
               sales={sales}
               products={products}
               inventory={inventory}
-              addExpense={addExpense}
               suppliers={suppliers}
               reloadExpenses={reloadExpenses}
               initialTab={financeiroTab}
