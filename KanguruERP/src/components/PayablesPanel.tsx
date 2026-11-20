@@ -88,6 +88,20 @@ function situationOf(bill: PayableBill, today: string): BillSituation {
   return { label: 'A vencer', tone: 'bg-blue-50 text-blue-700 border-blue-200' };
 }
 
+// Prazos de fornecedor: parcelas que vencem N dias depois da data da compra.
+const SUPPLIER_TERMS = { P7_14: [7, 14], P7_14_21: [7, 14, 21], P30_60_90: [30, 60, 90] } as const;
+type IntervalOption = 'MENSAL' | 'QUINZENAL' | 'SEMANAL' | keyof typeof SUPPLIER_TERMS | 'OUTRO';
+
+// "28/56/84" -> [28, 56, 84]; nulo se invalido (precisa ser crescente, de 0 a 720).
+function termOffsets(option: IntervalOption, custom: string): number[] | null {
+  if (option in SUPPLIER_TERMS) return [...SUPPLIER_TERMS[option as keyof typeof SUPPLIER_TERMS]];
+  if (option !== 'OUTRO') return null;
+  const parts = custom.split(/[^0-9]+/).filter(Boolean).map(Number);
+  if (parts.length === 0 || parts.length > 24) return null;
+  if (parts.some((value, index) => value > 720 || (index > 0 && value <= parts[index - 1]))) return null;
+  return parts;
+}
+
 const inputClass = 'w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs outline-none focus:ring-1 focus:ring-blue-500';
 
 export default function PayablesPanel({ currentUser, storeConfigs, suppliers, onExpensesChanged }: PayablesPanelProps) {
@@ -581,7 +595,12 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
   const [notes, setNotes] = useState(bill?.notes ?? '');
   const [mode, setMode] = useState<'UNICA' | 'PARCELADA' | 'RECORRENTE'>('UNICA');
   const [installments, setInstallments] = useState<number | null>(2);
-  const [frequency, setFrequency] = useState<'MENSAL' | 'QUINZENAL' | 'SEMANAL'>('MENSAL');
+  const [frequency, setFrequency] = useState<IntervalOption>('MENSAL');
+  const [customTerm, setCustomTerm] = useState('');
+  const termMode = frequency in SUPPLIER_TERMS || frequency === 'OUTRO';
+  const planOffsets = termMode ? termOffsets(frequency, customTerm) : null;
+  const planCount = termMode ? planOffsets?.length ?? 0 : installments ?? 0;
+  const termDates = dueDate && planOffsets ? planOffsets.map(days => formatDate(addDays(dueDate, days))) : [];
   const [amountIsTotal, setAmountIsTotal] = useState(true);
   const [monthsAhead, setMonthsAhead] = useState(3);
   const [file, setFile] = useState<File | null>(null);
@@ -604,7 +623,13 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
     if (!dueDate) return setError('Informe o vencimento.');
     if (supplierId === 'custom' && !supplierName.trim()) return setError('Digite o nome do fornecedor ou escolha "Sem fornecedor".');
     if (digits && ![44, 47, 48].includes(digits.length)) return setError('Código de barras inválido: são 44, 47 ou 48 números.');
-    if (!bill && mode === 'PARCELADA' && (!installments || installments < 2 || installments > 48)) return setError('Informe de 2 a 48 parcelas.');
+    const offsets = termOffsets(frequency, customTerm);
+    const isTerm = frequency in SUPPLIER_TERMS || frequency === 'OUTRO';
+    if (!bill && mode === 'PARCELADA' && isTerm) {
+      if (!offsets || offsets.length < 2) return setError('Digite o prazo com 2 ou mais parcelas, em dias crescentes (ex.: 30/60/90).');
+    } else if (!bill && mode === 'PARCELADA' && (!installments || installments < 2 || installments > 48)) {
+      return setError('Informe de 2 a 48 parcelas.');
+    }
     if (file && file.size > 10 * 1024 * 1024) return setError('O anexo pode ter no máximo 10 MB.');
     const payNow = !bill && mode === 'UNICA' && alreadyPaid;
     if (payNow && (!paidAt || paidAt > today)) return setError('Informe a data do pagamento (não pode ser no futuro).');
@@ -626,8 +651,14 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
     if (!bill) {
       input.mode = mode;
       if (mode === 'PARCELADA') {
-        input.installments = installments ?? 2;
-        input.frequency = frequency;
+        if (isTerm && offsets) {
+          input.frequency = 'PRAZO';
+          input.dayOffsets = offsets;
+          input.installments = offsets.length;
+        } else {
+          input.installments = installments ?? 2;
+          input.frequency = frequency as 'MENSAL' | 'QUINZENAL' | 'SEMANAL';
+        }
         input.amountIsTotal = amountIsTotal;
       }
       if (mode === 'RECORRENTE') input.monthsAhead = monthsAhead;
@@ -752,23 +783,40 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
             <ValueInput value={amount} onValueChange={setAmount} className={`${inputClass} font-mono`} />
           </label>
           <label className="block space-y-1">
-            <span className="font-bold text-slate-700">{!bill && mode !== 'UNICA' ? 'Primeiro vencimento *' : 'Vencimento *'}</span>
+            <span className="font-bold text-slate-700">
+              {!bill && mode === 'PARCELADA' && termMode ? 'Data da compra (nota) *' : !bill && mode !== 'UNICA' ? 'Primeiro vencimento *' : 'Vencimento *'}
+            </span>
             <input type="date" value={dueDate} onChange={event => setDueDate(event.target.value)} className={inputClass} />
           </label>
         </div>
 
         {!bill && mode === 'PARCELADA' && (
           <div className="grid grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-lg p-3">
-            <label className="block space-y-1">
-              <span className="font-bold text-slate-700">Parcelas</span>
-              <ValueInput decimals={0} value={installments} onValueChange={setInstallments} className={inputClass} />
-            </label>
+            {termMode ? (
+              <label className="block space-y-1">
+                <span className="font-bold text-slate-700">Prazo (dias)</span>
+                {frequency === 'OUTRO' ? (
+                  <input value={customTerm} onChange={event => setCustomTerm(event.target.value)} placeholder="Ex.: 28/56/84" className={`${inputClass} font-mono`} />
+                ) : (
+                  <div className={`${inputClass} font-mono text-slate-700`}>{SUPPLIER_TERMS[frequency as keyof typeof SUPPLIER_TERMS].join('/')}</div>
+                )}
+              </label>
+            ) : (
+              <label className="block space-y-1">
+                <span className="font-bold text-slate-700">Parcelas</span>
+                <ValueInput decimals={0} value={installments} onValueChange={setInstallments} className={inputClass} />
+              </label>
+            )}
             <label className="block space-y-1">
               <span className="font-bold text-slate-700">Intervalo</span>
-              <select value={frequency} onChange={event => setFrequency(event.target.value as typeof frequency)} className={inputClass}>
+              <select value={frequency} onChange={event => setFrequency(event.target.value as IntervalOption)} className={inputClass}>
                 <option value="MENSAL">Todo mês</option>
                 <option value="QUINZENAL">A cada 15 dias</option>
                 <option value="SEMANAL">Toda semana</option>
+                <option value="P7_14">Prazo 7/14 dias</option>
+                <option value="P7_14_21">Prazo 7/14/21 dias</option>
+                <option value="P30_60_90">Prazo 30/60/90 dias</option>
+                <option value="OUTRO">Outro prazo (digitar)</option>
               </select>
             </label>
             <label className="block space-y-1">
@@ -778,11 +826,12 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
                 <option value="EACH">De cada parcela</option>
               </select>
             </label>
-            {amount && installments && installments >= 2 ? (
+            {amount && planCount >= 2 ? (
               <p className="col-span-3 text-[11px] text-slate-500">
                 {amountIsTotal
-                  ? `${installments}x de ${money(Math.floor((amount / installments) * 100) / 100)} (total ${money(amount)})`
-                  : `${installments}x de ${money(amount)} (total ${money(amount * installments)})`}
+                  ? `${planCount}x de ${money(Math.floor((amount / planCount) * 100) / 100)} (total ${money(amount)})`
+                  : `${planCount}x de ${money(amount)} (total ${money(amount * planCount)})`}
+                {termMode && termDates.length > 0 && <span className="block">Vencimentos: {termDates.join(', ')}</span>}
               </p>
             ) : null}
           </div>
