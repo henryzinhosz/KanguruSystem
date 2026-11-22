@@ -2654,3 +2654,24 @@ textarea:focus {
 .auth-panel p.field-error {
   color: #fca5a5;
 }
+
+/* Calculadora de taxa (2026-11-22) */
+.menu-grid-more { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.total-row-label { display: inline-flex; align-items: center; gap: 0.6rem; }
+.fee-calc-open { display: inline-flex; align-items: center; gap: 0.3rem; border: 1px solid #cbd5e1; border-radius: 8px; padding: 0.2rem 0.55rem; color: #1d4ed8; background: #eff6ff; font: 600 0.78rem var(--font-sans); cursor: pointer; }
+.fee-calc-open:hover:not(:disabled) { border-color: #93c5fd; }
+.fee-calc-open:disabled { opacity: 0.5; cursor: default; }
+.fee-calc-modal { width: min(100%, 640px); display: flex; flex-direction: column; }
+.fee-calc-top { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.75rem; }
+.fee-calc-top label { display: grid; flex: 1 1 220px; gap: 0.35rem; font-weight: 600; }
+.fee-calc-top .reservation-nav { display: inline-flex; align-items: center; gap: 0.4rem; }
+.fee-calc-table { min-height: 0; max-height: 46vh; margin-top: 0.75rem; overflow-y: auto; border: 1px solid #cbd5e1; border-radius: 12px; }
+.fee-calc-row { display: grid; width: 100%; grid-template-columns: 1.1fr 1fr 1.2fr; gap: 0.5rem; align-items: center; border: 0; border-bottom: 1px solid #e2e8f0; padding: 0.55rem 0.85rem; color: inherit; background: transparent; font: inherit; text-align: left; }
+.fee-calc-row:last-child { border-bottom: 0; }
+.fee-calc-row strong { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.fee-calc-row strong small { color: #94a3b8; font: 500 0.8rem var(--font-sans); }
+.fee-calc-head { position: sticky; top: 0; z-index: 1; color: #64748b; background: #f8fafc; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
+.fee-calc-row.is-clickable { cursor: pointer; }
+.fee-calc-row.is-clickable:hover { background: #eff6ff; }
+.fee-calc-warning { margin: 0.75rem 0 0; border-radius: 10px; padding: 0.6rem 0.8rem; color: #9a3412; background: #fff7ed; font-size: 0.9rem; }
+@media (max-width: 560px) { .fee-calc-row { grid-template-columns: 1fr 1fr; } .fee-calc-row > :last-child { grid-column: 1 / -1; color: #64748b; font-size: 0.85rem; } }

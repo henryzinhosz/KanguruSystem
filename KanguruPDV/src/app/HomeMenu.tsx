@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import {
   BanknoteArrowDown,
   BanknoteArrowUp,
+  Calculator,
   ChartLine,
   ClipboardList,
   FileText,
@@ -26,7 +27,7 @@ export type MenuAction =
   | 'sale' | 'trade-in' | 'trade-phone' | 'work-orders' | 'quotes' | 'reservations' | 'returns' | 'warranty' | 'receipts' | 'new-reservation'
   | 'sangria' | 'suprimento' | 'partial' | 'drawer'
   | 'open-cash' | 'close-cash' | 'reprint-opening' | 'lock'
-  | 'product-lookup' | 'today-sales' | 'seller-report'
+  | 'product-lookup' | 'today-sales' | 'seller-report' | 'fee-calculator'
   | 'comunicador' | 'printer' | 'version';
 
 type Group = 'operacional' | 'consultas' | 'config';
@@ -113,6 +114,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
     { key: '7', action: 'suprimento', disabled: !cashOpen },
     { key: '8', action: 'partial', disabled: offline || !cashOpen },
     { key: '9', action: 'drawer', disabled: !drawerAvailable },
+    { key: 'c', action: 'fee-calculator', disabled: false },
   ];
 
   function run(action: MenuAction) {
@@ -211,7 +213,11 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
         </div>
         <div>
           <p className="menu-group-label">Mais opções</p>
-          <div className="menu-grid menu-grid-three">
+          <div className="menu-grid menu-grid-more">
+            <button type="button" className="menu-tile tone-green is-compact" onClick={() => run('fee-calculator')}>
+              <span className="menu-tile-icon" aria-hidden="true"><Calculator size={20} strokeWidth={1.8} /></span>
+              <span className="menu-tile-label">Calculadora de taxa</span>
+            </button>
             <button type="button" className="menu-tile tone-orange is-compact" onClick={() => setGroup('operacional')}>
               <span className="menu-tile-icon" aria-hidden="true"><Lock size={20} strokeWidth={1.8} /></span>
               <span className="menu-tile-label">Operacional</span>
@@ -229,7 +235,7 @@ export function HomeMenu({ offline, drawerAvailable, cashOpen, version, onAction
       </section>
 
       <footer className="menu-footer">
-        <span><b>F1</b> Nova venda · <b>1–9</b> atalhos dos botões · <b>Esc</b> voltar</span>
+        <span><b>F1</b> Nova venda · <b>1–9</b> atalhos dos botões · <b>C</b> calculadora de taxa · <b>Esc</b> voltar</span>
         {version && <span>Versão {version}</span>}
       </footer>
 

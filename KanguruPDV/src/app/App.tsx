@@ -3,6 +3,7 @@ import { findProductWarranty, loadProductWarranties } from '../services/supabase
 import { SUPPORT_EMAIL, SUPPORT_PHONE, formatSubscriptionDate, loadPosSubscription, readCachedSubscription, type PosSubscriptionState } from '../services/supabase/subscription';
 import {
   ArrowLeft,
+  Calculator,
   CircleAlert,
   ClipboardList,
   CreditCard,
@@ -61,6 +62,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { TopBar } from './TopBar';
 import { HomeMenu, type MenuAction } from './HomeMenu';
 import { ProductLookupModal } from './ProductLookupModal';
+import { FeeCalculatorModal, type FeeChoice } from './FeeCalculatorModal';
 import { SellerReportModal } from './SellerReportModal';
 import { CustomerHistoryModal } from './CustomerHistoryModal';
 import { PrinterSettingsModal } from './PrinterSettingsModal';
@@ -489,6 +491,8 @@ export function App() {
   const [offlineCustomerOpen, setOfflineCustomerOpen] = useState(false);
   // Menu inicial (2.10): consulta de produto, versao do app e numero da abertura na barra.
   const [lookupOpen, setLookupOpen] = useState(false);
+  // Calculadora de taxa: aberta pelo menu (so consulta) ou pela venda (leva a forma para o pagamento).
+  const [feeCalcOpen, setFeeCalcOpen] = useState<'menu' | 'sale' | null>(null);
   const [sellerReportOpen, setSellerReportOpen] = useState(false);
   const [customerHistoryOpen, setCustomerHistoryOpen] = useState(false);
   // Impressao direta (2.8c): impressora termica escolhida neste PC.
@@ -1351,6 +1355,10 @@ export function App() {
         setScreen('unlock');
         break;
       case 'product-lookup': setLookupOpen(true); break;
+      case 'fee-calculator':
+        getPosCardFees().then(setCardFees).catch(() => undefined);
+        setFeeCalcOpen('menu');
+        break;
       case 'seller-report': setSellerReportOpen(true); break;
       case 'comunicador': configureComunicador(); break;
       case 'version':
@@ -2003,7 +2011,7 @@ export function App() {
         setCpfPromptOpen(false);
         return;
       }
-      if (serialProduct || adminApprovalOpen || customerPickerOpen || customerHistoryOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
+      if (feeCalcOpen || serialProduct || adminApprovalOpen || customerPickerOpen || customerHistoryOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
       if (catalogItems.length > 0 || query) {
         setCatalogItems([]);
         setQuery('');
@@ -2041,6 +2049,18 @@ export function App() {
 
   const grossAmount = cart.reduce((total, item) => total + discountedLineTotal(item), 0);
   const cartHasBackorder = cart.some((item) => item.backorder);
+  // Calculadora de taxa pela venda: cobra o que falta depois das formas ja lancadas
+  // (cartao com "Repassar taxa" e linhas vazias sao substituidos pela forma escolhida).
+  const feeKeptLines = paymentLines.filter((line) =>
+    line.amount > 0 && !((line.paymentMethod === 'CREDITO' || line.paymentMethod === 'DEBITO') && line.passFee));
+  const feeRemaining = Math.max(0, toCents(grossAmount) - feeKeptLines.reduce((sum, line) => sum + toCents(line.amount), 0)) / 100;
+  function applyFeeChoice(choice: FeeChoice) {
+    const line: PaymentLine = choice.method === 'CREDITO' || choice.method === 'DEBITO'
+      ? { paymentMethod: choice.method, amount: feeRemaining, installments: choice.installments, passFee: true }
+      : { paymentMethod: choice.method, amount: feeRemaining };
+    setPaymentLines([...feeKeptLines, line]);
+    setFeeCalcOpen(null);
+  }
   // Servicos ficam fora da NFC-e: com "Nota fiscal" eles saem em NFS-e.
   const cartHasProduct = cart.some((item) => item.itemType === 'PRODUCT');
   const cartHasService = cart.some((item) => item.itemType === 'SERVICE');
@@ -2798,6 +2818,7 @@ export function App() {
           />
         )}
         {lookupOpen && <ProductLookupModal onClose={() => setLookupOpen(false)} />}
+        {feeCalcOpen === 'menu' && <FeeCalculatorModal fees={cardFees} onClose={() => setFeeCalcOpen(null)} />}
         {sellerReportOpen && <SellerReportModal onClose={() => setSellerReportOpen(false)} loadStoreProfile={loadStoreProfile} />}
         {nfceModal}
       </main>
@@ -3071,7 +3092,18 @@ export function App() {
                     onSeller={setSaleSeller}
                   />
                   <div className="total-row">
-                    <span>Total</span>
+                    <span className="total-row-label">
+                      <button
+                        className="fee-calc-open"
+                        type="button"
+                        title="Calculadora de taxa: quanto cobrar em cada forma"
+                        disabled={busy}
+                        onClick={() => setFeeCalcOpen('sale')}
+                      >
+                        <Calculator size={15} /> Calculadora
+                      </button>
+                      Total
+                    </span>
                     {/* Com "Repassar taxa" o total ja mostra o valor com os juros do cartao. */}
                     <strong>{currency.format(grossAmount + surchargeTotal(withCardSurcharge(paymentLines, cardFees)))}</strong>
                   </div>
@@ -3108,6 +3140,20 @@ export function App() {
           )}
         </aside>
       </section>
+      {feeCalcOpen === 'sale' && (
+        <FeeCalculatorModal
+          fees={cardFees}
+          initialValue={feeRemaining}
+          onUse={applyFeeChoice}
+          useDisabledReason={
+            grossAmount <= 0 ? 'Adicione produtos ao carrinho para usar na venda.'
+              : feeRemaining <= 0 ? 'O pagamento já está completo.'
+                : offlineNow ? 'Sem internet não dá para repassar a taxa do cartão: use só para consultar.'
+                  : null
+          }
+          onClose={() => setFeeCalcOpen(null)}
+        />
+      )}
       {nfceModal}
       {cpfPromptOpen && (
         <CpfPromptModal
