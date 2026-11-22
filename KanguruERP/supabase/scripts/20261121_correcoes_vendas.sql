@@ -20,6 +20,9 @@
 -- 5. Cópias e impressões não lançadas (comprovantes achados pelo usuário): 10 no cartão (taxa real da Stone),
 --    6 no Pix e R$ 63 em dinheiro (vários dias sem registro; lançados juntos em 20/11). Sem vendedor,
 --    sem caixa, sem estoque (como as vendas importadas). Nota "COPIA-<data>-<hora>".
+-- 6. Switch OLED usado (06/11, link 8x, R$ 2.400 preço cheio, custo R$ 1.200, vendedor Luiz) = "MANUAL-20261106-1114";
+--    22 valores pequenos da Stone sem venda lançados como "Vendas antigas do sistema - Sem discriminação de itens"
+--    (custo 0, taxa real da Stone) = "SEMITENS-<data>-<hora>".
 
 DO $$
 DECLARE
@@ -224,6 +227,74 @@ BEGIN
   END LOOP;
   SELECT COUNT(*) INTO v_count FROM public.sales WHERE tenant_id = v_tenant AND invoice_number LIKE 'COPIA-%';
   IF v_count <> 17 THEN RAISE EXCEPTION '5: esperava 17 lançamentos de cópias, gravou %. Nada foi gravado.', v_count; END IF;
+
+  -- 6) Venda do Switch OLED usado (06/11, link de pagamento 8x, preço cheio R$ 2.400, custo R$ 1.200, vendedor Luiz)
+  --    e 22 valores pequenos da Stone sem venda (decisão do usuário: lançar sem discriminar itens, custo 0).
+  IF EXISTS (SELECT 1 FROM public.sales WHERE tenant_id = v_tenant AND (invoice_number LIKE 'SEMITENS-%' OR invoice_number LIKE 'MANUAL-%')) THEN
+    RAISE EXCEPTION '6: esses lançamentos já existem. Nada foi gravado.';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.pdv_operators WHERE tenant_id = v_tenant AND id = '0cc736ec-546f-44e4-8896-3bf543be45dd') THEN
+    RAISE EXCEPTION '6: vendedor Luiz Eduardo não encontrado. Nada foi gravado.';
+  END IF;
+
+  INSERT INTO public.sales (
+    id, tenant_id, cash_session_id, invoice_number, unit_id, items, payment_method, gross_amount, fee_amount,
+    net_amount, operator_id, operator_name, timestamp, status, requires_approval, reservation_deposit_applied,
+    seller_id, seller_code, seller_name, finalized_by_id, finalized_by_code, finalized_by_name, fiscal_type
+  ) VALUES (
+    'manual-20261106-1114', v_tenant, NULL, 'MANUAL-20261106-1114', 'loja_beb_games_park_shopping_cg',
+    '[{"itemType":"PRODUCT","productId":null,"itemSku":"","itemName":"Nintendo Switch OLED (Seminovo)","quantity":1,"unitPrice":2400,"discountPercent":0,"lineTotal":2400,"unitCost":1200,"costTotal":1200,"serials":null,"importedFrom":"LANCAMENTO_MANUAL"}]'::JSONB,
+    'CREDITO', 2400.00, 343.20, 2056.80, v_admin::TEXT, 'Lançamento manual', '2026-11-06 11:14:05-03',
+    'CONCLUIDA', false, 0,
+    '0cc736ec-546f-44e4-8896-3bf543be45dd', '24', 'Luiz Eduardo',
+    '0cc736ec-546f-44e4-8896-3bf543be45dd', '24', 'Luiz Eduardo', 'NAO_FISCAL'
+  );
+
+  FOR r IN
+    SELECT * FROM (VALUES
+      ('2026-11-02 14:58:30-03', 'CREDITO', 100.00, 4.44),
+      ('2026-11-02 18:18:39-03', 'DEBITO', 3.00, 0.03),
+      ('2026-11-02 20:15:04-03', 'DEBITO', 10.00, 0.10),
+      ('2026-11-02 20:35:42-03', 'DEBITO', 49.90, 0.47),
+      ('2026-11-04 10:37:14-03', 'CREDITO', 4.00, 0.13),
+      ('2026-11-06 21:35:37-03', 'DEBITO', 50.00, 0.48),
+      ('2026-11-07 18:18:50-03', 'CREDITO', 199.90, 8.40),
+      ('2026-11-07 18:59:20-03', 'DEBITO', 6.00, 0.06),
+      ('2026-11-07 19:27:51-03', 'DEBITO', 8.00, 0.08),
+      ('2026-11-07 20:12:25-03', 'DEBITO', 12.00, 0.11),
+      ('2026-11-08 18:32:15-03', 'DEBITO', 12.00, 0.11),
+      ('2026-11-10 10:17:16-03', 'DEBITO', 4.00, 0.04),
+      ('2026-11-12 19:10:39-03', 'CREDITO', 199.90, 8.40),
+      ('2026-11-12 19:12:27-03', 'CREDITO', 49.90, 1.57),
+      ('2026-11-14 13:11:12-03', 'DEBITO', 55.93, 0.53),
+      ('2026-11-14 16:49:26-03', 'DEBITO', 150.00, 1.43),
+      ('2026-11-14 17:48:38-03', 'DEBITO', 55.93, 0.53),
+      ('2026-11-15 19:46:17-03', 'CREDITO', 149.90, 6.30),
+      ('2026-11-17 18:38:00-03', 'CREDITO', 34.93, 1.10),
+      ('2026-11-20 17:12:16-03', 'DEBITO', 30.00, 0.29),
+      ('2026-11-20 18:51:24-03', 'DEBITO', 60.00, 0.57),
+      ('2026-11-20 19:58:57-03', 'DEBITO', 239.90, 2.28)
+    ) AS v(ts, method, gross, fee)
+  LOOP
+    INSERT INTO public.sales (
+      id, tenant_id, cash_session_id, invoice_number, unit_id, items, payment_method, gross_amount, fee_amount,
+      net_amount, operator_id, operator_name, timestamp, status, requires_approval, reservation_deposit_applied,
+      fiscal_type
+    ) VALUES (
+      'semitens-' || to_char(r.ts::TIMESTAMPTZ AT TIME ZONE 'America/Sao_Paulo', 'YYYYMMDD-HH24MISS'), v_tenant, NULL,
+      'SEMITENS-' || to_char(r.ts::TIMESTAMPTZ AT TIME ZONE 'America/Sao_Paulo', 'YYYYMMDD-HH24MISS'),
+      'loja_beb_games_park_shopping_cg',
+      jsonb_build_array(jsonb_build_object(
+        'itemType', 'PRODUCT', 'productId', NULL, 'itemSku', '',
+        'itemName', 'Vendas antigas do sistema - Sem discriminação de itens',
+        'quantity', 1, 'unitPrice', r.gross, 'discountPercent', 0, 'lineTotal', r.gross,
+        'unitCost', 0, 'costTotal', 0, 'serials', NULL, 'importedFrom', 'LANCAMENTO_MANUAL')),
+      r.method, r.gross, r.fee, r.gross - r.fee, v_admin::TEXT, 'Lançamento manual (sem itens)', r.ts::TIMESTAMPTZ,
+      'CONCLUIDA', false, 0, 'NAO_FISCAL'
+    );
+  END LOOP;
+  SELECT COUNT(*) INTO v_count FROM public.sales WHERE tenant_id = v_tenant AND invoice_number LIKE 'SEMITENS-%';
+  IF v_count <> 22 THEN RAISE EXCEPTION '6: esperava 22 lançamentos sem itens, gravou %. Nada foi gravado.', v_count; END IF;
 END $$;
 
 -- Conferência 1 (rode depois): vendas corrigidas
@@ -239,3 +310,8 @@ order by s.timestamp;
 -- Conferência 2: cópias (deve dar 17 lançamentos, R$ 236,00, taxas R$ 1,95)
 select count(*) as lancamentos, sum(gross_amount) as total, sum(fee_amount) as taxas
 from public.sales where invoice_number like 'COPIA-%';
+
+-- Conferência 3: Switch OLED (1 venda, R$ 2.400, taxa R$ 343,20) e sem itens (22, R$ 1.485,19, taxas R$ 37,45)
+select left(invoice_number, 6) as grupo, count(*) as lancamentos, sum(gross_amount) as total, sum(fee_amount) as taxas
+from public.sales where invoice_number like 'MANUAL-%' or invoice_number like 'SEMITENS-%'
+group by 1 order by 1;
