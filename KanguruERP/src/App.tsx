@@ -19,7 +19,7 @@ import ClientesView from './components/ClientesView';
 import UcpView from './components/UcpView';
 import NetworkView from './components/NetworkView';
 import BalancoPanel from './components/BalancoPanel';
-import AttentionPanel, { AttentionDrawer, type AttentionTarget } from './components/AttentionPanel';
+import { AttentionDrawer, type AttentionTarget } from './components/AttentionPanel';
 import type { FinanceiroTab } from './components/FinanceiroView';
 import AnnouncementsView, { ImportantAnnouncementModal } from './components/AnnouncementsView';
 import StoreGoalsCard from './components/StoreGoalsCard';
@@ -286,13 +286,7 @@ export default function App() {
         {/* Main Content Workspace Container */}
         <main className="erp-workspace flex-1 p-3 sm:p-4 lg:p-5 w-full overflow-y-auto">
           {tab === 'dashboard' && (
-            <div className="space-y-5 mb-5">
-              <AttentionPanel
-                alerts={insights.alerts}
-                loading={insights.alertsLoading}
-                storeName={attentionStoreName}
-                onNavigate={navigateFromAlert}
-              />
+            <div className="mb-5 empty:hidden">
               <StoreGoalsCard />
             </div>
           )}
