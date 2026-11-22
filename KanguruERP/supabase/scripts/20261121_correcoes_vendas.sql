@@ -8,9 +8,9 @@
 --       quando ela aconteceu de verdade.
 --    c) 09/11 R$ 4.520 em 12x: estava com 13% (tabela antiga); real 9,99%.
 --    d) 08/11 R$ 29,90 no crédito: cartão Amex (4,49%; estava 3,14%).
--- 2. Venda de 08/11 do Sergio (Pc Gamer N1 + Monitor) lançada duas vezes: fica CANCELADA, SEM devolver
---    nada ao estoque (os dois itens saíram da loja na venda de 12/11). O caixa daquele dia já está fechado,
---    então o bloqueio de estorno com caixa fechado é desligado só durante esta correção.
+-- 2. Venda de 08/11 do Sergio (Pc Gamer N1 + Monitor) lançada duas vezes: já foi devolvida inteira no PDV
+--    em 11/11 (faturamento já se anula). A taxa do cartão dela vai a zero (a real está na venda de 12/11) e
+--    sai 1 PC Gamer N1 e 1 Monitor do estoque (a devolução pôs de volta, mas saíram na venda de 12/11).
 -- 3. Reserva da Camila (sinal de R$ 5.199,90 no crédito, ainda ativa): cancelada SEM lançar devolução de
 --    dinheiro, porque a venda dela já foi lançada em 19/11; a Camila vira a cliente dessa venda.
 -- 4. Venda do Davi (PS5 Slim Drive + Base, decisão de 22/11/2026): o Pix de R$ 2.000 e o cartão foram em 05/11;
@@ -86,15 +86,50 @@ BEGIN
   UPDATE public.sales SET fee_amount = fee_amount + 0.40, net_amount = net_amount - 0.40
   WHERE tenant_id = v_tenant AND invoice_number = 'PDV-1794157785890';
 
-  -- 2) Cancela a venda repetida de 08/11 sem mexer no estoque
-  EXECUTE 'ALTER TABLE public.sales DISABLE TRIGGER zz_sale_cancellation_closed_cash';
-  UPDATE public.sales
-  SET status = 'CANCELADA', approved_by = 'Correção 21/11/2026: venda lançada duas vezes (vale a de 12/11)'
+  -- 2) Venda repetida de 08/11: já foi devolvida inteira no PDV em 11/11 (devolução nº 2, "Erro"), então
+  --    o faturamento já se anula. Falta: (a) tirar a taxa do cartão dela (a taxa real está na venda de 12/11,
+  --    corrigida no 1b) e (b) tirar do estoque o PC Gamer N1 e o Monitor que a devolução pôs de volta, porque
+  --    os dois saíram da loja na venda de 12/11 (Orçamento de PC).
+  SELECT * INTO v_sale FROM public.sales
   WHERE tenant_id = v_tenant AND invoice_number = 'PDV-1794176921704' AND status = 'CONCLUIDA'
-    AND gross_amount = 4300;
-  GET DIAGNOSTICS v_count = ROW_COUNT;
-  EXECUTE 'ALTER TABLE public.sales ENABLE TRIGGER zz_sale_cancellation_closed_cash';
-  IF v_count <> 1 THEN RAISE EXCEPTION '2: venda de 08/11 do Sergio não encontrada como esperado. Nada foi gravado.'; END IF;
+    AND gross_amount = 4300
+  FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION '2: venda de 08/11 do Sergio não encontrada como esperado. Nada foi gravado.'; END IF;
+  SELECT COUNT(*) INTO v_count FROM public.sale_returns
+  WHERE tenant_id = v_tenant AND sale_id = v_sale.id AND total_amount = 4300;
+  IF v_count <> 1 THEN RAISE EXCEPTION '2: devolução da venda de 08/11 não encontrada como esperado. Nada foi gravado.'; END IF;
+  SELECT COUNT(*) INTO v_count FROM public.sale_payments
+  WHERE tenant_id = v_tenant AND sale_id = v_sale.id AND payment_method NOT IN ('PIX', 'CREDITO', 'DEBITO');
+  IF v_count <> 0 THEN RAISE EXCEPTION '2: formas de pagamento da venda de 08/11 diferentes do esperado. Nada foi gravado.'; END IF;
+
+  UPDATE public.sale_payments SET fee_percent = 0
+  WHERE tenant_id = v_tenant AND sale_id = v_sale.id AND payment_method IN ('CREDITO', 'DEBITO');
+  UPDATE public.sales SET fee_amount = 0, net_amount = gross_amount WHERE id = v_sale.id;
+
+  FOR r IN SELECT * FROM (VALUES ('p_new_mb713wy'), ('p_new_980rown')) AS v(product_id) LOOP
+    SELECT * INTO v_inv FROM public.inventory
+    WHERE tenant_id = v_tenant AND product_id = r.product_id
+    FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION '2: estoque do produto % não encontrado. Nada foi gravado.', r.product_id; END IF;
+    v_inv.quantities := public.inventory_with_unit(v_inv.quantities, v_sale.unit_id);
+    v_qty := COALESCE((v_inv.quantities -> v_sale.unit_id ->> 'qty')::INTEGER, 0);
+    IF v_qty < 1 THEN
+      RAISE EXCEPTION '2: o produto % já está com estoque % (alguém já corrigiu?). Nada foi gravado.', r.product_id, v_qty;
+    END IF;
+    UPDATE public.inventory
+    SET quantities = jsonb_set(v_inv.quantities, ARRAY[v_sale.unit_id, 'qty'], to_jsonb(v_qty - 1), true),
+        updated_at = NOW()
+    WHERE tenant_id = v_tenant AND product_id = r.product_id;
+    INSERT INTO public.movements (
+      id, tenant_id, product_id, variation_id, from_unit_id, to_unit_id, type, quantity,
+      serials, card_condition, operator_id, operator_name, timestamp, reason, unit_cost
+    ) VALUES (
+      gen_random_uuid()::TEXT, v_tenant, r.product_id, NULL, v_sale.unit_id, 'CLIENTE', 'SAIDA', 1,
+      NULL, NULL, v_admin::TEXT, 'Correção 22/11/2026', NOW(),
+      'Correção: voltou ao estoque pela devolução nº 2, mas saiu na venda de 12/11 (Orçamento de PC)',
+      ROUND(public.get_store_avg_cost(v_tenant, r.product_id, v_sale.unit_id), 4)
+    );
+  END LOOP;
 
   -- 3) Reserva da Camila: cancela sem devolução e liga a cliente à venda de 19/11
   SELECT COUNT(*) INTO v_count FROM public.product_reservations
