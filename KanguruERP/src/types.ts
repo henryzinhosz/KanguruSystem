@@ -600,8 +600,14 @@ export interface StoreConfig {
 }
 
 export interface CardFeeTable {
+  // Taxa REAL da maquininha (descontada do lucro).
   debito: number;
   credito: number[]; // ate 21 valores: posicao 0 = 1x ... posicao 20 = 21x
+  // Taxa COBRADA DO CLIENTE (calculadora e "Repassar taxa" do PDV). null = usa a real; 0 = sem acrescimo.
+  cliente?: {
+    debito: number | null;
+    credito: Array<number | null>;
+  };
 }
 
 export interface Supplier {
