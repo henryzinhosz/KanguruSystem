@@ -24,6 +24,7 @@ import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fisca
 import ValueInput from './ValueInput';
 import LabelPrintModal, { LabelRequest } from './LabelPrintModal';
 import MergeProductsModal from './MergeProductsModal';
+import LoosePartsPendingPanel from './LoosePartsPendingPanel';
 
 // Categorias de produto (lista da loja; 2026-11-06).
 const PRODUCT_CATEGORIES = ['Carregadores', 'Cabos', 'Adaptadores', 'Fones', 'Periféricos', 'Videogames', 'Celulares', 'Geek', 'Peças', 'Computadores', 'PCs montados', 'Cards', 'Outros'];
@@ -265,7 +266,10 @@ export default function EstoqueView({
   const totalStockAllStores = (productId: string) => Object.entries(getProductInventory(productId)?.quantities || {})
     .filter(([unitId]) => unitId !== 'central')
     .reduce((sum, [, unit]) => sum + (unit.qty || 0), 0);
-  const isHiddenProduct = (p: Product) => Boolean(p.archivedAt) || (Boolean(p.quoteId) && totalStockAllStores(p.id) <= 0);
+  const isHiddenProduct = (p: Product) => Boolean(p.archivedAt) || ((Boolean(p.quoteId) || Boolean(p.loosePart)) && totalStockAllStores(p.id) <= 0);
+  // Pecas avulsas: vendidas com custo a informar e as que ficaram sem vender (PDV fechado no meio da venda).
+  const loosePending = products.filter(p => p.loosePart && p.costPending && !p.archivedAt && totalStockAllStores(p.id) <= 0);
+  const looseUnsold = products.filter(p => p.loosePart && p.costPending && !p.archivedAt && totalStockAllStores(p.id) > 0);
   const hiddenCount = products.filter(isHiddenProduct).length;
   const filteredProducts = products.filter(p => {
     if (!showArchived && isHiddenProduct(p)) return false;
@@ -803,6 +807,7 @@ export default function EstoqueView({
       {/* 1. VIEW: Catalogo & Niveis */}
       {activeSubTab === 'catalogo' && (
         <div className="space-y-4">
+          {isAdmin && <LoosePartsPendingPanel pending={loosePending} unsold={looseUnsold} onChanged={onStockChanged} />}
           {/* Filters Bar */}
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row gap-4 justify-between">
             <div className="relative flex-1">

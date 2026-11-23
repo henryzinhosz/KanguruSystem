@@ -39,7 +39,7 @@ export function computeStockAlerts(products: Product[], inventory: StockInventor
   const alerts: StockAlert[] = [];
   products.forEach(product => {
     // Arquivado (juntado a outro) e PC de orcamento nunca sao repostos: fora dos alertas.
-    if (product.archivedAt || product.quoteId) return;
+    if (product.archivedAt || product.quoteId || product.loosePart) return;
     const qty = inventory.find(inv => inv.productId === product.id)?.quantities[unitId]?.qty || 0;
     const minDefined = product.minStock !== null && product.minStock !== undefined;
     const minStock = minDefined ? (product.minStock as number) : DEFAULT_MIN_STOCK;

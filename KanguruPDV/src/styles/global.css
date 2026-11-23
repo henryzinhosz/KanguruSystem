@@ -2675,3 +2675,15 @@ textarea:focus {
 .fee-calc-row.is-clickable:hover { background: #eff6ff; }
 .fee-calc-warning { margin: 0.75rem 0 0; border-radius: 10px; padding: 0.6rem 0.8rem; color: #9a3412; background: #fff7ed; font-size: 0.9rem; }
 @media (max-width: 560px) { .fee-calc-row { grid-template-columns: 1fr 1fr; } .fee-calc-row > :last-child { grid-column: 1 / -1; color: #64748b; font-size: 0.85rem; } }
+
+/* Pecas avulsas - PC (2026-11-22) */
+.loose-parts-open { display: inline-flex; align-items: center; gap: 0.4rem; align-self: flex-start; margin-top: 0.6rem; border: 1px solid #cbd5e1; border-radius: 10px; padding: 0.45rem 0.8rem; color: #1d4ed8; background: #eff6ff; font: 600 0.85rem var(--font-sans); cursor: pointer; }
+.loose-parts-open:hover:not(:disabled) { border-color: #93c5fd; }
+.loose-parts-open:disabled { opacity: 0.5; cursor: default; }
+.loose-parts-modal { width: min(100%, 860px); }
+.loose-parts-list { display: grid; gap: 0.6rem; margin: 0.75rem 0; }
+.loose-part-row { display: grid; grid-template-columns: 150px 1fr 130px 110px 36px; gap: 0.5rem; align-items: end; }
+.loose-part-row label { display: grid; gap: 0.3rem; font-size: 0.8rem; font-weight: 600; color: #475569; }
+.loose-parts-total { margin-right: auto; color: #475569; }
+.loose-parts-total strong { color: #0f172a; font-family: var(--font-mono); }
+@media (max-width: 720px) { .loose-part-row { grid-template-columns: 1fr 1fr; } .loose-part-name { grid-column: 1 / -1; } }

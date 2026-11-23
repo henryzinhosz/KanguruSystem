@@ -6,6 +6,7 @@ import {
   Calculator,
   CircleAlert,
   ClipboardList,
+  Cpu,
   CreditCard,
   LayoutGrid,
   LockKeyhole,
@@ -64,6 +65,8 @@ import { TopBar } from './TopBar';
 import { HomeMenu, type MenuAction } from './HomeMenu';
 import { ProductLookupModal } from './ProductLookupModal';
 import { FeeCalculatorModal, type FeeChoice } from './FeeCalculatorModal';
+import { LoosePartsModal } from './LoosePartsModal';
+import { discardPosLooseParts } from '../services/supabase/looseParts';
 import { SellerReportModal } from './SellerReportModal';
 import { CustomerHistoryModal } from './CustomerHistoryModal';
 import { PrinterSettingsModal } from './PrinterSettingsModal';
@@ -177,6 +180,8 @@ interface CartItem extends PosCatalogItem {
   // Servico de uma Ordem de Servico sendo cobrada (o banco liga a venda a OS).
   workOrderId?: string;
   workOrderNumber?: number;
+  // Peca avulsa criada nesta venda: removida do carrinho ou venda descartada = descarta no banco.
+  loosePart?: boolean;
 }
 
 const currency = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
@@ -493,6 +498,7 @@ export function App() {
   const [lookupOpen, setLookupOpen] = useState(false);
   // Calculadora de taxa: aberta pelo menu (so consulta) ou pela venda (leva a forma para o pagamento).
   const [feeCalcOpen, setFeeCalcOpen] = useState<'menu' | 'sale' | null>(null);
+  const [loosePartsOpen, setLoosePartsOpen] = useState(false);
   const [sellerReportOpen, setSellerReportOpen] = useState(false);
   const [customerHistoryOpen, setCustomerHistoryOpen] = useState(false);
   // Impressao direta (2.8c): impressora termica escolhida neste PC.
@@ -925,7 +931,16 @@ export function App() {
     });
   }
 
+  // Pecas avulsas desta venda entram como produtos normais (1 unidade cada).
+  function addLooseParts(items: PosCatalogItem[]) {
+    setCart((current) => [...current, ...items.map((item) => ({ ...item, quantity: 1, discountPercent: 0, loosePart: true }))]);
+    setLoosePartsOpen(false);
+    setMessage(`${items.length} peça(s) avulsa(s) adicionada(s) ao carrinho.`);
+  }
+
   function changeQuantity(productId: string, itemType: PosCatalogItem['itemType'], change: number) {
+    const removed = cart.find((item) => item.id === productId && item.itemType === itemType && !item.workOrderId);
+    if (removed?.loosePart && removed.quantity + change <= 0) discardPosLooseParts([removed.id]);
     setCart((current) =>
       current.flatMap((item) => {
         if (item.id !== productId || item.itemType !== itemType || item.workOrderId) return [item];
@@ -1990,6 +2005,7 @@ export function App() {
 
   // Sair da venda para o menu descarta a venda em andamento (proxima venda comeca limpa).
   function leaveSaleToMenu() {
+    discardPosLooseParts(cart.filter((item) => item.loosePart).map((item) => item.id));
     setCart([]);
     setCatalogItems([]);
     setQuery('');
@@ -2011,7 +2027,7 @@ export function App() {
         setCpfPromptOpen(false);
         return;
       }
-      if (feeCalcOpen || serialProduct || adminApprovalOpen || customerPickerOpen || customerHistoryOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
+      if (feeCalcOpen || loosePartsOpen || serialProduct || adminApprovalOpen || customerPickerOpen || customerHistoryOpen || customerForm || nfceProblem || offlineCustomerOpen || returnSaleId) return;
       if (catalogItems.length > 0 || query) {
         setCatalogItems([]);
         setQuery('');
@@ -2862,6 +2878,17 @@ export function App() {
               <Search size={21} />
             </button>
           </form>
+          {!reservationMode && (
+            <button
+              className="loose-parts-open"
+              type="button"
+              disabled={busy || offlineNow}
+              title={offlineNow ? 'Indisponível sem internet' : 'Peça vendida separada (processador, SSD, placa-mãe...)'}
+              onClick={() => setLoosePartsOpen(true)}
+            >
+              <Cpu size={16} /> Peças avulsas - PC
+            </button>
+          )}
 
           <Notice message={message} />
 
@@ -3146,6 +3173,7 @@ export function App() {
           )}
         </aside>
       </section>
+      {loosePartsOpen && <LoosePartsModal onAdded={addLooseParts} onClose={() => setLoosePartsOpen(false)} />}
       {feeCalcOpen === 'sale' && (
         <FeeCalculatorModal
           fees={cardFees}

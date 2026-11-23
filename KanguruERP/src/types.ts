@@ -203,6 +203,9 @@ export interface Product {
   archivedInto?: string | null;
   // PC criado pelo Orcamento de PC: vendido (sem estoque) some do catalogo.
   quoteId?: string | null;
+  // Peca avulsa criada no PDV (migration 20261207); costPending = custo ainda nao informado.
+  loosePart?: boolean;
+  costPending?: boolean;
 }
 
 // Item da Troca Gamer na hora de estocar (varios itens, migration 20261206).

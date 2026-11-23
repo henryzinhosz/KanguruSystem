@@ -3,7 +3,7 @@ import { supabase } from './supabaseClient';
 // Alertas "Precisa de atenção", ficha do cliente, metas da rede e comunicados no ERP do franqueado
 // (migrations 20261118 e 20261119).
 
-export type ErpAlertKind = 'OS_ATRASADA' | 'OS_PARADA' | 'NOTA' | 'CAIXA' | 'RESERVA' | 'OFFLINE' | 'ESTOQUE' | 'CONTA_PAGAR';
+export type ErpAlertKind = 'OS_ATRASADA' | 'OS_PARADA' | 'NOTA' | 'CAIXA' | 'RESERVA' | 'OFFLINE' | 'ESTOQUE' | 'CONTA_PAGAR' | 'PECA_AVULSA';
 
 export interface ErpAlert {
   kind: ErpAlertKind;
