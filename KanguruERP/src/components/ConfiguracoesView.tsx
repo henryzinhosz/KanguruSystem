@@ -5,6 +5,7 @@ import { supabaseService } from '../db/supabaseService';
 import ValueInput from './ValueInput';
 import ManagerPasswordPanel from './ManagerPasswordPanel';
 import TenantUsersPanel from './TenantUsersPanel';
+import AuditLogPanel from './AuditLogPanel';
 import FranchiseeContactPanel from './FranchiseeContactPanel';
 
 interface ConfiguracoesViewProps {
@@ -112,13 +113,13 @@ export default function ConfiguracoesView({
   const [operatorMessage, setOperatorMessage] = useState('');
   const [operatorError, setOperatorError] = useState('');
   const canManageOperators = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER;
-  type SettingsTab = 'conta' | 'lojas' | 'pdv' | 'usuarios';
+  type SettingsTab = 'conta' | 'lojas' | 'pdv' | 'usuarios' | 'registro';
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('conta');
   const settingsTabs = ([
     ['conta', 'Minha conta'],
     ['lojas', 'Lojas'],
     ...(canManageOperators ? [['pdv', 'Configurações do PDV']] : []),
-    ...(currentUser.role === UserRole.ADMIN ? [['usuarios', 'Usuários do ERP']] : []),
+    ...(currentUser.role === UserRole.ADMIN ? [['usuarios', 'Usuários do ERP'], ['registro', 'Registro de ações']] : []),
   ] as [SettingsTab, string][]);
   // Janela da loja dividida em abas.
   const [storeSection, setStoreSection] = useState<StoreSection>('dados');
@@ -446,6 +447,7 @@ export default function ConfiguracoesView({
       )}
 
       {settingsTab === 'usuarios' && currentUser.role === UserRole.ADMIN && <TenantUsersPanel currentUser={currentUser} storeConfigs={storeConfigs} />}
+      {settingsTab === 'registro' && currentUser.role === UserRole.ADMIN && <AuditLogPanel storeConfigs={storeConfigs} />}
 
       {storeModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="presentation" onKeyDown={event => { if (event.key === 'Escape') closeStoreModal(); }}>
