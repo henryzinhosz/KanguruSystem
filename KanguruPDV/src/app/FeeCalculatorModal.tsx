@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Copy, X } from 'lucide-react';
 import ValueInput from './ValueInput';
-import { cardFeeRate, cardSurcharge, type CardFeeTable, type PaymentMethodKey } from '../services/supabase/sales';
+import { cardFeeConfigured, cardFeeRate, cardSurcharge, type CardFeeTable, type PaymentMethodKey } from '../services/supabase/sales';
 
 // Calculadora de taxa (desenho aprovado em 2026-11-22): quanto cobrar em cada forma para a loja receber
 // o valor cheio. Mesma tabela e mesma conta do "Repassar taxa" da venda. O vendedor NUNCA ve a % da taxa
@@ -26,17 +26,18 @@ function buildRows(fees: CardFeeTable | null, value: number): Row[] {
   const rows: Row[] = [
     { key: 'pix', label: 'Pix ou dinheiro', choice: { method: 'PIX', installments: 1 }, total: value, installment: null },
   ];
-  const debitRate = cardFeeRate(fees, 'DEBITO', 1);
+  // Taxa 0 cadastrada = sem acrescimo (total = valor); sem taxa cadastrada = null.
+  const totalFor = (method: PaymentMethodKey, count: number) =>
+    cardFeeConfigured(fees, method, count) ? value + cardSurcharge(value, cardFeeRate(fees, method, count)) : null;
   rows.push({
     key: 'debito',
     label: 'Débito',
     choice: { method: 'DEBITO', installments: 1 },
-    total: debitRate > 0 ? value + cardSurcharge(value, debitRate) : null,
+    total: totalFor('DEBITO', 1),
     installment: null,
   });
   for (let count = 1; count <= 21; count += 1) {
-    const rate = cardFeeRate(fees, 'CREDITO', count);
-    const total = rate > 0 ? value + cardSurcharge(value, rate) : null;
+    const total = totalFor('CREDITO', count);
     rows.push({
       key: `credito-${count}`,
       label: `Crédito ${count}x`,

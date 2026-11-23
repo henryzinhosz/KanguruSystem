@@ -450,7 +450,7 @@ function QuoteEditor({ mode, initial, seed, settings, fees, templates, seller, s
 
       <div className="wo-summary qt-summary">
         <div><small>Total à vista</small><strong>{currency.format(total)}</strong></div>
-        <div><small>Em 12x no cartão</small><strong>{currency.format(plan.installmentTotal)}</strong><span>12x de {currency.format(plan.installment)} · taxa de {rate.toLocaleString('pt-BR')}% da tabela do ERP</span></div>
+        <div><small>Em 12x no cartão</small><strong>{currency.format(plan.installmentTotal)}</strong><span>12x de {currency.format(plan.installment)} · taxa já incluída</span></div>
         <div><small>Custo{hasStock ? ' das peças digitadas' : ''}</small><strong>{currency.format(typedCost)}</strong></div>
         <div><small>Lucro à vista{hasStock ? ' das peças digitadas' : ''}</small><strong>{currency.format(round2(typedPrice - typedCost))}</strong></div>
       </div>

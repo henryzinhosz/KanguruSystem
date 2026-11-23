@@ -37,6 +37,7 @@ import {
   getPosNfceStatus,
   getPosCardFees,
   getPosSaleReceipt,
+  cardFeeConfigured,
   cardFeeRate,
   lineSurcharge,
   saleRpc,
@@ -319,7 +320,6 @@ function surchargeTotal(lines: PaymentLine[]): number {
   return lines.reduce((sum, line) => sum + toCents(line.surcharge ?? 0), 0) / 100;
 }
 
-const percentText = (value: number) => value.toLocaleString('pt-BR', { maximumFractionDigits: 2 });
 
 function legacyPaymentMethod(applied: PaymentLine[]): string {
   return applied.length === 1 ? applied[0].paymentMethod : 'DIVIDIDO';
@@ -2055,8 +2055,14 @@ export function App() {
     line.amount > 0 && !((line.paymentMethod === 'CREDITO' || line.paymentMethod === 'DEBITO') && line.passFee));
   const feeRemaining = Math.max(0, toCents(grossAmount) - feeKeptLines.reduce((sum, line) => sum + toCents(line.amount), 0)) / 100;
   function applyFeeChoice(choice: FeeChoice) {
+    // Cartao com taxa do cliente > 0 sai com "Repassar taxa"; debito sem acrescimo sai sem repasse.
     const line: PaymentLine = choice.method === 'CREDITO' || choice.method === 'DEBITO'
-      ? { paymentMethod: choice.method, amount: feeRemaining, installments: choice.installments, passFee: true }
+      ? {
+        paymentMethod: choice.method,
+        amount: feeRemaining,
+        installments: choice.installments,
+        passFee: cardFeeRate(cardFees, choice.method, choice.installments) > 0,
+      }
       : { paymentMethod: choice.method, amount: feeRemaining };
     setPaymentLines([...feeKeptLines, line]);
     setFeeCalcOpen(null);
@@ -3482,14 +3488,10 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
                     value={installments}
                     onChange={(event) => updateLine(index, { installments: Number(event.target.value), ...fillAmount(line, otherLinesCents) })}
                   >
-                    {Array.from({ length: 21 }, (_, i) => i + 1).map((count) => {
-                      const countRate = cardFeeRate(cardFees, 'CREDITO', count);
-                      return (
-                        <option key={count} value={count}>
-                          {count}x{countRate > 0 ? ` (${percentText(countRate)}%)` : ''}
-                        </option>
-                      );
-                    })}
+                    {/* Sem a % da taxa: a tela pode ser vista pelo cliente (decisao de 2026-11-22). */}
+                    {Array.from({ length: 21 }, (_, i) => i + 1).map((count) => (
+                      <option key={count} value={count}>{count}x</option>
+                    ))}
                   </select>
                 )}
                 {rate > 0 ? (
@@ -3499,8 +3501,10 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
                       checked={Boolean(line.passFee)}
                       onChange={(event) => updateLine(index, { passFee: event.target.checked, ...fillAmount(line, otherLinesCents) })}
                     />
-                    Repassar taxa ({percentText(rate)}%)
+                    Repassar taxa
                   </label>
+                ) : cardFeeConfigured(cardFees, line.paymentMethod, installments) ? (
+                  <small>Sem acréscimo</small>
                 ) : (
                   <small>Taxa não cadastrada no ERP</small>
                 )}
@@ -3511,7 +3515,7 @@ function PaymentLinesEditor({ lines, total, totalLabel, busy, cardFees, onChange
                     </small>
                   ) : null
                 ) : rate > 0 ? (
-                  <small>A taxa de {percentText(rate)}% fica com a loja</small>
+                  <small>Sem repassar, a taxa fica com a loja</small>
                 ) : null}
               </div>
             )}

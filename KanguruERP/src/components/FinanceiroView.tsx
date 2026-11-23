@@ -308,6 +308,9 @@ export default function FinanceiroView({
   // Taxas do cartao (%): debito e credito de 1x a 21x (calculadora de juros do PDV).
   const [editDebitFee, setEditDebitFee] = useState<number | null>(null);
   const [editCreditFees, setEditCreditFees] = useState<Array<number | null>>(() => Array(21).fill(null));
+  // Taxa cobrada do cliente (calculadora e "Repassar taxa" do PDV): em branco = usa a real; 0 = sem acrescimo.
+  const [editClientDebitFee, setEditClientDebitFee] = useState<number | null>(null);
+  const [editClientCreditFees, setEditClientCreditFees] = useState<Array<number | null>>(() => Array(21).fill(null));
   const [configError, setConfigError] = useState('');
 
   useEffect(() => {
@@ -333,7 +336,15 @@ export default function FinanceiroView({
       setEditPixFee(String((cfg.paymentFees?.PIX ?? 0) * 100));
       setEditDebitFee(cfg.cardFeeTable?.debito || null);
       setEditCreditFees(Array.from({ length: 21 }, (_, index) => cfg.cardFeeTable?.credito?.[index] || null));
+      setEditClientDebitFee(cfg.cardFeeTable?.cliente?.debito ?? null);
+      setEditClientCreditFees(Array.from({ length: 21 }, (_, index) => cfg.cardFeeTable?.cliente?.credito?.[index] ?? null));
     }
+  };
+
+  // Regra da loja: Nx = (N + 1)% no credito; debito sem acrescimo.
+  const fillClientFeeRule = () => {
+    setEditClientDebitFee(0);
+    setEditClientCreditFees(Array.from({ length: 21 }, (_, index) => index + 2));
   };
 
   useEffect(() => {
@@ -352,14 +363,15 @@ export default function FinanceiroView({
     setConfigError('');
     const credito = editCreditFees.map(value => value ?? 0);
     const debito = editDebitFee ?? 0;
-    if ([debito, ...credito].some(value => value < 0 || value >= 100)) {
+    const clientValues = [editClientDebitFee, ...editClientCreditFees].filter((value): value is number => value !== null);
+    if ([debito, ...credito, ...clientValues].some(value => value < 0 || value >= 100)) {
       setConfigError('As taxas do cartão precisam ficar entre 0% e 99,99%.');
       return;
     }
     try {
       await updateStoreConfig(selectedConfigUnit, {
         fixedCost: editFixedCost,
-        cardFeeTable: { debito, credito },
+        cardFeeTable: { debito, credito, cliente: { debito: editClientDebitFee, credito: editClientCreditFees } },
         paymentFees: {
           DINHEIRO: 0,
           PIX: parsePercentage(editPixFee),
@@ -1106,7 +1118,7 @@ export default function FinanceiroView({
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="font-bold text-slate-600 block text-[10px]">Crédito por número de parcelas (%)</label>
+                  <label className="font-bold text-slate-600 block text-[10px]">Taxa real da maquininha: crédito por número de parcelas (%)</label>
                   <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
                     {editCreditFees.map((value, index) => (
                       <div key={index} className="space-y-0.5">
@@ -1121,7 +1133,45 @@ export default function FinanceiroView({
                     ))}
                   </div>
                   <p className="text-[10px] text-slate-500">
-                    O PDV usa estas taxas ao escolher crédito (e as parcelas) ou débito. Com "Repassar taxa" o cliente paga os juros e a loja recebe o valor cheio; sem repassar, a taxa é descontada do lucro nos relatórios.
+                    A taxa real (débito e crédito) é a que a maquininha desconta: o sistema grava em cada venda e desconta do lucro nos relatórios. Os vendedores nunca veem esta tabela.
+                  </p>
+                </div>
+
+                <div className="space-y-2 bg-white p-3 rounded-lg border border-blue-100">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label className="font-bold text-slate-700 block text-[10px] uppercase tracking-wider">Taxa cobrada do cliente (%)</label>
+                    <button
+                      type="button"
+                      onClick={fillClientFeeRule}
+                      className="text-[10px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded px-2 py-1"
+                    >
+                      Preencher com a regra: parcelas + 1%
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 sm:grid-cols-7 gap-2">
+                    <div className="space-y-0.5">
+                      <span className="text-[10px] text-slate-500 font-bold">Débito</span>
+                      <ValueInput
+                        aria-label="Débito cobrado do cliente (%)"
+                        value={editClientDebitFee}
+                        onValueChange={setEditClientDebitFee}
+                        className="w-full bg-white border border-slate-200 rounded p-1.5 outline-none font-mono"
+                      />
+                    </div>
+                    {editClientCreditFees.map((value, index) => (
+                      <div key={index} className="space-y-0.5">
+                        <span className="text-[10px] text-slate-500 font-bold">{index + 1}x</span>
+                        <ValueInput
+                          aria-label={`Crédito ${index + 1}x cobrado do cliente (%)`}
+                          value={value}
+                          onValueChange={(next) => setEditClientCreditFees(previous => previous.map((current, i) => i === index ? next : current))}
+                          className="w-full bg-white border border-slate-200 rounded p-1.5 outline-none font-mono"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    É a que a calculadora de taxa e o "Repassar taxa" do PDV usam para o cliente. Em branco usa a taxa real; 0 = sem acréscimo (ex.: débito). A diferença entre o que o cliente paga e a taxa real aparece no lucro.
                   </p>
                 </div>
 

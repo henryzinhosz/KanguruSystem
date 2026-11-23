@@ -18,10 +18,22 @@ export interface PaymentLine {
   surcharge?: number;
 }
 
-// Taxas do cartao da loja (em %), configuradas no ERP: debito e credito de 1x a 21x.
+// Taxas do cartao COBRADAS DO CLIENTE (em %), configuradas no ERP: debito e credito de 1x a 21x.
+// A taxa real da maquininha nunca chega ao PDV. null = nao cadastrada; 0 = sem acrescimo.
 export interface CardFeeTable {
   debito?: number | null;
   credito?: Array<number | null>;
+}
+
+// A forma tem taxa definida no ERP (inclusive 0 = sem acrescimo)?
+export function cardFeeConfigured(table: CardFeeTable | null, method: PaymentMethodKey, installments = 1): boolean {
+  if (!table) return false;
+  const rate = method === 'DEBITO'
+    ? table.debito
+    : method === 'CREDITO' && installments >= 1 && installments <= 21
+      ? table.credito?.[installments - 1]
+      : null;
+  return rate !== null && rate !== undefined && Number.isFinite(Number(rate)) && Number(rate) >= 0;
 }
 
 export function cardFeeRate(table: CardFeeTable | null, method: PaymentMethodKey, installments = 1): number {
