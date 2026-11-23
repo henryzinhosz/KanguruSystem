@@ -16,6 +16,7 @@ import {
 } from '../db/receivables';
 import { listPayableBills } from '../db/payables';
 import { listOpenReceivableInstallments, type OpenInstallment } from '../db/receivableTitles';
+import { listCardAportes, type CardAporte } from '../db/cashAccounts';
 
 // Recebimentos (desenho aprovado em 2026-11-20): quanto cai na conta e quando, ja sem a taxa
 // da maquininha, com conferencia do extrato por dia e loja. Regras em Taxas & Custos Fixos.
@@ -45,6 +46,7 @@ interface DayRow {
   pix: number;
   debito: number;
   credito: number;
+  aportes: number;
   refunds: number;
   fees: number;
   net: number;
@@ -82,7 +84,31 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
     return { from: customFrom || '2000-01-01', to: customTo || '2100-12-31' };
   }, [period, customFrom, customTo, month, today]);
 
-  const allEntries = useMemo(() => buildReceivables(sales, stores), [sales, stores]);
+  // Aportes/empréstimos do sócio passados no cartão (migration 20261209): somam no dia em que caem.
+  const [cardAportes, setCardAportes] = useState<CardAporte[]>([]);
+  useEffect(() => {
+    listCardAportes('2000-01-01', '2100-12-31').then(setCardAportes).catch(() => setCardAportes([]));
+  }, []);
+
+  const allEntries = useMemo(() => [
+    ...buildReceivables(sales, stores),
+    ...cardAportes
+      .filter(item => stores.some(store => store.unitId === item.unitId))
+      .map<ReceivableEntry>(item => ({
+        payoutDate: item.payoutDate,
+        unitId: item.unitId,
+        saleId: item.id,
+        saleLabel: `${item.type === 'EMPRESTIMO_SOCIO' ? 'Empréstimo do sócio' : 'Aporte do sócio'} no cartão${item.description ? ` (${item.description})` : ''}`,
+        saleDate: item.date,
+        method: 'CREDITO',
+        installment: item.installments > 1 ? `${item.installments}x` : null,
+        gross: item.gross,
+        fee: item.fee,
+        net: item.net,
+        isRefund: false,
+        isAporte: true,
+      })),
+  ], [sales, stores, cardAportes]);
   const scoped = allEntries.filter(entry => !storeFilter || entry.unitId === storeFilter);
 
   const loadChecks = useCallback(async () => {
@@ -119,8 +145,9 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
       .filter(entry => entry.payoutDate >= range.from && entry.payoutDate <= range.to)
       .forEach(entry => {
         const key = `${entry.payoutDate}|${entry.unitId}`;
-        const row = map.get(key) ?? { key, payoutDate: entry.payoutDate, unitId: entry.unitId, pix: 0, debito: 0, credito: 0, refunds: 0, fees: 0, net: 0, entries: [] };
-        if (entry.isRefund) row.refunds += entry.gross;
+        const row = map.get(key) ?? { key, payoutDate: entry.payoutDate, unitId: entry.unitId, pix: 0, debito: 0, credito: 0, aportes: 0, refunds: 0, fees: 0, net: 0, entries: [] };
+        if (entry.isAporte) row.aportes += entry.gross;
+        else if (entry.isRefund) row.refunds += entry.gross;
         else if (entry.method === 'PIX') row.pix += entry.gross;
         else if (entry.method === 'DEBITO') row.debito += entry.gross;
         else row.credito += entry.gross;
@@ -133,9 +160,11 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
   }, [scoped, range.from, range.to]);
 
   const totals = rows.reduce((acc, row) => ({
-    pix: acc.pix + row.pix, debito: acc.debito + row.debito, credito: acc.credito + row.credito,
+    pix: acc.pix + row.pix, debito: acc.debito + row.debito, credito: acc.credito + row.credito, aportes: acc.aportes + row.aportes,
     refunds: acc.refunds + row.refunds, fees: acc.fees + row.fees, net: acc.net + row.net,
-  }), { pix: 0, debito: 0, credito: 0, refunds: 0, fees: 0, net: 0 });
+  }), { pix: 0, debito: 0, credito: 0, aportes: 0, refunds: 0, fees: 0, net: 0 });
+  const showAportes = rows.some(row => row.aportes !== 0);
+  const columnCount = 8 + (stores.length > 1 ? 1 : 0) + (showAportes ? 1 : 0);
 
   const checkOf = (row: DayRow) => checks.find(item => item.unitId === row.unitId && item.payoutDate === row.payoutDate);
 
@@ -272,6 +301,7 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
                 <th className="px-3 py-2 text-right">Pix</th>
                 <th className="px-3 py-2 text-right">Débito</th>
                 <th className="px-3 py-2 text-right">Crédito</th>
+                {showAportes && <th className="px-3 py-2 text-right">Aporte no cartão</th>}
                 <th className="px-3 py-2 text-right">Devoluções</th>
                 <th className="px-3 py-2 text-right">Taxas</th>
                 <th className="px-3 py-2 text-right">Líquido</th>
@@ -300,6 +330,7 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
                       <td className="px-3 py-2.5 text-right font-mono">{row.pix ? money(row.pix) : '-'}</td>
                       <td className="px-3 py-2.5 text-right font-mono">{row.debito ? money(row.debito) : '-'}</td>
                       <td className="px-3 py-2.5 text-right font-mono">{row.credito ? money(row.credito) : '-'}</td>
+                      {showAportes && <td className="px-3 py-2.5 text-right font-mono text-blue-600">{row.aportes ? money(row.aportes) : '-'}</td>}
                       <td className="px-3 py-2.5 text-right font-mono text-rose-600">{row.refunds ? money(row.refunds) : '-'}</td>
                       <td className="px-3 py-2.5 text-right font-mono text-rose-600">{row.fees ? `- ${money(row.fees)}` : '-'}</td>
                       <td className="px-3 py-2.5 text-right font-mono font-bold text-slate-900">{money(row.net)}</td>
@@ -324,7 +355,7 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
                     </tr>
                     {open && (
                       <tr className="bg-slate-50/70">
-                        <td colSpan={stores.length > 1 ? 9 : 8} className="px-4 py-2">
+                        <td colSpan={columnCount} className="px-4 py-2">
                           <table className="w-full text-[11px]">
                             <thead className="text-slate-400">
                               <tr>
@@ -343,7 +374,7 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
                                   <td className="py-1 font-mono">{formatDate(entry.saleDate)}</td>
                                   <td className="py-1">
                                     {entry.isRefund ? 'Estorno ' : ''}{entry.method === 'PIX' ? 'Pix' : entry.method === 'DEBITO' ? 'Débito' : 'Crédito'}
-                                    {entry.installment ? ` (parcela ${entry.installment})` : ''}
+                                    {entry.installment ? (entry.isAporte ? ` ${entry.installment}` : ` (parcela ${entry.installment})`) : ''}
                                   </td>
                                   <td className="py-1 text-right font-mono">{money(entry.gross)}</td>
                                   <td className="py-1 text-right font-mono text-rose-600">{entry.fee ? `- ${money(entry.fee)}` : '-'}</td>
@@ -359,7 +390,7 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
                 );
               })}
               {rows.length === 0 && (
-                <tr><td colSpan={9} className="py-10 text-center text-slate-400">Nenhum recebimento em cartão ou Pix neste período.</td></tr>
+                <tr><td colSpan={columnCount} className="py-10 text-center text-slate-400">Nenhum recebimento em cartão ou Pix neste período.</td></tr>
               )}
             </tbody>
             {rows.length > 0 && (
@@ -369,6 +400,7 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
                   <td className="px-3 py-2 text-right font-mono">{money(totals.pix)}</td>
                   <td className="px-3 py-2 text-right font-mono">{money(totals.debito)}</td>
                   <td className="px-3 py-2 text-right font-mono">{money(totals.credito)}</td>
+                  {showAportes && <td className="px-3 py-2 text-right font-mono text-blue-600">{money(totals.aportes)}</td>}
                   <td className="px-3 py-2 text-right font-mono text-rose-600">{money(totals.refunds)}</td>
                   <td className="px-3 py-2 text-right font-mono text-rose-600">- {money(totals.fees)}</td>
                   <td className="px-3 py-2 text-right font-mono">{money(totals.net)}</td>

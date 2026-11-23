@@ -2101,7 +2101,8 @@ export const supabaseService = {
       category: s.category,
       historyCount: s.history_count,
       phone: s.phone || undefined,
-      website: s.website || undefined
+      website: s.website || undefined,
+      brands: Array.isArray(s.brands) ? s.brands : undefined
     }));
   },
 

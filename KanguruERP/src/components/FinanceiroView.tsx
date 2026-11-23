@@ -37,9 +37,11 @@ import {
   Printer,
   Wallet,
   Landmark,
-  HandCoins
+  HandCoins,
+  PiggyBank
 } from 'lucide-react';
 import PayablesPanel from './PayablesPanel';
+import CashAccountsPanel from './CashAccountsPanel';
 import AccountsReceivablePanel from './AccountsReceivablePanel';
 import ExpensesLedger from './ExpensesLedger';
 import ReceivablesPanel from './ReceivablesPanel';
@@ -115,9 +117,11 @@ interface FinanceiroViewProps {
   otherIncome?: OtherIncome[];
   reloadOtherIncome?: () => void | Promise<void>;
   productStoreCosts?: ProductStoreCost[];
+  // Caixa e Bancos (migration 20261209): criar fornecedor só com o nome ao ligar marcas.
+  addSupplier?: (supplier: Omit<Supplier, 'id' | 'historyCount'>) => Promise<Supplier>;
 }
 
-export type FinanceiroTab = 'vendas' | 'contas' | 'areceber' | 'recebimentos' | 'despesas' | 'indicadores' | 'configs';
+export type FinanceiroTab = 'vendas' | 'caixa' | 'contas' | 'areceber' | 'recebimentos' | 'despesas' | 'indicadores' | 'configs';
 
 export default function FinanceiroView({
   currentUser,
@@ -133,7 +137,8 @@ export default function FinanceiroView({
   initialTab,
   otherIncome = [],
   reloadOtherIncome,
-  productStoreCosts = []
+  productStoreCosts = [],
+  addSupplier
 }: FinanceiroViewProps) {
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const stores = storeConfigs.filter(store => store.unitId !== 'central');
@@ -452,6 +457,18 @@ export default function FinanceiroView({
             Histórico de Vendas
           </button>
           <button
+            id="tab-financeiro-cash"
+            onClick={() => setActiveTab('caixa')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeTab === 'caixa'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <PiggyBank className="w-4 h-4 mr-1.5" />
+            Caixa e Bancos
+          </button>
+          <button
             id="tab-financeiro-payables"
             onClick={() => setActiveTab('contas')}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
@@ -527,6 +544,17 @@ export default function FinanceiroView({
           )}
         </div>
       </div>
+
+      {activeTab === 'caixa' && (
+        <CashAccountsPanel
+          currentUser={currentUser}
+          sales={sales}
+          storeConfigs={storeConfigs}
+          suppliers={suppliers}
+          addSupplier={addSupplier}
+          onExpensesChanged={reloadExpenses}
+        />
+      )}
 
       {activeTab === 'contas' && (
         <PayablesPanel currentUser={currentUser} storeConfigs={storeConfigs} suppliers={suppliers} onExpensesChanged={reloadExpenses} />

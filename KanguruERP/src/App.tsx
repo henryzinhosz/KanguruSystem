@@ -379,6 +379,7 @@ export default function App() {
               products={products}
               inventory={inventory}
               suppliers={suppliers}
+              addSupplier={addSupplier}
               reloadExpenses={reloadExpenses}
               otherIncome={otherIncome}
               reloadOtherIncome={async () => { await reloadOtherIncome(); await loadAllFromSupabase(); }}

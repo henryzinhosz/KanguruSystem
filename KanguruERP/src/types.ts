@@ -659,6 +659,9 @@ export interface Supplier {
   historyCount: number;
   phone?: string;
   website?: string;
+  // Marcas que este fornecedor repõe (reserva de reposição, migration 20261209). So leitura aqui:
+  // quem grava e a funcao set_brand_supplier (Caixa e Bancos > Ligar marcas).
+  brands?: string[];
 }
 
 // Contas a pagar (migration 20261130). Paga = vira despesa na data do pagamento.

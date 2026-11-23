@@ -130,6 +130,8 @@ export interface ReceivableEntry {
   fee: number;
   net: number;
   isRefund: boolean;
+  // Aporte/empréstimo do sócio passado no cartão (Caixa e Bancos): cai junto com as vendas.
+  isAporte?: boolean;
 }
 
 const round2 = (value: number) => Math.round(value * 100) / 100;
