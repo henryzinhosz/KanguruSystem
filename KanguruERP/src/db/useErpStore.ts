@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabaseService, isTableMissingError } from './supabaseService';
 import { supabase } from './supabaseClient';
 import { getMyNetworkAccess } from './network';
+import { listOtherIncome } from './receivableTitles';
+import type { OtherIncome } from './finance';
 import { 
   User, 
   UserRole, isNetworkRole,
@@ -42,6 +44,7 @@ export function useErpStore() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [pdvOperators, setPdvOperators] = useState<PdvOperator[]>([]);
   const [productStoreCosts, setProductStoreCosts] = useState<ProductStoreCost[]>([]);
+  const [otherIncome, setOtherIncome] = useState<OtherIncome[]>([]);
 
   // Supabase Sync States
   const useSupabase = true;
@@ -64,6 +67,7 @@ export function useErpStore() {
     setSuppliers([]);
     setPdvOperators([]);
     setProductStoreCosts([]);
+    setOtherIncome([]);
   }, []);
 
   // Supabase owns the persisted session; the ERP derives its in-memory gestor profile from it.
@@ -232,7 +236,10 @@ export function useErpStore() {
         console.warn('Nao foi possivel carregar o custo por loja:', costError);
         setProductStoreCosts([]);
       }
-      
+
+      // Outras receitas (contas a receber, migration 20261208). Antes da migration fica vazio.
+      setOtherIncome(await listOtherIncome().catch(() => []));
+
       setSupabaseLoading(false);
       return true;
     } catch (err: any) {
@@ -401,6 +408,11 @@ export function useErpStore() {
     return 'CANCELADA';
   };
 
+  // Recarrega so as outras receitas (recebimentos de contas a receber).
+  const reloadOtherIncome = async () => {
+    setOtherIncome(await listOtherIncome().catch(() => []));
+  };
+
   // Recarrega so as despesas (contas a pagar pagas viram despesa no banco).
   const reloadExpenses = async () => {
     setExpenses(await supabaseService.getExpenses());
@@ -549,6 +561,8 @@ export function useErpStore() {
     suppliers,
     pdvOperators,
     productStoreCosts,
+    otherIncome,
+    reloadOtherIncome,
     useSupabase,
     supabaseLoading,
     supabaseConnected,

@@ -1979,7 +1979,9 @@ export const supabaseService = {
       quoteMinMargin: c.quote_min_margin == null ? undefined : Number(c.quote_min_margin),
       quoteInstallmentMarkup: c.quote_installment_markup == null ? undefined : Number(c.quote_installment_markup),
       quoteValidDays: c.quote_valid_days == null ? undefined : Number(c.quote_valid_days),
-      tradeInCreditBonus: c.trade_in_credit_bonus == null ? undefined : Number(c.trade_in_credit_bonus)
+      tradeInCreditBonus: c.trade_in_credit_bonus == null ? undefined : Number(c.trade_in_credit_bonus),
+      // Contas a receber (migration 20261208): undefined = coluna ainda nao existe.
+      pixKey: c.pix_key === undefined ? undefined : (c.pix_key ?? '')
     }));
   },
 
@@ -2014,7 +2016,9 @@ export const supabaseService = {
       // NFS-e (migration 20261113): so envia quando a coluna ja foi lida ou a tela preencheu.
       ...(c.municipalRegistration !== undefined ? { municipal_registration: c.municipalRegistration.trim() || null } : {}),
       ...(c.cityIbgeCode !== undefined ? { city_ibge_code: c.cityIbgeCode.replace(/\D/g, '') || null } : {}),
-      ...(c.simplesNacionalOption !== undefined ? { simples_nacional_option: c.simplesNacionalOption } : {})
+      ...(c.simplesNacionalOption !== undefined ? { simples_nacional_option: c.simplesNacionalOption } : {}),
+      // Chave Pix da loja (migration 20261208): so envia quando a coluna ja foi lida.
+      ...(c.pixKey !== undefined ? { pix_key: c.pixKey.trim() || null } : {})
     };
 
     const { error } = await supabase.from('store_configs').upsert(payload);

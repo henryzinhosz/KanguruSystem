@@ -15,6 +15,7 @@ import {
   type ReceivableEntry,
 } from '../db/receivables';
 import { listPayableBills } from '../db/payables';
+import { listOpenReceivableInstallments, type OpenInstallment } from '../db/receivableTitles';
 
 // Recebimentos (desenho aprovado em 2026-11-20): quanto cai na conta e quando, ja sem a taxa
 // da maquininha, com conferencia do extrato por dia e loja. Regras em Taxas & Custos Fixos.
@@ -63,6 +64,8 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
   const [expanded, setExpanded] = useState<string | null>(null);
   const [checks, setChecks] = useState<PayoutCheck[]>([]);
   const [payables, setPayables] = useState<PayableBill[]>([]);
+  // Contas a receber em aberto (migration 20261208): entram no "Entra x sai" pelo vencimento.
+  const [openReceivables, setOpenReceivables] = useState<OpenInstallment[]>([]);
   const [checking, setChecking] = useState<DayRow | null>(null);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -98,6 +101,7 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
 
   useEffect(() => {
     listPayableBills().then(setPayables).catch(() => setPayables([]));
+    listOpenReceivableInstallments().then(setOpenReceivables).catch(() => setOpenReceivables([]));
   }, []);
 
   // Cartoes do topo.
@@ -138,7 +142,10 @@ export default function ReceivablesPanel({ sales, storeConfigs, onOpenSettings }
   // Entra x sai dos proximos 7 dias.
   const flow = Array.from({ length: 7 }, (_, index) => {
     const day = addDaysKey(today, index);
-    const incoming = sumNet(scoped.filter(entry => entry.payoutDate === day));
+    const incoming = sumNet(scoped.filter(entry => entry.payoutDate === day))
+      + openReceivables
+        .filter(item => (!storeFilter || item.unitId === storeFilter) && (item.dueDate === day || (index === 0 && item.dueDate < today)))
+        .reduce((total, item) => total + item.remaining, 0);
     const pending = payables.filter(bill => bill.status === 'PENDENTE' && (!storeFilter || bill.unitId === storeFilter));
     const outgoing = pending
       .filter(bill => bill.dueDate === day || (index === 0 && bill.dueDate < today))

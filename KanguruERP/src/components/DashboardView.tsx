@@ -57,7 +57,9 @@ import {
   resolvePeriod,
   saleCost,
   summarize,
-  toLocalDateKey
+  toLocalDateKey,
+  otherIncomeTimestamp,
+  type OtherIncome
 } from '../db/finance';
 
 interface DashboardProps {
@@ -68,6 +70,7 @@ interface DashboardProps {
   expenses: Expense[];
   storeConfigs: StoreConfig[];
   productStoreCosts: ProductStoreCost[];
+  otherIncome?: OtherIncome[];
 }
 
 // Paleta categorica validada (ordem fixa; a cor segue a loja/categoria, nunca a posicao no ranking).
@@ -103,7 +106,8 @@ export default function DashboardView({
   sales,
   expenses,
   storeConfigs,
-  productStoreCosts
+  productStoreCosts,
+  otherIncome = []
 }: DashboardProps) {
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const canChooseStore = currentUser.unitId === 'central';
@@ -145,7 +149,8 @@ export default function DashboardView({
   const allScopeSales = completedSales(sales).filter(sale => inScope(sale.unitId, activeUnitId));
   const scopeSales = allScopeSales.filter(sale => isInRange(sale.timestamp, range));
   const scopeExpenses = expenses.filter(expense => inScope(expense.unitId, activeUnitId) && isInRange(expense.timestamp, range));
-  const summary = summarize(scopeSales, scopeExpenses);
+  const scopeOtherIncome = otherIncome.filter(entry => inScope(entry.unitId, activeUnitId) && isInRange(otherIncomeTimestamp(entry), range));
+  const summary = summarize(scopeSales, scopeExpenses, scopeOtherIncome);
   const ticketMedio = summary.salesCount > 0 ? summary.revenue / summary.salesCount : 0;
   const grossMargin = summary.revenue > 0 ? (summary.grossProfit / summary.revenue) * 100 : 0;
 
@@ -505,6 +510,7 @@ export default function DashboardView({
             </h3>
             <p className="text-[11px] text-slate-500 mt-0.5">
               Taxas: {formatMoney(summary.fees)} · Despesas: {formatMoney(summary.expenses)}
+              {summary.otherIncome !== 0 && <> · Outras receitas: {formatMoney(summary.otherIncome)}</>}
             </p>
           </div>
         </div>

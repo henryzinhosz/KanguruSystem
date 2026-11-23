@@ -206,6 +206,7 @@ export default function ConfiguracoesView({
       workOrderTerms: store.workOrderTerms || '',
       workOrderDeliveryTerms: store.workOrderDeliveryTerms || '',
       instagram: store.instagram || '',
+      pixKey: store.pixKey,
       municipalRegistration: store.municipalRegistration || '',
       cityIbgeCode: store.cityIbgeCode || '',
       simplesNacionalOption: store.simplesNacionalOption || '3',
@@ -562,7 +563,8 @@ function StoreFields({ form, onChange, section }: {
     { field: 'address', label: 'Endereço completo', section: 'dados' },
     { field: 'phone', label: 'Telefone', section: 'dados' },
     { field: 'contactEmail', label: 'E-mail de contato', type: 'email', section: 'dados' },
-    { field: 'instagram', label: 'Instagram da loja (ex.: @bebgamescg) — vira o QR code do cupom', section: 'dados' }
+    { field: 'instagram', label: 'Instagram da loja (ex.: @bebgamescg) — vira o QR code do cupom', section: 'dados' },
+    { field: 'pixKey', label: 'Chave Pix da loja — vai na cobrança das contas a receber pelo WhatsApp', section: 'dados' }
   ];
 
   return (
