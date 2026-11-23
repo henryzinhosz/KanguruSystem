@@ -1,6 +1,8 @@
 import { supabase } from './supabaseClient';
-import { 
-  Product, 
+import {
+  Product,
+  TradeInStockLine,
+  TradeInStockResult,
   Service,
   StockInventory, 
   StockMovement, 
@@ -1122,8 +1124,24 @@ export const supabaseService = {
       csosn: p.csosn ?? null,
       icmsRate: p.icms_rate == null ? null : Number(p.icms_rate),
       icmsReduction: p.icms_reduction == null ? null : Number(p.icms_reduction),
-      taxBurdenPercent: p.tax_burden_percent == null ? null : Number(p.tax_burden_percent)
+      taxBurdenPercent: p.tax_burden_percent == null ? null : Number(p.tax_burden_percent),
+      archivedAt: p.archived_at ?? null,
+      archivedInto: p.archived_into ?? null,
+      quoteId: p.quote_id ?? null
     }));
+  },
+
+  // Troca Gamer: estoca varios itens de uma vez (tudo ou nada; migration 20261206).
+  async stockTradeIn(tradeId: string, lines: TradeInStockLine[]): Promise<TradeInStockResult[]> {
+    const { data, error } = await supabase.rpc('stock_trade_in', { p_trade_id: tradeId, p_lines: lines });
+    if (error) throw error;
+    return ((data as { items?: TradeInStockResult[] } | null)?.items ?? []);
+  },
+
+  // Junta produtos repetidos no principal (so o dono; migration 20261206).
+  async mergeProducts(mainId: string, duplicateIds: string[]): Promise<void> {
+    const { error } = await supabase.rpc('merge_products', { p_main_id: mainId, p_duplicate_ids: duplicateIds });
+    if (error) throw error;
   },
 
   // Devolve o codigo gravado: vazio vira o proximo numero automatico (trigger do banco).

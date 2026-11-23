@@ -72,7 +72,8 @@ export default function App() {
     cancelSale,
     addExpense,
     reloadExpenses,
-    approveTradeIn,
+    stockTradeIn,
+    mergeProducts,
     cancelTradeIn,
     updateWorkOrderStatus,
     updateStoreConfig,
@@ -323,13 +324,14 @@ export default function App() {
               registerStockEntry={registerStockEntry}
               productStoreCosts={productStoreCosts}
               onStockChanged={loadAllFromSupabase}
+              mergeProducts={mergeProducts}
             />
           )}
 
           {tab === 'balanco' && (
             <BalancoPanel
               currentUser={currentUser}
-              products={products}
+              products={products.filter(product => !product.archivedAt)}
               inventory={inventory}
               storeConfigs={storeConfigs}
               productStoreCosts={productStoreCosts}
@@ -359,7 +361,7 @@ export default function App() {
               inventory={inventory}
               tradeIns={tradeIns}
               storeConfigs={storeConfigs}
-              approveTradeIn={approveTradeIn}
+              stockTradeIn={stockTradeIn}
               cancelTradeIn={cancelTradeIn}
             />
           )}

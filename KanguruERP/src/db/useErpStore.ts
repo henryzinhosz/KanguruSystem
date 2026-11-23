@@ -12,8 +12,9 @@ import {
   Sale, 
   Expense, 
   TradeIn, 
-  TradeInApproval,
-  WorkOrder, 
+  TradeInStockLine,
+  TradeInStockResult,
+  WorkOrder,
   WorkOrderStatus,
   StoreConfig, 
   Supplier, 
@@ -418,53 +419,18 @@ export function useErpStore() {
     setExpenses(prev => [newExpense, ...prev]);
   };
 
-  // Troca Gamer: cadastra o videogame usado e da entrada da unidade com o serial real.
-  // O custo da unidade e o valor pago ao cliente (entra no custo medio da loja).
-  // Se o produto ja foi criado numa tentativa anterior que falhou na entrada, reaproveita.
-  const approveTradeIn = async (tradeId: string, details: TradeInApproval): Promise<void> => {
-    const trade = tradeIns.find(t => t.id === tradeId);
-    if (!trade) throw new Error('Troca não encontrada.');
-    const unitId = trade.unitId || currentUser.unitId;
+  // Troca Gamer com varios itens (migration 20261206): o banco cria os produtos novos, da entrada de
+  // cada item com o seu custo e marca a troca como estocada, tudo ou nada.
+  const stockTradeIn = async (tradeId: string, lines: TradeInStockLine[]): Promise<TradeInStockResult[]> => {
+    const result = await supabaseService.stockTradeIn(tradeId, lines);
+    await loadAllFromSupabase();
+    return result;
+  };
 
-    let productId = trade.createdProductId && products.some(p => p.id === trade.createdProductId)
-      ? trade.createdProductId
-      : null;
-    if (!productId) {
-      const newProduct = await addProduct({
-        sku: details.sku,
-        name: details.name,
-        category: trade.deviceType === 'IPHONE' ? 'Celulares' : 'Videogames',
-        brand: 'Troca Gamer',
-        costPrice: trade.valuationAmount,
-        sellPrice: details.sellPrice,
-        ncm: details.ncm,
-        warrantyMonths: details.warrantyMonths,
-        isSerialized: true,
-        isUsed: true,
-        cest: details.cest,
-        icmsOrigin: details.icmsOrigin,
-        icmsCst: details.icmsCst,
-        csosn: details.csosn,
-        icmsRate: details.icmsRate,
-        icmsReduction: details.icmsReduction,
-        taxBurdenPercent: details.taxBurdenPercent
-      });
-      productId = newProduct.id;
-      const withProduct = { ...trade, createdProductId: productId };
-      if (useSupabase) await supabaseService.upsertTradeIn(withProduct);
-      setTradeIns(prev => prev.map(t => t.id === tradeId ? withProduct : t));
-    }
-
-    await registerSerializedStockEntry(
-      productId,
-      unitId,
-      [{ serialNumber: details.serialNumber, imei: details.imei || undefined, unitCost: trade.valuationAmount }],
-      `Troca Gamer: compra de ${trade.sellerName} (CPF: ${trade.sellerCpf})`
-    );
-
-    const approved = { ...trade, status: 'APROVADO' as const, createdProductId: productId };
-    if (useSupabase) await supabaseService.upsertTradeIn(approved);
-    setTradeIns(prev => prev.map(t => t.id === tradeId ? approved : t));
+  // Junta produtos repetidos no principal e arquiva os repetidos (so o dono).
+  const mergeProducts = async (mainId: string, duplicateIds: string[]): Promise<void> => {
+    await supabaseService.mergeProducts(mainId, duplicateIds);
+    await loadAllFromSupabase();
   };
 
   const cancelTradeIn = async (tradeId: string) => {
@@ -601,7 +567,8 @@ export function useErpStore() {
     cancelSale,
     addExpense,
     reloadExpenses,
-    approveTradeIn,
+    stockTradeIn,
+    mergeProducts,
     cancelTradeIn,
     updateWorkOrderStatus,
     updateStoreConfig,

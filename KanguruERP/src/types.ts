@@ -198,6 +198,42 @@ export interface Product {
   icmsRate?: number | null;
   icmsReduction?: number | null;
   taxBurdenPercent?: number | null;
+  // Arquivado (juntado a outro produto): some do catalogo, mas as vendas antigas continuam apontando.
+  archivedAt?: string | null;
+  archivedInto?: string | null;
+  // PC criado pelo Orcamento de PC: vendido (sem estoque) some do catalogo.
+  quoteId?: string | null;
+}
+
+// Item da Troca Gamer na hora de estocar (varios itens, migration 20261206).
+export interface TradeInStockLine {
+  skip?: boolean;
+  productId?: string | null;
+  newProduct?: {
+    sku: string;
+    name: string;
+    category: string;
+    sellPrice: number;
+    warrantyMonths: number;
+    isSerialized: boolean;
+    ncm: string;
+    cest: string | null;
+    icmsOrigin: string | null;
+    icmsCst: string | null;
+    csosn: string | null;
+    icmsRate: number | null;
+    icmsReduction: number | null;
+    taxBurdenPercent: number | null;
+  } | null;
+  quantity: number;
+  unitCost: number;
+  serials?: { serialNumber: string; imei?: string | null }[];
+}
+
+export interface TradeInStockResult {
+  productId: string;
+  quantity: number;
+  serials: string[];
 }
 
 // Custo medio de um produto em uma loja (sem serial: media ponderada;
