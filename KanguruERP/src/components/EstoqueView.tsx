@@ -23,6 +23,7 @@ import { sanitizeItemCode } from '../db/itemCode';
 import { CSOSNS, ICMS_CSTS, ICMS_ORIGINS, productFiscalError } from '../db/fiscal';
 import ValueInput from './ValueInput';
 import LabelPrintModal, { LabelRequest } from './LabelPrintModal';
+import MergeProductsModal from './MergeProductsModal';
 
 // Categorias de produto (lista da loja; 2026-11-06).
 const PRODUCT_CATEGORIES = ['Carregadores', 'Cabos', 'Adaptadores', 'Fones', 'Periféricos', 'Videogames', 'Celulares', 'Geek', 'Peças', 'Computadores', 'PCs montados', 'Cards', 'Outros'];
@@ -102,6 +103,7 @@ interface EstoqueViewProps {
   ) => Promise<void>;
   productStoreCosts: ProductStoreCost[];
   onStockChanged: () => Promise<void>;
+  mergeProducts: (mainId: string, duplicateIds: string[]) => Promise<void>;
 }
 
 type SerializedEntryDraft = { serialNumber: string; imei: string; unitCost: string };
@@ -121,7 +123,8 @@ export default function EstoqueView({
   registerTransfer,
   registerStockEntry,
   productStoreCosts,
-  onStockChanged
+  onStockChanged,
+  mergeProducts
 }: EstoqueViewProps) {
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const stores = storeConfigs.filter(store => store.unitId !== 'central');
@@ -132,6 +135,10 @@ export default function EstoqueView({
 
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('Todas');
+  // Arquivados (juntados a outro produto) e PCs de orcamento ja vendidos ficam escondidos.
+  const [showArchived, setShowArchived] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const activeProducts = products.filter(product => !product.archivedAt);
   
   // UI Tabs inside Estoque
   const [activeSubTab, setActiveSubTab] = useState<'catalogo' | 'entrada' | 'transferencias' | 'avariados'>('catalogo');
@@ -203,7 +210,7 @@ export default function EstoqueView({
 
 
   const selectedStockEntryProduct = products.find(product => product.id === stockEntryProductId) || null;
-  const stockEntryResults = products.filter(product => {
+  const stockEntryResults = activeProducts.filter(product => {
     const query = stockEntrySearch.trim().toLowerCase();
     if (!query) return true;
     return product.name.toLowerCase().includes(query) || product.sku.toLowerCase().includes(query);
@@ -255,8 +262,14 @@ export default function EstoqueView({
   }, [stockEntryProductId, storeIdsKey]);
 
   // 1. Filtered Catalogs
+  const totalStockAllStores = (productId: string) => Object.entries(getProductInventory(productId)?.quantities || {})
+    .filter(([unitId]) => unitId !== 'central')
+    .reduce((sum, [, unit]) => sum + (unit.qty || 0), 0);
+  const isHiddenProduct = (p: Product) => Boolean(p.archivedAt) || (Boolean(p.quoteId) && totalStockAllStores(p.id) <= 0);
+  const hiddenCount = products.filter(isHiddenProduct).length;
   const filteredProducts = products.filter(p => {
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    if (!showArchived && isHiddenProduct(p)) return false;
+    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           p.sku.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = categoryFilter === 'Todas' || p.category === categoryFilter;
     return matchesSearch && matchesCategory;
@@ -273,7 +286,7 @@ export default function EstoqueView({
   const transferResults = (() => {
     const query = transferSearch.trim().toLowerCase();
     if (!query) return [];
-    return products.filter(product => product.name.toLowerCase().includes(query) || product.sku.toLowerCase().includes(query));
+    return activeProducts.filter(product => product.name.toLowerCase().includes(query) || product.sku.toLowerCase().includes(query));
   })();
   const selectTransferProduct = (productId: string) => {
     setTransferProductId(productId);
@@ -820,6 +833,19 @@ export default function EstoqueView({
             </div>
           </div>
 
+          <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+            <label className="flex items-center gap-1.5 text-xs text-slate-600 font-semibold">
+              <input type="checkbox" checked={showArchived} onChange={event => setShowArchived(event.target.checked)} />
+              Mostrar arquivados ({hiddenCount})
+              <span className="font-normal text-slate-400">· produtos juntados a outro e PCs de orçamento já vendidos</span>
+            </label>
+            {isAdmin && (
+              <button type="button" onClick={() => setMergeOpen(true)} className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50">
+                Juntar produtos repetidos
+              </button>
+            )}
+          </div>
+
           {inlineError && <p role="alert" className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-3">{inlineError}</p>}
           {/* Lista do catalogo: um produto por linha */}
           <div className="grid grid-cols-1 gap-5 bg-slate-200/60 p-4 rounded-2xl">
@@ -845,6 +871,11 @@ export default function EstoqueView({
                         <span className="text-[10px] bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded uppercase font-mono">
                           {p.category}
                         </span>
+                        {isHiddenProduct(p) && (
+                          <span className="text-[10px] bg-slate-700 text-white font-bold px-2 py-0.5 rounded uppercase font-mono ml-1.5" title={p.archivedInto ? `Juntado em: ${products.find(item => item.id === p.archivedInto)?.name ?? ''}` : 'PC de orçamento já vendido'}>
+                            {p.archivedAt ? `Arquivado${p.archivedInto ? ` → ${products.find(item => item.id === p.archivedInto)?.name ?? ''}` : ''}` : 'Vendido (orçamento)'}
+                          </span>
+                        )}
                         <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase font-mono ml-1.5 ${
                           totalStock === 0
                             ? 'bg-rose-50 text-rose-700 border border-rose-100/50'
@@ -1837,6 +1868,14 @@ export default function EstoqueView({
       )}
       {labelRequest && (
         <LabelPrintModal request={labelRequest} storeConfigs={storeConfigs} onClose={() => setLabelRequest(null)} />
+      )}
+      {mergeOpen && (
+        <MergeProductsModal
+          products={activeProducts}
+          inventory={inventory}
+          onMerge={mergeProducts}
+          onClose={() => setMergeOpen(false)}
+        />
       )}
     </div>
   );

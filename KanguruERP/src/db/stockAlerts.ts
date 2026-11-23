@@ -38,12 +38,16 @@ export function computeStockAlerts(products: Product[], inventory: StockInventor
 
   const alerts: StockAlert[] = [];
   products.forEach(product => {
+    // Arquivado (juntado a outro) e PC de orcamento nunca sao repostos: fora dos alertas.
+    if (product.archivedAt || product.quoteId) return;
     const qty = inventory.find(inv => inv.productId === product.id)?.quantities[unitId]?.qty || 0;
     const minDefined = product.minStock !== null && product.minStock !== undefined;
     const minStock = minDefined ? (product.minStock as number) : DEFAULT_MIN_STOCK;
     const soldRecently = (lastSaleAt.get(product.id) || 0) >= staleStart;
     // Produto parado: zerado, sem venda ha 90+ dias e sem minimo definido (provavelmente saiu de linha).
     if (qty <= 0 && !minDefined && !soldRecently) return;
+    // Usado (Troca Gamer) esgotado sem minimo definido: peca unica, nao e para repor.
+    if (qty <= 0 && !minDefined && product.isUsed) return;
 
     const dailyRate = (soldLast30.get(product.id) || 0) / COVERAGE_WINDOW_DAYS;
     const coverageDays = dailyRate > 0 ? Math.max(0, qty) / dailyRate : null;
