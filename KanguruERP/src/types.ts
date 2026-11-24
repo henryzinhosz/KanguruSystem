@@ -203,6 +203,9 @@ export interface Product {
   archivedInto?: string | null;
   // PC criado pelo Orcamento de PC: vendido (sem estoque) some do catalogo.
   quoteId?: string | null;
+  // Peca avulsa criada no PDV (migration 20261207); costPending = custo ainda nao informado.
+  loosePart?: boolean;
+  costPending?: boolean;
 }
 
 // Item da Troca Gamer na hora de estocar (varios itens, migration 20261206).
@@ -617,6 +620,7 @@ export interface StoreConfig {
   quoteInstallmentMarkup?: number; // acrescimo no 12x do orcamento (%)
   quoteValidDays?: number; // validade padrao do orcamento (dias)
   tradeInCreditBonus?: number; // bonus do vale-troca na Troca Gamer de iPhone (%; padrao 10)
+  pixKey?: string; // chave Pix da loja (mensagem de cobranca das contas a receber)
   // NFS-e Nacional: inscricao municipal, municipio (IBGE) e opcao do Simples (1 nao optante, 2 MEI, 3 ME/EPP).
   municipalRegistration?: string;
   cityIbgeCode?: string;
@@ -655,6 +659,9 @@ export interface Supplier {
   historyCount: number;
   phone?: string;
   website?: string;
+  // Marcas que este fornecedor repõe (reserva de reposição, migration 20261209). So leitura aqui:
+  // quem grava e a funcao set_brand_supplier (Caixa e Bancos > Ligar marcas).
+  brands?: string[];
 }
 
 // Contas a pagar (migration 20261130). Paga = vira despesa na data do pagamento.

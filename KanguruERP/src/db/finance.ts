@@ -131,7 +131,8 @@ export interface FinancialSummary {
   grossProfit: number;     // faturamento - custo
   fees: number;            // taxas de pagamento
   expenses: number;        // despesas lancadas no Financeiro
-  operatingProfit: number; // lucro bruto - taxas - despesas
+  otherIncome: number;     // outras receitas (contas a receber: so a parte que e lucro)
+  operatingProfit: number; // lucro bruto - taxas - despesas + outras receitas
   salesCount: number;
   salesMissingCost: number;
 }
@@ -143,7 +144,17 @@ export const completedSales = (sales: Sale[]) => sales.filter(sale => sale.statu
 export const saleReturnedAmount = (sale: Sale) => (sale.returns || []).reduce((sum, item) => sum + item.totalAmount, 0);
 const saleReturnedCost = (sale: Sale) => (sale.returns || []).reduce((sum, item) => sum + item.costBack, 0);
 
-export function summarize(sales: Sale[], expenses: Expense[]): FinancialSummary {
+// "Outras receitas" (contas a receber, migration 20261208): data do recebimento e a parte que e lucro.
+export interface OtherIncome {
+  unitId: string;
+  date: string; // AAAA-MM-DD
+  amount: number;
+}
+
+// Data AAAA-MM-DD como meio-dia local (para os filtros de periodo e semana que usam timestamp).
+export const otherIncomeTimestamp = (entry: OtherIncome) => `${entry.date}T12:00:00`;
+
+export function summarize(sales: Sale[], expenses: Expense[], otherIncome: OtherIncome[] = []): FinancialSummary {
   let revenue = 0;
   let cost = 0;
   let fees = 0;
@@ -156,6 +167,7 @@ export function summarize(sales: Sale[], expenses: Expense[]): FinancialSummary 
     if (info.missing) salesMissingCost += 1;
   });
   const expenseTotal = expenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const otherIncomeTotal = otherIncome.reduce((sum, entry) => sum + entry.amount, 0);
   const grossProfit = revenue - cost;
   return {
     revenue,
@@ -163,7 +175,8 @@ export function summarize(sales: Sale[], expenses: Expense[]): FinancialSummary 
     grossProfit,
     fees,
     expenses: expenseTotal,
-    operatingProfit: grossProfit - fees - expenseTotal,
+    otherIncome: otherIncomeTotal,
+    operatingProfit: grossProfit - fees - expenseTotal + otherIncomeTotal,
     salesCount: sales.length,
     salesMissingCost,
   };

@@ -3,6 +3,7 @@ import { DEFAULT_MANAGER_PERMISSIONS, Product, Sale, StockInventory, StoreConfig
 import { listErpAlerts, listMyAnnouncements, type ErpAlert, type MyAnnouncement } from './insights';
 import { computeStockAlerts } from './stockAlerts';
 import { ensurePayableRecurrences, listUrgentPayables } from './payables';
+import { listOpenReceivableInstallments } from './receivableTitles';
 import { toLocalDateKey } from './finance';
 
 // Contas a pagar vencidas ou vencendo ate amanha: uma linha por loja (so quem ve o Financeiro).
@@ -36,6 +37,24 @@ async function loadPayableAlerts(): Promise<ErpAlert[]> {
   });
 }
 
+// Contas a receber vencidas: uma linha por loja (so quem ve o Financeiro).
+async function loadReceivableAlerts(): Promise<ErpAlert[]> {
+  const today = toLocalDateKey(new Date());
+  const yesterday = toLocalDateKey(new Date(Date.now() - 86400000));
+  const overdue = (await listOpenReceivableInstallments(yesterday)).filter(item => item.dueDate < today && item.remaining > 0);
+  const byStore = new Map<string, typeof overdue>();
+  overdue.forEach(item => byStore.set(item.unitId, [...(byStore.get(item.unitId) ?? []), item]));
+  const money = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  return Array.from(byStore.entries()).map(([unitId, items]) => ({
+    kind: 'CONTA_RECEBER' as const,
+    unitId,
+    ref: `receber-${unitId}`,
+    title: `${items.length} parcela(s) vencida(s) (${money(items.reduce((sum, item) => sum + item.remaining, 0))})`,
+    detail: Array.from(new Set(items.map(item => item.debtorName))).slice(0, 4).join(', '),
+    date: null,
+  }));
+}
+
 // Alertas "Precisa de atenção" e comunicados da rede para o ERP do franqueado.
 // Recarrega a cada 5 minutos; antes das migrations 20261118/20261119 fica vazio (sem erro na tela).
 const REFRESH_MS = 5 * 60 * 1000;
@@ -59,12 +78,13 @@ export function useFranchiseeInsights(
     if (!enabled) return;
     setAlertsLoading(true);
     try {
-      const [server, payables] = await Promise.all([
+      const [server, payables, receivables] = await Promise.all([
         listErpAlerts().catch(() => [] as ErpAlert[]),
         seesFinance ? loadPayableAlerts().catch(() => [] as ErpAlert[]) : Promise.resolve([] as ErpAlert[]),
+        seesFinance ? loadReceivableAlerts().catch(() => [] as ErpAlert[]) : Promise.resolve([] as ErpAlert[]),
       ]);
       setServerAlerts(server);
-      setPayableAlerts(payables);
+      setPayableAlerts([...payables, ...receivables]);
     } finally {
       setAlertsLoading(false);
     }
@@ -116,7 +136,27 @@ export function useFranchiseeInsights(
       });
   }, [enabled, storeConfigs, products, inventory, sales]);
 
-  const alerts = useMemo(() => [...payableAlerts, ...stockAlerts, ...serverAlerts], [payableAlerts, stockAlerts, serverAlerts]);
+  // Pecas avulsas vendidas com custo a informar (so o dono informa): primeiro item do sino.
+  const loosePartAlerts = useMemo<ErpAlert[]>(() => {
+    if (!enabled || currentUser?.role !== UserRole.ADMIN) return [];
+    const stock = (productId: string) => Object.entries(inventory.find(item => item.productId === productId)?.quantities ?? {})
+      .reduce((sum, [, unit]) => sum + (unit.qty || 0), 0);
+    const pending = products.filter(product => product.loosePart && product.costPending && !product.archivedAt && stock(product.id) <= 0);
+    if (pending.length === 0) return [];
+    return [{
+      kind: 'PECA_AVULSA' as const,
+      unitId: '',
+      ref: 'pecas-avulsas',
+      title: `${pending.length} peça(s) vendida(s) sem custo informado`,
+      detail: pending.slice(0, 4).map(product => product.name).join(', ') + (pending.length > 4 ? '...' : ''),
+      date: null,
+    }];
+  }, [enabled, currentUser?.role, products, inventory]);
+
+  const alerts = useMemo(
+    () => [...loosePartAlerts, ...payableAlerts, ...stockAlerts, ...serverAlerts],
+    [loosePartAlerts, payableAlerts, stockAlerts, serverAlerts]
+  );
   const unreadAnnouncements = announcements.filter(item => !item.readAt).length;
   const pendingImportant = announcements.find(item => item.priority === 'IMPORTANTE' && !item.readAt) ?? null;
 

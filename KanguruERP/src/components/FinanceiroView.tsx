@@ -15,7 +15,7 @@ import {
   SALE_PAYMENT_METHOD_LABELS,
   Product,
   StockInventory,
-  CardCondition, SaleServiceInvoice, Supplier } from '../types';
+  CardCondition, SaleServiceInvoice, Supplier, ProductStoreCost } from '../types';
 import { 
   Plus, 
   DollarSign, 
@@ -36,9 +36,13 @@ import {
   Trash2,
   Printer,
   Wallet,
-  Landmark
+  Landmark,
+  HandCoins,
+  PiggyBank
 } from 'lucide-react';
 import PayablesPanel from './PayablesPanel';
+import CashAccountsPanel from './CashAccountsPanel';
+import AccountsReceivablePanel from './AccountsReceivablePanel';
 import ExpensesLedger from './ExpensesLedger';
 import ReceivablesPanel from './ReceivablesPanel';
 import SettlementRulesEditor from './SettlementRulesEditor';
@@ -89,6 +93,8 @@ import {
   shiftMonthKey,
   weeksOfMonth,
   summarize,
+  otherIncomeTimestamp,
+  type OtherIncome,
 } from '../db/finance';
 
 type HistoryPreset = 'hoje' | 'semana' | 'personalizado';
@@ -107,9 +113,15 @@ interface FinanceiroViewProps {
   reloadExpenses: () => void | Promise<void>;
   // Aba aberta ao entrar (ex.: alerta de contas vencidas abre Contas a pagar).
   initialTab?: FinanceiroTab;
+  // Contas a receber (migration 20261208): parte que e lucro de cada recebimento.
+  otherIncome?: OtherIncome[];
+  reloadOtherIncome?: () => void | Promise<void>;
+  productStoreCosts?: ProductStoreCost[];
+  // Caixa e Bancos (migration 20261209): criar fornecedor só com o nome ao ligar marcas.
+  addSupplier?: (supplier: Omit<Supplier, 'id' | 'historyCount'>) => Promise<Supplier>;
 }
 
-export type FinanceiroTab = 'vendas' | 'contas' | 'recebimentos' | 'despesas' | 'indicadores' | 'configs';
+export type FinanceiroTab = 'vendas' | 'caixa' | 'contas' | 'areceber' | 'recebimentos' | 'despesas' | 'indicadores' | 'configs';
 
 export default function FinanceiroView({
   currentUser,
@@ -122,7 +134,11 @@ export default function FinanceiroView({
   cancelSale,
   suppliers,
   reloadExpenses,
-  initialTab
+  initialTab,
+  otherIncome = [],
+  reloadOtherIncome,
+  productStoreCosts = [],
+  addSupplier
 }: FinanceiroViewProps) {
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const stores = storeConfigs.filter(store => store.unitId !== 'central');
@@ -400,16 +416,19 @@ export default function FinanceiroView({
   const dreMonthWeeks = weeksOfMonth(dreMonth);
   const monthSales = scopedSales.filter(sale => monthKeyOf(sale.timestamp) === dreMonth);
   const monthExpenses = scopedExpenses.filter(expense => monthKeyOf(expense.timestamp) === dreMonth);
+  const scopedOtherIncome = otherIncome.filter(entry => inScope(entry.unitId, activeIndicatorScope));
+  const monthOtherIncome = scopedOtherIncome.filter(entry => entry.date.slice(0, 7) === dreMonth);
   const weeklyChartData = dreMonthWeeks
     .filter(week => dreWeek === 'all' || week.endsWith(`-${dreWeek}`))
     .map(week => ({
       week,
       ...summarize(
         monthSales.filter(sale => monthWeekKey(sale.timestamp) === week),
-        monthExpenses.filter(expense => monthWeekKey(expense.timestamp) === week)
+        monthExpenses.filter(expense => monthWeekKey(expense.timestamp) === week),
+        monthOtherIncome.filter(entry => monthWeekKey(otherIncomeTimestamp(entry)) === week)
       ),
     }));
-  const dreMonthTotal = summarize(monthSales, monthExpenses);
+  const dreMonthTotal = summarize(monthSales, monthExpenses, monthOtherIncome);
   const weeksMissingCost = weeklyChartData.reduce((sum, row) => sum + row.salesMissingCost, 0);
   const changeDreMonth = (monthKey: string) => {
     setDreMonth(monthKey);
@@ -438,6 +457,18 @@ export default function FinanceiroView({
             Histórico de Vendas
           </button>
           <button
+            id="tab-financeiro-cash"
+            onClick={() => setActiveTab('caixa')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeTab === 'caixa'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <PiggyBank className="w-4 h-4 mr-1.5" />
+            Caixa e Bancos
+          </button>
+          <button
             id="tab-financeiro-payables"
             onClick={() => setActiveTab('contas')}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
@@ -448,6 +479,18 @@ export default function FinanceiroView({
           >
             <Wallet className="w-4 h-4 mr-1.5" />
             Contas a Pagar
+          </button>
+          <button
+            id="tab-financeiro-accounts-receivable"
+            onClick={() => setActiveTab('areceber')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+              activeTab === 'areceber'
+                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            <HandCoins className="w-4 h-4 mr-1.5" />
+            Contas a Receber
           </button>
           <button
             id="tab-financeiro-receivables"
@@ -502,11 +545,33 @@ export default function FinanceiroView({
         </div>
       </div>
 
+      {activeTab === 'caixa' && (
+        <CashAccountsPanel
+          currentUser={currentUser}
+          sales={sales}
+          storeConfigs={storeConfigs}
+          suppliers={suppliers}
+          addSupplier={addSupplier}
+          onExpensesChanged={reloadExpenses}
+        />
+      )}
+
       {activeTab === 'contas' && (
         <PayablesPanel currentUser={currentUser} storeConfigs={storeConfigs} suppliers={suppliers} onExpensesChanged={reloadExpenses} />
       )}
 
       {/* 0. VIEW: Registro de Vendas por Forma de Pagamento */}
+      {activeTab === 'areceber' && (
+        <AccountsReceivablePanel
+          currentUser={currentUser}
+          storeConfigs={storeConfigs}
+          products={products}
+          inventory={inventory}
+          productStoreCosts={productStoreCosts}
+          onChanged={async () => { await reloadOtherIncome?.(); }}
+        />
+      )}
+
       {activeTab === 'vendas' && (
         <div className="space-y-4 font-sans text-xs">
           {saleSuccess && (
@@ -849,7 +914,8 @@ export default function FinanceiroView({
             {breakEvenStores.map(cfg => {
               const month = summarize(
                 completedSales(sales).filter(sale => sale.unitId === cfg.unitId && isInRange(sale.timestamp, currentMonth)),
-                expenses.filter(expense => expense.unitId === cfg.unitId && isInRange(expense.timestamp, currentMonth))
+                expenses.filter(expense => expense.unitId === cfg.unitId && isInRange(expense.timestamp, currentMonth)),
+                otherIncome.filter(entry => entry.unitId === cfg.unitId && isInRange(otherIncomeTimestamp(entry), currentMonth))
               );
               const storeRev = month.revenue;
               const storeProfit = month.operatingProfit;
@@ -998,6 +1064,7 @@ export default function FinanceiroView({
                     <th className="px-4 py-2.5 text-right">Lucro Bruto</th>
                     <th className="px-4 py-2.5 text-right">Taxas</th>
                     <th className="px-4 py-2.5 text-right">Despesas</th>
+                    <th className="px-4 py-2.5 text-right" title="Contas a receber: só a parte que é lucro">Outras receitas</th>
                     <th className="px-4 py-2.5 text-right">Lucro Real Operacional</th>
                   </tr>
                 </thead>
@@ -1015,6 +1082,7 @@ export default function FinanceiroView({
                       <td className={`px-4 py-2.5 text-right font-semibold ${row.grossProfit >= 0 ? 'text-slate-900' : 'text-rose-700'}`}>{formatMoney(row.grossProfit)}</td>
                       <td className="px-4 py-2.5 text-right text-rose-600">- {formatMoney(row.fees)}</td>
                       <td className="px-4 py-2.5 text-right text-rose-600">- {formatMoney(row.expenses)}</td>
+                      <td className="px-4 py-2.5 text-right text-emerald-700">{row.otherIncome ? `+ ${formatMoney(row.otherIncome)}` : formatMoney(0)}</td>
                       <td className={`px-4 py-2.5 text-right font-black ${
                         row.operatingProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'
                       }`}>
@@ -1032,6 +1100,7 @@ export default function FinanceiroView({
                       <td className={`px-4 py-2.5 text-right font-bold ${dreMonthTotal.grossProfit >= 0 ? 'text-slate-900' : 'text-rose-700'}`}>{formatMoney(dreMonthTotal.grossProfit)}</td>
                       <td className="px-4 py-2.5 text-right font-semibold text-rose-600">- {formatMoney(dreMonthTotal.fees)}</td>
                       <td className="px-4 py-2.5 text-right font-semibold text-rose-600">- {formatMoney(dreMonthTotal.expenses)}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-emerald-700">{dreMonthTotal.otherIncome ? `+ ${formatMoney(dreMonthTotal.otherIncome)}` : formatMoney(0)}</td>
                       <td className={`px-4 py-2.5 text-right font-black ${dreMonthTotal.operatingProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{formatMoney(dreMonthTotal.operatingProfit)}</td>
                     </tr>
                   </tfoot>

@@ -1127,8 +1127,22 @@ export const supabaseService = {
       taxBurdenPercent: p.tax_burden_percent == null ? null : Number(p.tax_burden_percent),
       archivedAt: p.archived_at ?? null,
       archivedInto: p.archived_into ?? null,
-      quoteId: p.quote_id ?? null
+      quoteId: p.quote_id ?? null,
+      loosePart: Boolean(p.loose_part),
+      costPending: Boolean(p.cost_pending)
     }));
+  },
+
+  // Peca avulsa: custo informado pelo dono corrige o custo congelado nas vendas (migration 20261207).
+  async setLoosePartCost(productId: string, cost: number): Promise<void> {
+    const { error } = await supabase.rpc('set_loose_part_cost', { p_product_id: productId, p_cost: cost });
+    if (error) throw error;
+  },
+
+  // Peca avulsa que ficou sem vender: zera o estoque e arquiva.
+  async discardLoosePart(productId: string): Promise<void> {
+    const { error } = await supabase.rpc('discard_loose_part', { p_product_id: productId });
+    if (error) throw error;
   },
 
   // Troca Gamer: estoca varios itens de uma vez (tudo ou nada; migration 20261206).
@@ -1965,7 +1979,9 @@ export const supabaseService = {
       quoteMinMargin: c.quote_min_margin == null ? undefined : Number(c.quote_min_margin),
       quoteInstallmentMarkup: c.quote_installment_markup == null ? undefined : Number(c.quote_installment_markup),
       quoteValidDays: c.quote_valid_days == null ? undefined : Number(c.quote_valid_days),
-      tradeInCreditBonus: c.trade_in_credit_bonus == null ? undefined : Number(c.trade_in_credit_bonus)
+      tradeInCreditBonus: c.trade_in_credit_bonus == null ? undefined : Number(c.trade_in_credit_bonus),
+      // Contas a receber (migration 20261208): undefined = coluna ainda nao existe.
+      pixKey: c.pix_key === undefined ? undefined : (c.pix_key ?? '')
     }));
   },
 
@@ -2000,7 +2016,9 @@ export const supabaseService = {
       // NFS-e (migration 20261113): so envia quando a coluna ja foi lida ou a tela preencheu.
       ...(c.municipalRegistration !== undefined ? { municipal_registration: c.municipalRegistration.trim() || null } : {}),
       ...(c.cityIbgeCode !== undefined ? { city_ibge_code: c.cityIbgeCode.replace(/\D/g, '') || null } : {}),
-      ...(c.simplesNacionalOption !== undefined ? { simples_nacional_option: c.simplesNacionalOption } : {})
+      ...(c.simplesNacionalOption !== undefined ? { simples_nacional_option: c.simplesNacionalOption } : {}),
+      // Chave Pix da loja (migration 20261208): so envia quando a coluna ja foi lida.
+      ...(c.pixKey !== undefined ? { pix_key: c.pixKey.trim() || null } : {})
     };
 
     const { error } = await supabase.from('store_configs').upsert(payload);
@@ -2083,7 +2101,8 @@ export const supabaseService = {
       category: s.category,
       historyCount: s.history_count,
       phone: s.phone || undefined,
-      website: s.website || undefined
+      website: s.website || undefined,
+      brands: Array.isArray(s.brands) ? s.brands : undefined
     }));
   },
 

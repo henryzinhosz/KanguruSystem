@@ -67,11 +67,6 @@ export default function AdminToolsView({
       setSupplierFormError('Por favor, informe o nome do fornecedor.');
       return;
     }
-    if (!supplierFormCnpj.trim()) {
-      setSupplierFormError('Por favor, informe o CNPJ do fornecedor.');
-      return;
-    }
-
     try {
     if (editingSupplier) {
       await editSupplier({
@@ -255,7 +250,10 @@ const handleConfirmDeletion = async () => {
                     <span className="font-bold text-slate-800 text-[11px] leading-tight">{s.name}</span>
                   </div>
                   <div className="text-[10px] text-slate-500 font-sans space-y-0.5">
-                    <p>CNPJ: <span className="font-mono text-slate-700">{s.cnpj}</span></p>
+                    <p>CNPJ: <span className="font-mono text-slate-700">{s.cnpj || 'Não informado'}</span></p>
+                    {s.brands && s.brands.length > 0 && (
+                      <p>Marcas (reposição): <span className="text-slate-700 font-medium">{s.brands.join(', ')}</span></p>
+                    )}
                     <p>E-mail: <span className="text-slate-700">{s.contact || 'Não informado'}</span></p>
                     <p>Categoria: <span className="text-slate-700 font-medium">{s.category || 'Não informado'}</span></p>
                     <p>Número: <span className="text-slate-700">{s.phone || 'Não informado'}</span></p>
@@ -326,14 +324,13 @@ Boletos e compras a prazo dos fornecedores agora ficam em Livro Caixa & DRE › 
               </div>
 
               <div className="space-y-1">
-                <label className="font-bold text-slate-600 block">CNPJ *</label>
+                <label className="font-bold text-slate-600 block">CNPJ</label>
                 <input
                   type="text"
-                  placeholder="Ex: 00.123.456/0001-99"
+                  placeholder="Opcional. Ex: 00.123.456/0001-99"
                   value={supplierFormCnpj}
                   onChange={(e) => setSupplierFormCnpj(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded p-1.5 outline-none font-mono font-semibold text-slate-800"
-                  required
                 />
               </div>
 

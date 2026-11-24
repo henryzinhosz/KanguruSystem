@@ -68,6 +68,8 @@ export default function App() {
     registerTransfer,
     registerStockEntry,
     productStoreCosts,
+    otherIncome,
+    reloadOtherIncome,
     loadAllFromSupabase,
     cancelSale,
     addExpense,
@@ -94,8 +96,8 @@ export default function App() {
   const [financeiroTab, setFinanceiroTab] = useState<FinanceiroTab | undefined>(undefined);
   const [financeiroKey, setFinanceiroKey] = useState(0);
   const navigateFromAlert = (target: Exclude<AttentionTarget, null>) => {
-    if (target === "contas") {
-      setFinanceiroTab("contas");
+    if (target === "contas" || target === "areceber") {
+      setFinanceiroTab(target);
       setFinanceiroKey(key => key + 1);
       setActiveTab("financeiro");
       return;
@@ -305,6 +307,7 @@ export default function App() {
               expenses={expenses}
               storeConfigs={storeConfigs}
               productStoreCosts={productStoreCosts}
+              otherIncome={otherIncome}
             />
           )}
 
@@ -376,7 +379,11 @@ export default function App() {
               products={products}
               inventory={inventory}
               suppliers={suppliers}
+              addSupplier={addSupplier}
               reloadExpenses={reloadExpenses}
+              otherIncome={otherIncome}
+              reloadOtherIncome={async () => { await reloadOtherIncome(); await loadAllFromSupabase(); }}
+              productStoreCosts={productStoreCosts}
               initialTab={financeiroTab}
               updateStoreConfig={updateStoreConfig}
               cancelSale={cancelSale}
