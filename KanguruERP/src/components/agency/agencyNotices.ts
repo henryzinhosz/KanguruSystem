@@ -287,13 +287,22 @@ function marketingNotices(input: NoticeInput, sales: Sale[]): AgencyNotice[] {
 
 const LEVEL_ORDER = { alto: 0, medio: 1, info: 2 } as const;
 
-export async function loadAgencyNotices(input: NoticeInput): Promise<AgencyNotice[]> {
+export const sortNotices = (notices: AgencyNotice[]) =>
+  [...notices].sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
+
+// Avisos calculados na hora (sem consultar o banco).
+export function quickAgencyNotices(input: NoticeInput): AgencyNotice[] {
   const sales = completedSales(input.sales).filter(sale => sale.unitId === input.unitId);
   const notices: AgencyNotice[] = [];
-  if (input.roomAllowed('financeiro') && input.canSeeFinance) notices.push(...await financeNotices(input));
   if (input.roomAllowed('compras')) notices.push(...purchaseNotices(input, sales));
   if (input.roomAllowed('atendimento')) notices.push(...serviceNotices(input));
   if (input.roomAllowed('vendas')) notices.push(...salesNotices(input, sales));
   if (input.roomAllowed('marketing')) notices.push(...marketingNotices(input, sales));
-  return notices.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level]);
+  return notices;
+}
+
+// Avisos do Financeiro (consultam contas, caixa e previsão).
+export async function financeAgencyNotices(input: NoticeInput): Promise<AgencyNotice[]> {
+  if (!input.roomAllowed('financeiro') || !input.canSeeFinance) return [];
+  return financeNotices(input);
 }

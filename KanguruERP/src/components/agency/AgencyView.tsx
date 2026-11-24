@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { History, Loader2, MessageSquarePlus, Send, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowLeft, History, Loader2, MessageSquarePlus, Send, Sparkles, Trash2 } from 'lucide-react';
 import type { Expense, PdvOperator, Product, ProductStoreCost, Sale, StockInventory, StoreConfig, Supplier, User, WorkOrder } from '../../types';
 import { DEFAULT_MANAGER_PERMISSIONS, UserRole } from '../../types';
 import type { OtherIncome } from '../../db/finance';
@@ -20,7 +20,7 @@ import {
 import type { ErpAlert } from '../../db/insights';
 import AgencyOffice, { ROOMS, type RoomState } from './AgencyOffice';
 import { buildAgencyContext } from './agencyContext';
-import { loadAgencyNotices, type AgencyNotice } from './agencyNotices';
+import { financeAgencyNotices, quickAgencyNotices, sortNotices, type AgencyNotice } from './agencyNotices';
 
 // Agencia de IA (etapa A): escritorio com 6 salas + chat da sala escolhida.
 // O agente so sugere; os botoes da resposta so abrem telas do ERP.
@@ -64,6 +64,8 @@ interface Props {
   // Avisos do sino "Precisa de atenção" (mesmas regras); a Agência separa por sala.
   alerts: ErpAlert[];
   onNavigate: (target: AgencyTarget) => void;
+  // Botão vermelho "Voltar ao ERP" (a Agência ocupa a tela inteira).
+  onExit: () => void;
 }
 
 const NOTICE_DOT: Record<AgencyNotice['level'], string> = { alto: '#f87171', medio: '#fbbf24', info: '#60a5fa' };
@@ -88,7 +90,7 @@ function AnswerText({ text }: { text: string }) {
 }
 
 export default function AgencyView(props: Props) {
-  const { currentUser, storeConfigs, onNavigate } = props;
+  const { currentUser, storeConfigs, onNavigate, onExit } = props;
   const stores = useMemo(() => storeConfigs.filter(store => store.unitId !== 'central'), [storeConfigs]);
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const permissions = currentUser.permissions ?? DEFAULT_MANAGER_PERMISSIONS;
@@ -130,9 +132,12 @@ export default function AgencyView(props: Props) {
   useEffect(() => {
     if (!unitId) return;
     let cancelled = false;
-    loadAgencyNotices({ unitId, alerts, storeConfigs, products, inventory, sales, pdvOperators, suppliers, canSeeFinance, roomAllowed })
-      .then(next => { if (!cancelled) setNotices(next); })
-      .catch(() => { if (!cancelled) setNotices([]); });
+    const input = { unitId, alerts, storeConfigs, products, inventory, sales, pdvOperators, suppliers, canSeeFinance, roomAllowed };
+    const quick = quickAgencyNotices(input);
+    setNotices(sortNotices(quick));
+    financeAgencyNotices(input)
+      .then(finance => { if (!cancelled) setNotices(sortNotices([...finance, ...quick])); })
+      .catch(() => undefined);
     return () => { cancelled = true; };
   }, [unitId, alerts, storeConfigs, products, inventory, sales, pdvOperators, suppliers, canSeeFinance, roomAllowed]);
 
@@ -274,19 +279,27 @@ export default function AgencyView(props: Props) {
         : '';
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2"><Sparkles className="h-5 w-5 text-orange-500" />Agência de IA</h2>
-          <p className="text-sm text-slate-500">Seis agentes que leem os dados da sua loja e sugerem o que fazer. Eles nunca lançam, pagam ou enviam nada sozinhos.</p>
-        </div>
+    <div className="fixed inset-0 z-[60] flex flex-col" style={{ background: '#0b1220' }}>
+      <header className="flex flex-wrap items-center gap-3 border-b-2 px-4 py-2" style={{ background: '#111c2e', borderColor: '#1f2f4b' }}>
+        <button
+          type="button"
+          onClick={onExit}
+          className="flex items-center gap-2 rounded-lg border-2 border-red-900 bg-red-600 px-3 py-1.5 text-sm font-bold text-white shadow-[3px_3px_0_#070b14] hover:bg-red-500"
+        >
+          <ArrowLeft className="h-4 w-4" />Voltar ao ERP
+        </button>
+        <h2 className="flex items-center gap-2 text-lg font-bold text-white" style={{ fontFamily: "'Pixelify Sans', ui-monospace, monospace" }}>
+          <Sparkles className="h-5 w-5 text-orange-400" />Agência de IA
+        </h2>
+        <p className="hidden text-xs text-slate-400 lg:block">Seis agentes que leem os dados da sua loja e sugerem o que fazer. Eles nunca lançam, pagam ou enviam nada sozinhos.</p>
         {status && (
-          <span className="text-xs font-semibold text-slate-500">Perguntas neste mês: <span className="font-mono text-slate-800">{status.used}/{status.limit}</span></span>
+          <span className="ml-auto text-xs font-semibold text-slate-300">Perguntas neste mês: <span className="font-mono text-white">{status.used}/{status.limit}</span></span>
         )}
-      </div>
+      </header>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="space-y-3">
+      <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[minmax(0,1fr)_440px] lg:overflow-hidden">
+        <div className="flex min-h-0 flex-col items-center justify-center gap-3">
+          <div className="w-full" style={{ maxWidth: 'calc((100vh - 84px) * 16 / 9)' }}>
           <AgencyOffice
             selected={room}
             states={states}
@@ -294,13 +307,14 @@ export default function AgencyView(props: Props) {
             panel={{ used: status?.used ?? 0, limit: status?.limit ?? 0, ...panelStatus }}
             badges={badges}
           />
-          <div className="flex flex-wrap gap-2 xl:hidden">
+          </div>
+          <div className="flex flex-wrap gap-2 lg:hidden">
             {ROOMS.map(item => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => setRoom(item.id)}
-                className={`rounded-lg border px-3 py-1.5 text-xs font-bold ${item.id === room ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-600'} ${roomAllowed(item.id) ? '' : 'opacity-50'}`}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-bold ${item.id === room ? 'border-blue-400 bg-blue-900/60 text-blue-100' : 'border-slate-600 bg-slate-900 text-slate-300'} ${roomAllowed(item.id) ? '' : 'opacity-50'}`}
               >
                 {item.short}{(badges[item.id] ?? 0) > 0 && roomAllowed(item.id) ? <span className="ml-1 rounded bg-rose-600 px-1 text-white">{badges[item.id]}</span> : null}
               </button>
@@ -310,7 +324,7 @@ export default function AgencyView(props: Props) {
 
         <section
           aria-label={`Conversa com ${currentRoom.agent}`}
-          className="flex min-h-[560px] flex-col overflow-hidden rounded-xl border-2 xl:max-h-[calc(100vh-180px)]"
+          className="flex min-h-[520px] flex-col overflow-hidden rounded-xl border-2 lg:h-full lg:min-h-0"
           style={{ background: '#0f1a2c', borderColor: '#5b7fa8', boxShadow: '4px 4px 0 #070b14', fontFamily: "'Pixelify Sans', ui-monospace, monospace" }}
         >
           <div className="flex items-center justify-between gap-2 border-b-2 px-3 py-2" style={{ background: '#1f2f4b', borderColor: '#5b7fa8' }}>
