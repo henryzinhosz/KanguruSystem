@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { useErpStore } from './db/useErpStore';
 import { supabase } from './db/supabaseClient';
 import Header from './components/Header';
@@ -125,6 +125,11 @@ export default function App() {
     setFinanceiroTab(undefined);
     setActiveTab(target === 'fornecedores' ? 'admin' : target);
   };
+  // A Agencia ocupa a tela inteira; "Voltar ao ERP" volta para a ultima tela aberta.
+  const agencyReturnTab = useRef<typeof activeTab>('dashboard');
+  useEffect(() => {
+    if (activeTab !== 'agencia') agencyReturnTab.current = activeTab;
+  }, [activeTab]);
   const insights = useFranchiseeInsights(currentUser, products, inventory, sales, storeConfigs);
   const subscription = useSubscriptionState(currentUser?.tenantId);
 
@@ -433,6 +438,7 @@ export default function App() {
           {tab === 'agencia' && (
             <AgencyView
               currentUser={currentUser}
+              alerts={insights.alerts}
               storeConfigs={storeConfigs}
               products={products}
               inventory={inventory}
@@ -444,6 +450,7 @@ export default function App() {
               suppliers={suppliers}
               productStoreCosts={productStoreCosts}
               onNavigate={navigateFromAgency}
+              onExit={() => setActiveTab(agencyReturnTab.current)}
             />
           )}
 
