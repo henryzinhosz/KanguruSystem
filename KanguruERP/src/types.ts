@@ -34,7 +34,7 @@ export interface User {
 }
 
 // Areas do ERP que o dono libera para cada gerente (Configuracoes fica sempre so com o dono).
-export type ErpArea = 'relatorios' | 'estoque' | 'servicos' | 'clientes' | 'troca_gamer' | 'financeiro' | 'fornecedores';
+export type ErpArea = 'relatorios' | 'estoque' | 'servicos' | 'clientes' | 'troca_gamer' | 'financeiro' | 'fornecedores' | 'agencia';
 export type ErpPermissions = Partial<Record<ErpArea, boolean>>;
 
 export const ERP_AREA_LABELS: Record<ErpArea, string> = {
@@ -45,6 +45,7 @@ export const ERP_AREA_LABELS: Record<ErpArea, string> = {
   troca_gamer: 'Trocas Gerais',
   financeiro: 'Caixa e Contas + Resultados',
   fornecedores: 'Fornecedores',
+  agencia: 'Agência de IA',
 };
 
 export const DEFAULT_MANAGER_PERMISSIONS: ErpPermissions = {
@@ -55,6 +56,7 @@ export const DEFAULT_MANAGER_PERMISSIONS: ErpPermissions = {
   troca_gamer: true,
   financeiro: false,
   fornecedores: false,
+  agencia: false,
 };
 
 export interface TenantUser {
