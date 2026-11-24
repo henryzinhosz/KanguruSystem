@@ -319,7 +319,7 @@ export default function PayablesPanel({ currentUser, storeConfigs, suppliers, on
           onPaid={async () => {
             setPaying(null);
             setError('');
-            setMessage('Conta paga: a despesa foi lançada no Livro Caixa na data do pagamento.');
+            setMessage('Conta paga: a despesa foi lançada em Despesas na data do pagamento.');
             await load();
             await onExpensesChanged();
           }}
@@ -553,7 +553,7 @@ function BillsSection({ title, hint, bills, preset, stores, storeName, categorie
                             title="Desfazer baixa"
                             disabled={busy}
                             onClick={() => {
-                              if (!window.confirm('Desfazer a baixa? A despesa sai do Livro Caixa e a conta volta a ficar em aberto.')) return;
+                              if (!window.confirm('Desfazer a baixa? A despesa sai de Despesas e a conta volta a ficar em aberto.')) return;
                               void run(bill.id, () => undoPayablePayment(bill.id), 'Baixa desfeita: a conta voltou a ficar em aberto.', true);
                             }}
                           ><Undo2 className="w-3.5 h-3.5" /></IconButton>
@@ -579,7 +579,7 @@ function BillsSection({ title, hint, bills, preset, stores, storeName, categorie
                             danger
                             disabled={busy}
                             onClick={() => {
-                              const paid = bill.status === 'PAGO' ? ' A despesa dela também sai do Livro Caixa.' : '';
+                              const paid = bill.status === 'PAGO' ? ' A despesa dela também sai de Despesas.' : '';
                               if (!window.confirm(`Excluir a conta "${bill.description}" de vez?${paid}`)) return;
                               void run(bill.id, async () => {
                                 if (bill.attachmentPath) await removePayableAttachment(bill);
@@ -756,7 +756,7 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
       if (payNow && ids[0]) {
         try {
           await payPayableBill(ids[0], paidAt, amount, method || null);
-          paidNote = ' Já paga: a despesa entrou no Livro caixa.';
+          paidNote = ' Já paga: a despesa entrou em Despesas.';
         } catch (payError) {
           paidNote = ` A conta foi lançada, mas a baixa não foi feita: ${errorText(payError)}`;
         }
@@ -922,7 +922,7 @@ function PayableFormModal({ bill, stores, suppliers, categories, tenantId, onClo
               <label className="block space-y-1">
                 <span className="font-bold text-slate-700">Data do pagamento</span>
                 <input type="date" value={paidAt} max={today} onChange={event => setPaidAt(event.target.value)} className={inputClass} />
-                <span className="block text-[11px] text-slate-500">A conta é lançada já paga, com a forma de pagamento escolhida acima, e entra no Livro caixa nesta data.</span>
+                <span className="block text-[11px] text-slate-500">A conta é lançada já paga, com a forma de pagamento escolhida acima, e entra em Despesas nesta data.</span>
               </label>
             )}
           </div>
@@ -1044,7 +1044,7 @@ function PayModal({ bill, today, onClose, onPaid }: { bill: PayableBill; today: 
             {PAYABLE_METHODS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}
           </select>
         </label>
-        <p className="text-[11px] text-slate-500">A despesa entra no Livro Caixa em {formatDate(paidAt)} e desconta do Lucro Real Operacional desse dia.</p>
+        <p className="text-[11px] text-slate-500">A despesa entra em Despesas em {formatDate(paidAt)} e desconta do Lucro Real Operacional desse dia.</p>
         <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
           <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold text-slate-700">Cancelar</button>
           <button type="submit" disabled={saving} className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold disabled:opacity-50">

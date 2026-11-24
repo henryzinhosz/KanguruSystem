@@ -20,7 +20,7 @@ import UcpView from './components/UcpView';
 import NetworkView from './components/NetworkView';
 import BalancoPanel from './components/BalancoPanel';
 import { AttentionDrawer, type AttentionTarget } from './components/AttentionPanel';
-import type { FinanceiroTab } from './components/FinanceiroView';
+import { isCashTab, type FinanceiroTab } from './components/FinanceiroView';
 import AnnouncementsView, { ImportantAnnouncementModal } from './components/AnnouncementsView';
 import StoreGoalsCard from './components/StoreGoalsCard';
 import { useFranchiseeInsights } from './db/useFranchiseeInsights';
@@ -30,7 +30,8 @@ import {
   Package, 
   ShoppingBag, 
   Wrench, 
-  DollarSign, 
+  DollarSign,
+  PiggyBank,
   FileSpreadsheet,
   Layers,
   ArrowUpRight,
@@ -90,16 +91,19 @@ export default function App() {
   } = useErpStore();
 
   // Active Main View Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'balanco' | 'servicos' | 'clientes' | 'vendas' | 'financeiro' | 'admin' | 'configuracoes' | 'comunicados'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'balanco' | 'servicos' | 'clientes' | 'vendas' | 'caixa' | 'financeiro' | 'admin' | 'configuracoes' | 'comunicados'>('dashboard');
   const [attentionOpen, setAttentionOpen] = useState(false);
-  // Aba do Livro Caixa aberta por um alerta (contas vencidas abrem Contas a pagar).
+  // Aba aberta por um alerta ou por um link entre as duas partes (Caixa e Contas / Resultados).
   const [financeiroTab, setFinanceiroTab] = useState<FinanceiroTab | undefined>(undefined);
   const [financeiroKey, setFinanceiroKey] = useState(0);
+  const openFinanceTab = (target: FinanceiroTab) => {
+    setFinanceiroTab(target);
+    setFinanceiroKey(key => key + 1);
+    setActiveTab(isCashTab(target) ? 'caixa' : 'financeiro');
+  };
   const navigateFromAlert = (target: Exclude<AttentionTarget, null>) => {
-    if (target === "contas" || target === "areceber") {
-      setFinanceiroTab(target);
-      setFinanceiroKey(key => key + 1);
-      setActiveTab("financeiro");
+    if (target === "contas" || target === "areceber" || target === "recebimentos") {
+      openFinanceTab(target);
       return;
     }
     setFinanceiroTab(undefined);
@@ -172,7 +176,8 @@ export default function App() {
     { id: 'servicos', name: 'Serviços / OS', icon: Wrench },
     { id: 'clientes', name: 'Clientes', icon: Users },
     { id: 'vendas', name: 'Trocas Gerais', icon: Coins },
-    { id: 'financeiro', name: 'Livro Caixa & DRE', icon: DollarSign },
+    { id: 'caixa', name: 'Caixa e Contas', icon: PiggyBank },
+    { id: 'financeiro', name: 'Resultados', icon: DollarSign },
     { id: 'admin', name: 'Fornecedores', icon: FileSpreadsheet },
     { id: 'configuracoes', name: 'Configurações', icon: Settings },
     { id: 'comunicados', name: 'Comunicados', icon: Megaphone }
@@ -186,6 +191,7 @@ export default function App() {
     servicos: 'servicos',
     clientes: 'clientes',
     vendas: 'troca_gamer',
+    caixa: 'financeiro',
     financeiro: 'financeiro',
     admin: 'fornecedores',
   };
@@ -369,9 +375,11 @@ export default function App() {
             />
           )}
 
-          {tab === 'financeiro' && (
-            <Fragment key={financeiroKey}>
+          {(tab === 'financeiro' || tab === 'caixa') && (
+            <Fragment key={`${tab}-${financeiroKey}`}>
             <FinanceiroView
+              section={tab === 'caixa' ? 'caixa' : 'resultados'}
+              onOpenTab={openFinanceTab}
               currentUser={currentUser}
               expenses={expenses}
               storeConfigs={storeConfigs}

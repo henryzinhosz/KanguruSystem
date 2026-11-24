@@ -71,7 +71,7 @@ export default function ExpensesLedger({ currentUser, expenses, storeConfigs, on
   const total = visible.reduce((sum, expense) => sum + expense.amount, 0);
 
   const remove = async (expense: Expense) => {
-    if (!window.confirm(`Apagar a despesa "${expense.description}" (${money(expense.amount)})? Ela sai do Livro caixa e do Lucro Real.`)) return;
+    if (!window.confirm(`Apagar a despesa "${expense.description}" (${money(expense.amount)})? Ela sai das Despesas e do Lucro Real.`)) return;
     setBusyId(expense.id);
     setError('');
     setMessage('');
@@ -91,7 +91,7 @@ export default function ExpensesLedger({ currentUser, expenses, storeConfigs, on
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center">
-            <BookOpen className="w-5 h-5 text-blue-600 mr-2" />Livro caixa (Saídas)
+            <BookOpen className="w-5 h-5 text-blue-600 mr-2" />Despesas
           </h3>
           <p className="text-xs text-slate-400">
             Tudo o que saiu do caixa, inclusive as contas a pagar já pagas. Para lançar um gasto, use{' '}

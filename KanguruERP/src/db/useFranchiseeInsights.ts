@@ -5,6 +5,27 @@ import { computeStockAlerts } from './stockAlerts';
 import { ensurePayableRecurrences, listUrgentPayables } from './payables';
 import { listOpenReceivableInstallments } from './receivableTitles';
 import { toLocalDateKey } from './finance';
+import { listCardAportes, loadPayoutWatch, type CardAporte, type PayoutWatch } from './cashAccounts';
+import { addPayoutDays, buildReceivables, listPayoutChecks, rulesOf, type PayoutCheck } from './receivables';
+
+interface PayoutWatchData {
+  watch: PayoutWatch[];
+  checks: PayoutCheck[];
+  aportes: CardAporte[];
+}
+
+// Caixa e Bancos: dados para o aviso "Recebimentos sem conferir" (so quem ve o Financeiro).
+async function loadPayoutWatchData(): Promise<PayoutWatchData> {
+  const watch = await loadPayoutWatch();
+  if (watch.length === 0) return { watch, checks: [], aportes: [] };
+  const from = watch.reduce((min, item) => item.payoutStart < min ? item.payoutStart : min, watch[0].payoutStart);
+  const to = toLocalDateKey(new Date());
+  const [checks, aportes] = await Promise.all([
+    listPayoutChecks(from, to).catch(() => [] as PayoutCheck[]),
+    listCardAportes(from, to).catch(() => [] as CardAporte[]),
+  ]);
+  return { watch, checks, aportes };
+}
 
 // Contas a pagar vencidas ou vencendo ate amanha: uma linha por loja (so quem ve o Financeiro).
 async function loadPayableAlerts(): Promise<ErpAlert[]> {
@@ -71,6 +92,7 @@ export function useFranchiseeInsights(
     || (currentUser.permissions ?? DEFAULT_MANAGER_PERMISSIONS).financeiro));
   const [serverAlerts, setServerAlerts] = useState<ErpAlert[]>([]);
   const [payableAlerts, setPayableAlerts] = useState<ErpAlert[]>([]);
+  const [payoutData, setPayoutData] = useState<PayoutWatchData>({ watch: [], checks: [], aportes: [] });
   const [alertsLoading, setAlertsLoading] = useState(false);
   const [announcements, setAnnouncements] = useState<MyAnnouncement[]>([]);
 
@@ -78,13 +100,16 @@ export function useFranchiseeInsights(
     if (!enabled) return;
     setAlertsLoading(true);
     try {
-      const [server, payables, receivables] = await Promise.all([
+      const emptyPayout: PayoutWatchData = { watch: [], checks: [], aportes: [] };
+      const [server, payables, receivables, payout] = await Promise.all([
         listErpAlerts().catch(() => [] as ErpAlert[]),
         seesFinance ? loadPayableAlerts().catch(() => [] as ErpAlert[]) : Promise.resolve([] as ErpAlert[]),
         seesFinance ? loadReceivableAlerts().catch(() => [] as ErpAlert[]) : Promise.resolve([] as ErpAlert[]),
+        seesFinance ? loadPayoutWatchData().catch(() => emptyPayout) : Promise.resolve(emptyPayout),
       ]);
       setServerAlerts(server);
       setPayableAlerts([...payables, ...receivables]);
+      setPayoutData(payout);
     } finally {
       setAlertsLoading(false);
     }
@@ -153,9 +178,42 @@ export function useFranchiseeInsights(
     }];
   }, [enabled, currentUser?.role, products, inventory]);
 
+  // Dias de repasse (cartão e Pix) que já passaram há mais de 1 dia útil e não foram conferidos.
+  const payoutAlerts = useMemo<ErpAlert[]>(() => {
+    if (!enabled || payoutData.watch.length === 0) return [];
+    const today = toLocalDateKey(new Date());
+    const money = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    return payoutData.watch.flatMap(item => {
+      const store = storeConfigs.find(config => config.unitId === item.unitId);
+      if (!store) return [];
+      const rules = rulesOf(store);
+      const byDay = new Map<string, number>();
+      buildReceivables(sales.filter(sale => sale.unitId === item.unitId), [store])
+        .forEach(entry => byDay.set(entry.payoutDate, (byDay.get(entry.payoutDate) ?? 0) + entry.net));
+      payoutData.aportes
+        .filter(aporte => aporte.unitId === item.unitId)
+        .forEach(aporte => byDay.set(aporte.payoutDate, (byDay.get(aporte.payoutDate) ?? 0) + aporte.net));
+      const checked = new Set(payoutData.checks.filter(check => check.unitId === item.unitId).map(check => check.payoutDate));
+      const late = Array.from(byDay.entries())
+        .filter(([day, amount]) => day > item.payoutStart && day < today && Math.abs(amount) > 0.004
+          && !checked.has(day) && addPayoutDays(day, 1, rules) < today)
+        .sort(([a], [b]) => a.localeCompare(b));
+      if (late.length === 0) return [];
+      const fmt = (key: string) => key.split('-').reverse().slice(0, 2).join('/');
+      return [{
+        kind: 'RECEBIMENTO' as const,
+        unitId: item.unitId,
+        ref: `recebimento-${item.unitId}`,
+        title: `${late.length} dia(s) de repasse sem conferir (${money(late.reduce((sum, [, amount]) => sum + amount, 0))})`,
+        detail: late.slice(0, 6).map(([day]) => fmt(day)).join(', ') + (late.length > 6 ? '...' : ''),
+        date: null,
+      }];
+    });
+  }, [enabled, payoutData, storeConfigs, sales]);
+
   const alerts = useMemo(
-    () => [...loosePartAlerts, ...payableAlerts, ...stockAlerts, ...serverAlerts],
-    [loosePartAlerts, payableAlerts, stockAlerts, serverAlerts]
+    () => [...loosePartAlerts, ...payableAlerts, ...payoutAlerts, ...stockAlerts, ...serverAlerts],
+    [loosePartAlerts, payableAlerts, payoutAlerts, stockAlerts, serverAlerts]
   );
   const unreadAnnouncements = announcements.filter(item => !item.readAt).length;
   const pendingImportant = announcements.find(item => item.priority === 'IMPORTANTE' && !item.readAt) ?? null;

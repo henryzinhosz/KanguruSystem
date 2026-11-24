@@ -46,6 +46,8 @@ const ENTRY_LABELS: Record<string, string> = {
   TROCA_PIX: 'Troca em Pix',
   DEVOLUCAO_PIX: 'Devolução em Pix',
   TRANSFERENCIA_ENTRADA: 'Transferência recebida',
+  SANGRIA_PDV: 'Sangria do PDV',
+  SUPRIMENTO_PDV: 'Suprimento do PDV',
 };
 const entryLabel = (kind: string) => ENTRY_LABELS[kind] ?? movementLabel(kind);
 
@@ -70,6 +72,7 @@ export default function CashAccountsPanel({ currentUser, sales, storeConfigs, su
   const [showMovement, setShowMovement] = useState(false);
   const [showBrands, setShowBrands] = useState(false);
   const [accountFilter, setAccountFilter] = useState('');
+  const [checkingAccount, setCheckingAccount] = useState<CashAccount | null>(null);
   const [showAllForecast, setShowAllForecast] = useState(false);
 
   useEffect(() => {
@@ -246,6 +249,7 @@ export default function CashAccountsPanel({ currentUser, sales, storeConfigs, su
             {activeAccounts.map(account => {
               const isPdv = account.id === settings?.pdvCashAccountId;
               const isPayout = account.id === settings?.payoutAccountId;
+              const isSafe = account.id === settings?.safeAccountId;
               return (
                 <div key={account.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
                   <div className="flex items-start justify-between gap-2">
@@ -262,8 +266,13 @@ export default function CashAccountsPanel({ currentUser, sales, storeConfigs, su
                       ? `contado no fechamento ${account.cashNumber ?? ''} (${formatDateTime(account.closedAt)})`
                       : `saldo inicial ${money(account.openingBalance)} em ${formatDate(account.openingDate)}`}
                   </p>
-                  {(isPdv || isPayout) && (
-                    <p className="text-[10px] text-slate-500 mt-0.5">{isPdv ? 'Recebe a contagem do PDV' : 'Recebe os repasses conferidos'}</p>
+                  {(isPdv || isPayout || isSafe) && (
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {[isPdv && 'Recebe a contagem do PDV', isPayout && 'Recebe os repasses conferidos', isSafe && 'Recebe as sangrias do PDV'].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
+                  {!isPdv && (
+                    <button type="button" onClick={() => setCheckingAccount(account)} className="mt-2 font-bold text-blue-600 hover:underline">Conferir saldo</button>
                   )}
                 </div>
               );
@@ -492,6 +501,14 @@ export default function CashAccountsPanel({ currentUser, sales, storeConfigs, su
           }}
         />
       )}
+      {checkingAccount && (
+        <BalanceCheckModal
+          unitId={unitId}
+          account={checkingAccount}
+          onClose={() => setCheckingAccount(null)}
+          onSaved={async text => { setCheckingAccount(null); setMessage(text); await load(); }}
+        />
+      )}
       {showBrands && reserves && (
         <BrandsModal
           reserves={reserves}
@@ -516,10 +533,12 @@ function SetupModal({ unitId, storeName, overview, onClose, onSaved }: {
     ? overview.accounts.map(account => ({ id: account.id, name: account.name, kind: account.kind, openingBalance: account.openingBalance, openingDate: account.openingDate, isActive: account.isActive }))
     : [
       { id: null, name: 'Gaveta (dinheiro)', kind: 'GAVETA', openingBalance: null, openingDate: today, isActive: true },
+      { id: null, name: 'Cofre', kind: 'GAVETA', openingBalance: null, openingDate: today, isActive: true },
       { id: null, name: 'Stone', kind: 'BANCO', openingBalance: null, openingDate: today, isActive: true },
     ]);
   const [pdvCash, setPdvCash] = useState(overview.settings.pdvCashAccountId ?? '');
   const [payout, setPayout] = useState(overview.settings.payoutAccountId ?? '');
+  const [safe, setSafe] = useState(overview.settings.safeAccountId ?? '');
   const [methods, setMethods] = useState<Record<string, string>>(() => Object.fromEntries(
     CASH_METHOD_KEYS.map(item => [item.key, overview.settings.methodAccounts?.[item.key] ?? ''])
   ));
@@ -557,16 +576,26 @@ function SetupModal({ unitId, storeName, overview, onClose, onSaved }: {
           openingDate: draft.openingDate, isActive: draft.isActive,
         }));
       }
-      // Na primeira configuração as contas ainda não tinham id: usa o padrão (gaveta / banco).
-      const pick = (value: string, kind: CashAccountKind) => firstSetup
-        ? ids[drafts.findIndex(draft => draft.kind === kind)] ?? null
-        : value || null;
+      // Contas novas ainda não tinham id: 1ª de dinheiro = gaveta do PDV, 2ª = Cofre, 1º banco = repasses.
+      const drawerIds = ids.filter((_, index) => drafts[index].kind === 'GAVETA' && drafts[index].isActive);
+      const bankId = ids.find((_, index) => drafts[index].kind === 'BANCO' && drafts[index].isActive) ?? null;
+      const pdvId = firstSetup ? drawerIds[0] ?? null : pdvCash || null;
+      const autoSafe = !safe;
+      const safeId = safe || drawerIds.find(id => id !== pdvId) || null;
+      const methodMap = Object.fromEntries(CASH_METHOD_KEYS.map(item => {
+        if (firstSetup) {
+          return [item.key, item.key === 'DINHEIRO' ? safeId ?? pdvId : item.key === 'CARTAO' || item.key === 'OUTRO' ? null : bankId];
+        }
+        const chosen = methods[item.key] || null;
+        // Cofre acabou de ser criado: o dinheiro das contas passa a sair dele, não da gaveta.
+        if (item.key === 'DINHEIRO' && autoSafe && safeId && chosen === pdvId) return [item.key, safeId];
+        return [item.key, chosen];
+      })) as Record<CashMethodKey, string | null>;
       await saveCashSettings(unitId, {
-        pdvCashAccountId: pick(pdvCash, 'GAVETA'),
-        payoutAccountId: pick(payout, 'BANCO'),
-        methodAccounts: Object.fromEntries(CASH_METHOD_KEYS.map(item => [item.key, firstSetup
-          ? (item.key === 'DINHEIRO' ? pick('', 'GAVETA') : item.key === 'CARTAO' || item.key === 'OUTRO' ? null : pick('', 'BANCO'))
-          : methods[item.key] || null])) as Record<CashMethodKey, string | null>,
+        pdvCashAccountId: pdvId,
+        payoutAccountId: firstSetup ? bankId : payout || null,
+        safeAccountId: safeId,
+        methodAccounts: methodMap,
         reserveStartDate: reserveStart || today,
       });
       await onSaved('Contas salvas.');
@@ -629,12 +658,17 @@ function SetupModal({ unitId, storeName, overview, onClose, onSaved }: {
             <button type="button" onClick={() => setDrafts(list => [...list, { id: null, name: '', kind: 'BANCO', openingBalance: null, openingDate: today, isActive: true }])} className="font-bold text-blue-600 hover:underline inline-flex items-center gap-1">
               <Plus className="w-3.5 h-3.5" />Adicionar conta
             </button>
+            {!drafts.some(draft => draft.kind === 'GAVETA' && /cofre/i.test(draft.name)) && (
+              <button type="button" onClick={() => setDrafts(list => [...list, { id: null, name: 'Cofre', kind: 'GAVETA', openingBalance: null, openingDate: today, isActive: true }])} className="ml-4 font-bold text-blue-600 hover:underline inline-flex items-center gap-1">
+                <Plus className="w-3.5 h-3.5" />Adicionar Cofre (dinheiro das sangrias)
+              </button>
+            )}
           </section>
 
           {firstSetup ? (
             <p className="text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-              Padrão: o fechamento do PDV e o que for pago em dinheiro vão para a conta de <strong>Dinheiro</strong>; os repasses de cartão e Pix e o resto vão para a conta de <strong>Banco</strong>.
-              Depois de salvar você pode mudar isso aqui mesmo.
+              Padrão: a 1ª conta de <strong>Dinheiro</strong> recebe a contagem do fechamento do PDV; a 2ª (<strong>Cofre</strong>) recebe as sangrias, paga os suprimentos e as contas em dinheiro;
+              os repasses de cartão e Pix e o resto vão para a conta de <strong>Banco</strong>. Depois de salvar você pode mudar isso aqui mesmo.
             </p>
           ) : (
             <section className="space-y-2">
@@ -646,6 +680,14 @@ function SetupModal({ unitId, storeName, overview, onClose, onSaved }: {
                     <option value="">Nenhuma</option>
                     {accountOptions.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}
                   </select>
+                </label>
+                <label className="space-y-1">
+                  <span className="block font-bold text-slate-500">Sangrias e suprimentos do PDV (Cofre)</span>
+                  <select value={safe} onChange={event => setSafe(event.target.value)} className={inputClass}>
+                    <option value="">{accountOptions.some(account => account.kind === 'GAVETA' && account.id !== pdvCash) ? 'Nenhuma' : 'Nenhuma (adicione uma conta "Cofre")'}</option>
+                    {accountOptions.filter(account => account.id !== pdvCash).map(account => <option key={account.id} value={account.id}>{account.name}</option>)}
+                  </select>
+                  <span className="block text-[10px] text-slate-400">Sangria da Troca não entra: é dinheiro que saiu para o cliente.</span>
                 </label>
                 <label className="space-y-1">
                   <span className="block font-bold text-slate-500">Repasses conferidos em Recebimentos (cartão e Pix)</span>
@@ -956,6 +998,88 @@ function BrandsModal({ reserves, suppliers, addSupplier, onClose, onChanged }: {
           </table>
           <div className="flex justify-end pt-2 border-t border-slate-100">
             <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold text-slate-700">Fechar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Conferir saldo com o extrato/app (todas as contas menos a gaveta do PDV, que é conferida no fechamento) ----
+function BalanceCheckModal({ unitId, account, onClose, onSaved }: {
+  unitId: string; account: CashAccount; onClose: () => void; onSaved: (text: string) => void | Promise<void>;
+}) {
+  const today = todayKey();
+  const [real, setReal] = useState<number | null>(null);
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const difference = real == null ? 0 : Math.round((real - account.balance) * 100) / 100;
+
+  const adjust = async () => {
+    if (real == null || difference === 0) return;
+    setSaving(true);
+    setError('');
+    try {
+      await addCashMovement({
+        unitId,
+        type: 'AJUSTE',
+        accountId: account.id,
+        toAccountId: null,
+        direction: difference > 0 ? 'ENTRADA' : 'SAIDA',
+        amount: Math.abs(difference),
+        date: today,
+        description: `Conferência de saldo: ${account.name} mostrava ${money(real)}${note.trim() ? ` (${note.trim()})` : ''}`,
+        card: null,
+      });
+      await onSaved(`Ajuste de ${money(difference)} lançado em ${account.name}.`);
+    } catch (saveError) {
+      setError(errorText(saveError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4">
+      <div className="bg-white w-full max-w-md rounded-xl shadow-xl border border-slate-200 overflow-hidden text-xs">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100 bg-slate-50">
+          <h3 className="text-sm font-bold text-slate-900">Conferir saldo · {account.name}</h3>
+          <button type="button" onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Fechar"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <p className="text-slate-500">Saldo no sistema: <span className="font-mono font-bold text-slate-900">{money(account.balance)}</span></p>
+          </div>
+          {error && <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg font-medium">{error}</div>}
+          <label className="block space-y-1">
+            <span className="font-bold text-slate-700">{account.kind === 'BANCO' ? 'Saldo que aparece no app/extrato agora (R$)' : 'Quanto tem contado agora (R$)'}</span>
+            <ValueInput value={real} onValueChange={setReal} className={`${inputClass} font-mono`} />
+          </label>
+          {real != null && (difference === 0 ? (
+            <p className="font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-2">Bateu certinho. Nada a fazer.</p>
+          ) : (
+            <div className="space-y-2">
+              <p className={`font-semibold ${difference < 0 ? 'text-rose-600' : 'text-amber-600'}`}>
+                {difference < 0 ? `Tem ${money(-difference)} a menos que o sistema.` : `Tem ${money(difference)} a mais que o sistema.`}
+              </p>
+              <p className="text-slate-500">
+                Antes de ajustar, confira: dia de Recebimentos sem conferir, conta paga que não foi lançada, depósito ou retirada sem lançamento.
+                Se não achar, lance o ajuste.
+              </p>
+              <label className="block space-y-1">
+                <span className="font-bold text-slate-700">Motivo (opcional)</span>
+                <input value={note} onChange={event => setNote(event.target.value)} maxLength={120} className={inputClass} />
+              </label>
+            </div>
+          ))}
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 font-bold text-slate-700">Fechar</button>
+            {real != null && difference !== 0 && (
+              <button type="button" disabled={saving} onClick={() => void adjust()} className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold disabled:opacity-50">
+                {saving ? 'Lançando...' : `Lançar ajuste de ${money(difference)}`}
+              </button>
+            )}
           </div>
         </div>
       </div>
