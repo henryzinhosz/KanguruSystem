@@ -17,8 +17,10 @@ import {
   type AgencyStatus,
   type AgencyTarget,
 } from '../../db/agency';
+import type { ErpAlert } from '../../db/insights';
 import AgencyOffice, { ROOMS, type RoomState } from './AgencyOffice';
 import { buildAgencyContext } from './agencyContext';
+import { loadAgencyNotices, type AgencyNotice } from './agencyNotices';
 
 // Agencia de IA (etapa A): escritorio com 6 salas + chat da sala escolhida.
 // O agente so sugere; os botoes da resposta so abrem telas do ERP.
@@ -59,8 +61,12 @@ interface Props {
   pdvOperators: PdvOperator[];
   suppliers: Supplier[];
   productStoreCosts: ProductStoreCost[];
+  // Avisos do sino "Precisa de atenção" (mesmas regras); a Agência separa por sala.
+  alerts: ErpAlert[];
   onNavigate: (target: AgencyTarget) => void;
 }
+
+const NOTICE_DOT: Record<AgencyNotice['level'], string> = { alto: '#f87171', medio: '#fbbf24', info: '#60a5fa' };
 
 const errorText = (error: unknown, fallback: string) => (error as { message?: string })?.message || fallback;
 
@@ -110,11 +116,39 @@ export default function AgencyView(props: Props) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [notices, setNotices] = useState<AgencyNotice[]>([]);
+  const [noticesOpen, setNoticesOpen] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const draftRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (!unitId && stores[0]) setUnitId(stores[0].unitId);
   }, [stores, unitId]);
+
+  // Etapa B: avisos automáticos (sem IA, sem custo, não contam no limite).
+  const { alerts, products, inventory, sales, pdvOperators, suppliers } = props;
+  useEffect(() => {
+    if (!unitId) return;
+    let cancelled = false;
+    loadAgencyNotices({ unitId, alerts, storeConfigs, products, inventory, sales, pdvOperators, suppliers, canSeeFinance, roomAllowed })
+      .then(next => { if (!cancelled) setNotices(next); })
+      .catch(() => { if (!cancelled) setNotices([]); });
+    return () => { cancelled = true; };
+  }, [unitId, alerts, storeConfigs, products, inventory, sales, pdvOperators, suppliers, canSeeFinance, roomAllowed]);
+
+  const badges = useMemo(() => {
+    const counts: Partial<Record<AgencyRoom, number>> = {};
+    notices.forEach(notice => { counts[notice.room] = (counts[notice.room] ?? 0) + 1; });
+    counts.recepcao = notices.length;
+    return counts;
+  }, [notices]);
+  const roomNotices = room === 'recepcao' ? notices : notices.filter(notice => notice.room === room);
+
+  const pickNotice = (notice: AgencyNotice) => {
+    if (notice.room !== room) setRoom(notice.room);
+    setDraft(notice.question);
+    window.setTimeout(() => draftRef.current?.focus(), 50);
+  };
 
   const loadStatus = useCallback(() => {
     getAgencyStatus().then(setStatus).catch(() => setStatus(null));
@@ -258,6 +292,7 @@ export default function AgencyView(props: Props) {
             states={states}
             onSelect={setRoom}
             panel={{ used: status?.used ?? 0, limit: status?.limit ?? 0, ...panelStatus }}
+            badges={badges}
           />
           <div className="flex flex-wrap gap-2 xl:hidden">
             {ROOMS.map(item => (
@@ -267,7 +302,7 @@ export default function AgencyView(props: Props) {
                 onClick={() => setRoom(item.id)}
                 className={`rounded-lg border px-3 py-1.5 text-xs font-bold ${item.id === room ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-600'} ${roomAllowed(item.id) ? '' : 'opacity-50'}`}
               >
-                {item.short}
+                {item.short}{(badges[item.id] ?? 0) > 0 && roomAllowed(item.id) ? <span className="ml-1 rounded bg-rose-600 px-1 text-white">{badges[item.id]}</span> : null}
               </button>
             ))}
           </div>
@@ -300,6 +335,40 @@ export default function AgencyView(props: Props) {
             </label>
             <span className="text-slate-400">{conversationId ? 'Dados do início desta conversa' : 'Dados atualizados ao enviar a 1ª pergunta'}</span>
           </div>
+
+          {roomNotices.length > 0 && allowed && (
+            <div className="border-b px-3 py-2" style={{ borderColor: '#1f2f4b', fontFamily: 'var(--font-sans)' }}>
+              <button type="button" onClick={() => setNoticesOpen(open => !open)} className="flex w-full items-center justify-between text-xs font-bold text-amber-200">
+                <span>{room === 'recepcao' ? `Avisos de hoje: ${roomNotices.length}` : `Avisos desta sala: ${roomNotices.length}`}</span>
+                <span className="text-slate-400">{noticesOpen ? 'esconder' : 'mostrar'}</span>
+              </button>
+              {noticesOpen && (
+                <ul className="mt-2 max-h-48 space-y-1.5 overflow-y-auto">
+                  {roomNotices.map(notice => {
+                    const owner = ROOMS.find(item => item.id === notice.room)!;
+                    return (
+                      <li key={notice.id} className="flex items-start gap-2 rounded px-2 py-1.5 text-xs hover:bg-white/5">
+                        <span className="mt-1 h-2 w-2 shrink-0" style={{ background: NOTICE_DOT[notice.level] }} aria-hidden="true" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-semibold text-slate-100">{room === 'recepcao' ? `${owner.short}: ` : ''}{notice.title}</span>
+                          {notice.detail && <span className="block truncate text-slate-400" title={notice.detail}>{notice.detail}</span>}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => pickNotice(notice)}
+                          disabled={sending}
+                          className="shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold disabled:opacity-50"
+                          style={{ background: '#0c1a33', borderColor: '#60a5fa', color: '#bfdbfe' }}
+                        >
+                          {notice.room === room ? 'Perguntar' : `Ir para ${owner.short}`}
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          )}
 
           {historyOpen && (
             <div className="max-h-56 overflow-y-auto border-b px-3 py-2" style={{ borderColor: '#1f2f4b', fontFamily: 'var(--font-sans)' }}>
@@ -368,6 +437,7 @@ export default function AgencyView(props: Props) {
             <label className="flex-1">
               <span className="sr-only">Pergunte ao agente</span>
               <textarea
+                ref={draftRef}
                 value={draft}
                 onChange={event => setDraft(event.target.value)}
                 onKeyDown={onKeyDown}

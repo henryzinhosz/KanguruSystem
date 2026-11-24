@@ -253,9 +253,11 @@ interface Props {
   states: Record<AgencyRoom, RoomState>;
   onSelect: (room: AgencyRoom) => void;
   panel: { used: number; limit: number; status: string; statusColor: string };
+  // Etapa B: numero de avisos automaticos de cada sala (balao vermelho).
+  badges?: Partial<Record<AgencyRoom, number>>;
 }
 
-export default function AgencyOffice({ selected, states, onSelect, panel }: Props) {
+export default function AgencyOffice({ selected, states, onSelect, panel, badges }: Props) {
   const shapes = useMemo(() => buildScene(selected), [selected]);
   const current = ROOMS.find(room => room.id === selected);
   const target = iso(current?.walk ?? 9.5, 7);
@@ -313,7 +315,14 @@ export default function AgencyOffice({ selected, states, onSelect, panel }: Prop
 
       {labels.map(({ room, x, y, look }) => (
         <span key={room.id} className="pointer-events-none absolute flex flex-col items-center" style={{ left: pctX(x), top: pctY(y), transform: 'translate(-50%, -100%)', gap: cq(4) }}>
-          <span className="whitespace-nowrap font-bold" style={{ padding: `${cq(3)} ${cq(7)}`, background: look.bg, border: `2px solid ${look.border}`, color: look.color, letterSpacing: '0.06em', ...textStyle(12) }}>{look.text}</span>
+          <span className="flex items-center" style={{ gap: cq(4) }}>
+            <span className="whitespace-nowrap font-bold" style={{ padding: `${cq(3)} ${cq(7)}`, background: look.bg, border: `2px solid ${look.border}`, color: look.color, letterSpacing: '0.06em', ...textStyle(12) }}>{look.text}</span>
+            {(badges?.[room.id] ?? 0) > 0 && states[room.id] !== 'SEM_ACESSO' && (
+              <span className="font-bold" title="Avisos desta sala" style={{ padding: `${cq(2)} ${cq(6)}`, background: '#dc2626', border: '2px solid #7f1d1d', color: '#ffffff', boxShadow: `${cq(2)} ${cq(2)} 0 #070b14`, ...textStyle(12) }}>
+                {badges![room.id]}
+              </span>
+            )}
+          </span>
           <span className="whitespace-nowrap font-semibold" style={{ padding: `${cq(3)} ${cq(7)}`, background: '#0b1220', border: '2px solid #3d4f6b', color: '#f1f5f9', letterSpacing: '0.05em', ...textStyle(12) }}>{room.label}</span>
         </span>
       ))}

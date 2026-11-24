@@ -433,6 +433,7 @@ export default function App() {
           {tab === 'agencia' && (
             <AgencyView
               currentUser={currentUser}
+              alerts={insights.alerts}
               storeConfigs={storeConfigs}
               products={products}
               inventory={inventory}

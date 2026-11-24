@@ -115,6 +115,27 @@ const costOf = (model: string, usage: Anthropic.Beta.BetaUsage) => {
   ) / 1_000_000;
 };
 
+// Modo de teste: mostra os dados que a sala recebeu (o que a IA vai ler) e um botao de exemplo.
+const TEST_BUTTON: Record<Room, string> = {
+  recepcao: 'dashboard',
+  marketing: 'estoque',
+  vendas: 'dashboard',
+  financeiro: 'contas',
+  compras: 'estoque',
+  atendimento: 'servicos',
+};
+
+const testAnswer = (room: Room, question: string, context: string | null) => [
+  '**Resposta de teste: a IA ainda não foi ligada.**',
+  `Quando a chave da IA for cadastrada no Supabase, este agente vai responder de verdade a: "${question}"`,
+  '',
+  context
+    ? `**Dados que esta sala recebeu (é isso que a IA vai ler):**\n${context}`
+    : 'Os dados são os mesmos do início desta conversa.',
+  '',
+  `[[abrir:${TEST_BUTTON[room]}]]`,
+].join('\n');
+
 const friendlyError = (error: unknown) => {
   if (error instanceof Anthropic.AuthenticationError || error instanceof Anthropic.PermissionDeniedError) {
     return 'A chave da IA não está aceita. Avise o suporte da Kanguru.';
@@ -138,7 +159,8 @@ Deno.serve(async (request) => {
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!supabaseUrl || !anonKey || !serviceRoleKey) return json({ error: 'Agência indisponível.' }, 500);
-  if (!apiKey) return json({ error: 'A Agência ainda não foi configurada (chave da IA). Avise o suporte.' }, 500);
+  // Sem a chave da IA: MODO DE TESTE (resposta simulada, custo zero) para testar a tela inteira.
+  const testMode = !apiKey;
 
   const callerClient = createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: authorization } } });
   const service = createClient(supabaseUrl, serviceRoleKey);
@@ -229,7 +251,7 @@ Deno.serve(async (request) => {
     { type: 'text', text: `Você está falando com: ${access.displayName}.\n\nDADOS DA LOJA (retrato do início desta conversa):\n${context}` },
   ];
 
-  const client = new Anthropic({ apiKey });
+  const client = testMode ? null : new Anthropic({ apiKey });
   const encoder = new TextEncoder();
   const send = (controller: ReadableStreamDefaultController<Uint8Array>, event: string, data: Record<string, unknown>) =>
     controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
@@ -243,6 +265,39 @@ Deno.serve(async (request) => {
       };
       try {
         send(controller, 'start', {});
+
+        if (!client) {
+          const text = testAnswer(room, question, isNew ? context : null);
+          const parts = text.match(/[\s\S]{1,160}/g) || [text];
+          for (const part of parts) {
+            send(controller, 'delta', { text: part });
+            await new Promise(resolve => setTimeout(resolve, 15));
+          }
+          const { data: answerRow } = await service
+            .from('agency_messages')
+            .insert({
+              conversation_id: conversationId,
+              tenant_id: tenantId,
+              user_id: userId,
+              role: 'assistant',
+              content: text,
+              blocks: null,
+              model: 'teste',
+              cost_usd: 0,
+            })
+            .select('id')
+            .single();
+          await service.from('agency_conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
+          send(controller, 'done', {
+            conversationId,
+            messageId: answerRow?.id ?? null,
+            text,
+            used: Number(access.used) + 1,
+            limit: Number(access.limit),
+          });
+          return;
+        }
+
         const stream = client.beta.messages.stream({
           model: MODEL,
           max_tokens: 6000,
