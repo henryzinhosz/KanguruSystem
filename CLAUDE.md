@@ -448,6 +448,22 @@ O usuário pausou o Kanguru para estudar outro assunto (pasta `Agencia/`). Quand
   (adiada até ter mais de um cliente). Tablet/2.10: só o visual foi feito; venda em sequência de telas descartada.
 - **Fase 3:** falta boleto/Pix automático (Asaas) e mensalidade extra por terminal. **Fase 4** não iniciada.
 
+## 10c. Agência de IA (novo projeto, iniciado em 2026-11-23)
+
+Ideia do usuário: "Agência de IA" no estilo de jogo (escritório visto de cima, bonequinho andando, cada
+sala um agente), oferecida **inclusa** no plano do Kanguru para os franqueados. Visual próprio (sem copiar
+o Habbo). Diferencial: os agentes usam os **dados da loja no Kanguru**. Base das instruções de cada agente:
+a coleção `Agencia/` (agency-agents, MIT; fora do Git), traduzida e adaptada (loja de games, Brasil, LGPD).
+- **Decisões (2026-11-24):** começar pelo **protótipo visual**; **6 salas** no piloto: Recepção (Gerente),
+  Marketing, Vendas, Financeiro, Compras, Atendimento; Agência **inclusa** na mensalidade.
+- **Desenho proposto:** área "Agência" dentro do ERP (mesmo login/empresa); Claude chamado por Edge Function
+  (chave só no servidor); agente só LÊ os dados da empresa logada (RLS) e na 1ª versão só SUGERE (nada lançado,
+  pago ou enviado sem clique); uso medido por franqueado com limite mensal; preços da API conferidos na hora.
+- **Pedidos do usuário:** Marketing **postar sozinho no Instagram** (possível pela API oficial da Meta, conta
+  Business/Criador ligada a página do Facebook, app da Kanguru aprovado pela Meta; proposta: agendar com
+  aprovação); Vendas ligada ao **futuro CRM com IA** da Kanguru.
+- Protótipo clicável: https://claude.ai/artifact/1PrQUizFuJRkYFWb2EbPeN (aguardando aprovação; conversas com dados de exemplo).
+
 ## 11. Como começar cada sessão
 
 1. Ler este arquivo inteiro.
