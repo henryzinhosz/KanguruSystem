@@ -41,6 +41,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 export function getSupabaseConfig() {
   return {
     url: supabaseUrl,
+    anonKey: supabaseAnonKey,
     isFallback: !hasConfiguredEnv && import.meta.env.DEV
   };
 }

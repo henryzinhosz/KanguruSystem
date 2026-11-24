@@ -19,6 +19,8 @@ import ClientesView from './components/ClientesView';
 import UcpView from './components/UcpView';
 import NetworkView from './components/NetworkView';
 import BalancoPanel from './components/BalancoPanel';
+import AgencyView from './components/agency/AgencyView';
+import type { AgencyTarget } from './db/agency';
 import { AttentionDrawer, type AttentionTarget } from './components/AttentionPanel';
 import { isCashTab, type FinanceiroTab } from './components/FinanceiroView';
 import AnnouncementsView, { ImportantAnnouncementModal } from './components/AnnouncementsView';
@@ -39,7 +41,8 @@ import {
   Settings,
   Users,
   ClipboardCheck,
-  Megaphone
+  Megaphone,
+  Sparkles
 } from 'lucide-react';
 
 import { isBlockedStatus, useSubscriptionState } from './db/billing';
@@ -91,7 +94,7 @@ export default function App() {
   } = useErpStore();
 
   // Active Main View Tab
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'balanco' | 'servicos' | 'clientes' | 'vendas' | 'caixa' | 'financeiro' | 'admin' | 'configuracoes' | 'comunicados'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'estoque' | 'balanco' | 'servicos' | 'clientes' | 'vendas' | 'caixa' | 'financeiro' | 'admin' | 'configuracoes' | 'comunicados' | 'agencia'>('dashboard');
   const [attentionOpen, setAttentionOpen] = useState(false);
   // Aba aberta por um alerta ou por um link entre as duas partes (Caixa e Contas / Resultados).
   const [financeiroTab, setFinanceiroTab] = useState<FinanceiroTab | undefined>(undefined);
@@ -108,6 +111,19 @@ export default function App() {
     }
     setFinanceiroTab(undefined);
     setActiveTab(target);
+  };
+  // Botoes das respostas da Agencia: so abrem a tela certa.
+  const navigateFromAgency = (target: AgencyTarget) => {
+    if (target === 'caixa' || target === 'contas' || target === 'areceber' || target === 'recebimentos') {
+      openFinanceTab(target);
+      return;
+    }
+    if (target === 'resultados') {
+      openFinanceTab('indicadores');
+      return;
+    }
+    setFinanceiroTab(undefined);
+    setActiveTab(target === 'fornecedores' ? 'admin' : target);
   };
   const insights = useFranchiseeInsights(currentUser, products, inventory, sales, storeConfigs);
   const subscription = useSubscriptionState(currentUser?.tenantId);
@@ -180,7 +196,8 @@ export default function App() {
     { id: 'financeiro', name: 'Resultados', icon: DollarSign },
     { id: 'admin', name: 'Fornecedores', icon: FileSpreadsheet },
     { id: 'configuracoes', name: 'Configurações', icon: Settings },
-    { id: 'comunicados', name: 'Comunicados', icon: Megaphone }
+    { id: 'comunicados', name: 'Comunicados', icon: Megaphone },
+    { id: 'agencia', name: 'Agência de IA', icon: Sparkles }
   ] as const;
 
   // Gerente de loja: so as areas liberadas pelo dono; Configuracoes so para o administrador.
@@ -194,6 +211,7 @@ export default function App() {
     caixa: 'financeiro',
     financeiro: 'financeiro',
     admin: 'fornecedores',
+    agencia: 'agencia',
   };
   const canOpen = (id: (typeof navigationItems)[number]['id']) => {
     // Comunicados da rede: so aparece quando a empresa recebeu algum.
@@ -409,6 +427,23 @@ export default function App() {
               addSupplier={addSupplier}
               editSupplier={editSupplier}
               deleteSupplier={deleteSupplier}
+            />
+          )}
+
+          {tab === 'agencia' && (
+            <AgencyView
+              currentUser={currentUser}
+              storeConfigs={storeConfigs}
+              products={products}
+              inventory={inventory}
+              sales={sales}
+              expenses={expenses}
+              otherIncome={otherIncome}
+              workOrders={workOrders}
+              pdvOperators={pdvOperators}
+              suppliers={suppliers}
+              productStoreCosts={productStoreCosts}
+              onNavigate={navigateFromAgency}
             />
           )}
 

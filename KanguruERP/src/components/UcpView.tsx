@@ -19,8 +19,9 @@ import {
   X
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { Wallet } from 'lucide-react';
+import { Sparkles, Wallet } from 'lucide-react';
 import BillingPanel from './BillingPanel';
+import AgencyAdminPanel from './AgencyAdminPanel';
 import { getTenantBilling, setTenantSubscriptionManual, syncPlatformSubscriptions } from '../db/billing';
 import { PdvOperator, PlatformPosTerminal, PlatformTenant, PlatformTenantDetails, PosTerminalActivation, PosTerminalActivationStatus, StoreNfceStatus, SubscriptionStatus } from '../types';
 import { supabaseService } from '../db/supabaseService';
@@ -63,7 +64,7 @@ const activationStatusClassName: Record<PosTerminalActivationStatus, string> = {
 };
 
 type UcpSection = 'clientes' | 'redes';
-type DetailTab = 'lojas' | 'cobranca' | 'terminais' | 'usuarios' | 'vendedores';
+type DetailTab = 'lojas' | 'cobranca' | 'agencia' | 'terminais' | 'usuarios' | 'vendedores';
 
 const UCP_NAV: { id: UcpSection; name: string; icon: LucideIcon; description: string }[] = [
   { id: 'clientes', name: 'Clientes', icon: Building2, description: 'Franqueados que usam o sistema: assinatura, lojas, PDVs e acessos.' },
@@ -73,6 +74,7 @@ const UCP_NAV: { id: UcpSection; name: string; icon: LucideIcon; description: st
 const DETAIL_TABS: { id: DetailTab; name: string; icon: LucideIcon }[] = [
   { id: 'lojas', name: 'Lojas e notas', icon: Store },
   { id: 'cobranca', name: 'Cobrança', icon: Wallet },
+  { id: 'agencia', name: 'Agência de IA', icon: Sparkles },
   { id: 'terminais', name: 'Terminais PDV', icon: KeyRound },
   { id: 'usuarios', name: 'Usuários do ERP', icon: UserRound },
   { id: 'vendedores', name: 'Vendedores do PDV', icon: Users },
@@ -629,6 +631,10 @@ export default function UcpView({ onBackToErp }: UcpViewProps) {
 
             {detailTab === 'cobranca' && (
               <BillingPanel tenantId={selectedTenant.tenant.id} onStatusChange={status => applyTenantStatus(selectedTenant.tenant.id, status)} />
+            )}
+
+            {detailTab === 'agencia' && (
+              <AgencyAdminPanel tenantId={selectedTenant.tenant.id} />
             )}
 
             {detailTab === 'terminais' && (
