@@ -423,6 +423,31 @@ select pg_get_functiondef('public.process_pos_terminal_sale'::regproc);
 
 ---
 
+## 10b. PONTO DE PARADA (congelado em 2026-11-23 a pedido do usuário)
+
+O usuário pausou o Kanguru para estudar outro assunto (pasta `Agencia/`). Quando ele disser
+**"volta pro PDV"** ou **"volta pro ERP"**, retomar EXATAMENTE daqui (ler esta seção e a seção 12):
+
+- **Estado:** tudo aplicado, mergeado e testado até a migration **20261210** (Cofre) — nada pendente
+  no banco, nenhum arquivo em `KanguruERP/supabase/migrations/` fora de `aplicadas/`. Branch de trabalho `chore/pos-deploy`.
+  PDV publicado: **0.2.36**.
+- **Último trabalho feito (ERP):** Caixa e Bancos completo (contas Gaveta/Cofre/Stone, aporte no cartão,
+  reserva de reposição por fornecedor, previsão 30 dias, menu "Caixa e Contas" / "Resultados", aviso de
+  recebimentos sem conferir, Conferir saldo).
+- **Próximos passos do ERP (na ordem combinada):**
+  1. Etapa 3 do Caixa e Bancos: **importar o CSV da Stone** para conferir os repasses sozinho (API da Stone só com parceria).
+  2. Item 6 da lista de melhorias ("menores"): estado do produto (novo/usado), sugestão de NCM pelo nome,
+     fotos nos setups (setups = modelos do Orçamento de PC), rastreio de encomendas (API Pacote Vício).
+  3. Painel da Rede ainda não mostra "Outras receitas" (contas a receber).
+  4. "Pente fino" (checagem só de leitura de dados e segurança do banco), proposto e não feito.
+  5. Usuário ainda vai lançar à mão a venda P5 (R$ 3.960, 16/11).
+- **Próximos passos do PDV:** nenhum em andamento. Em aberto (decisões do usuário): item 2 permissões por
+  vendedor (adiado "para um futuro distante"; desenho: PIN pessoal de 4 dígitos + permissões no lugar da
+  senha Gerente por ação), NFC-e/NFS-e em produção (token novo, IBPT, trocar ambiente no UCP, zerar
+  `nfse_next_dps_number`), Comunicador Offline (plano pago da Focus), assinatura digital do instalador
+  (adiada até ter mais de um cliente). Tablet/2.10: só o visual foi feito; venda em sequência de telas descartada.
+- **Fase 3:** falta boleto/Pix automático (Asaas) e mensalidade extra por terminal. **Fase 4** não iniciada.
+
 ## 11. Como começar cada sessão
 
 1. Ler este arquivo inteiro.
