@@ -280,7 +280,7 @@ const handleConfirmDeletion = async () => {
             Contas a pagar
           </h4>
           <p className="text-[11px] text-slate-600 leading-relaxed font-sans">
-Boletos e compras a prazo dos fornecedores agora ficam em Livro Caixa & DRE › Contas a Pagar, com vencimento, parcelas e baixa (a conta paga vira despesa).
+Boletos e compras a prazo dos fornecedores agora ficam em Caixa e Contas › Contas a Pagar, com vencimento, parcelas e baixa (a conta paga vira despesa).
           </p>
         </div>
       </div>

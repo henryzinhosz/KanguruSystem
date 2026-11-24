@@ -43,7 +43,7 @@ export const ERP_AREA_LABELS: Record<ErpArea, string> = {
   servicos: 'Serviços / OS',
   clientes: 'Clientes',
   troca_gamer: 'Trocas Gerais',
-  financeiro: 'Livro Caixa & DRE',
+  financeiro: 'Caixa e Contas + Resultados',
   fornecedores: 'Fornecedores',
 };
 

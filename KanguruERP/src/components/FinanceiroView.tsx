@@ -119,9 +119,15 @@ interface FinanceiroViewProps {
   productStoreCosts?: ProductStoreCost[];
   // Caixa e Bancos (migration 20261209): criar fornecedor só com o nome ao ligar marcas.
   addSupplier?: (supplier: Omit<Supplier, 'id' | 'historyCount'>) => Promise<Supplier>;
+  // Qual parte do menu: "Caixa e Contas" (dinheiro do dia a dia) ou "Resultados" (lucro e análise).
+  section?: 'caixa' | 'resultados';
+  onOpenTab?: (tab: FinanceiroTab) => void;
 }
 
 export type FinanceiroTab = 'vendas' | 'caixa' | 'contas' | 'areceber' | 'recebimentos' | 'despesas' | 'indicadores' | 'configs';
+
+const CASH_TABS: FinanceiroTab[] = ['caixa', 'contas', 'areceber', 'recebimentos'];
+export const isCashTab = (tab: FinanceiroTab) => CASH_TABS.includes(tab);
 
 export default function FinanceiroView({
   currentUser,
@@ -138,18 +144,28 @@ export default function FinanceiroView({
   otherIncome = [],
   reloadOtherIncome,
   productStoreCosts = [],
-  addSupplier
+  addSupplier,
+  section = 'resultados',
+  onOpenTab
 }: FinanceiroViewProps) {
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const stores = storeConfigs.filter(store => store.unitId !== 'central');
   const defaultStoreId = stores[0]?.unitId || '';
   const storeName = (unitId: string) => stores.find(store => store.unitId === unitId)?.tradeName || unitId;
 
-  // Active sub-menu: Despesas or Configuração de Custos/Taxas or Break-Even or Registro de Vendas
-  const [activeTab, setActiveTab] = useState<FinanceiroTab>(initialTab ?? 'vendas');
+  // Duas partes no menu (aprovado em 2026-11-23): "Caixa e Contas" e "Resultados".
+  const sectionDefault: FinanceiroTab = section === 'caixa' ? 'caixa' : 'vendas';
+  const inSection = (tab: FinanceiroTab) => isCashTab(tab) === (section === 'caixa');
+  const [activeTab, setActiveTab] = useState<FinanceiroTab>(initialTab && inSection(initialTab) ? initialTab : sectionDefault);
   useEffect(() => {
-    if (initialTab) setActiveTab(initialTab);
+    if (initialTab && inSection(initialTab)) setActiveTab(initialTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTab]);
+  // Aba da outra parte: troca o item do menu.
+  const openTab = (tab: FinanceiroTab) => {
+    if (inSection(tab)) setActiveTab(tab);
+    else onOpenTab?.(tab);
+  };
 
   // Vendas sao registradas somente pelo PDV; aqui ficam o historico e o estorno.
   const [saleError, setSaleError] = useState('');
@@ -444,104 +460,35 @@ export default function FinanceiroView({
       {/* Sub navigation bar */}
       <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex-wrap gap-4">
         <div className="flex flex-wrap gap-2">
-          <button
-            id="tab-financeiro-sales"
-            onClick={() => setActiveTab('vendas')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
-              activeTab === 'vendas'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <Receipt className="w-4 h-4 mr-1.5" />
-            Histórico de Vendas
-          </button>
-          <button
-            id="tab-financeiro-cash"
-            onClick={() => setActiveTab('caixa')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
-              activeTab === 'caixa'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <PiggyBank className="w-4 h-4 mr-1.5" />
-            Caixa e Bancos
-          </button>
-          <button
-            id="tab-financeiro-payables"
-            onClick={() => setActiveTab('contas')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
-              activeTab === 'contas'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <Wallet className="w-4 h-4 mr-1.5" />
-            Contas a Pagar
-          </button>
-          <button
-            id="tab-financeiro-accounts-receivable"
-            onClick={() => setActiveTab('areceber')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
-              activeTab === 'areceber'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <HandCoins className="w-4 h-4 mr-1.5" />
-            Contas a Receber
-          </button>
-          <button
-            id="tab-financeiro-receivables"
-            onClick={() => setActiveTab('recebimentos')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
-              activeTab === 'recebimentos'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <Landmark className="w-4 h-4 mr-1.5" />
-            Recebimentos
-          </button>
-          <button
-            id="tab-financeiro-expenses"
-            onClick={() => setActiveTab('despesas')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
-              activeTab === 'despesas'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <Calculator className="w-4 h-4 mr-1.5" />
-            Livro caixa (Saídas)
-          </button>
-          <button
-            id="tab-financeiro-indicators"
-            onClick={() => setActiveTab('indicadores')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
-              activeTab === 'indicadores'
-                ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-            }`}
-          >
-            <Activity className="w-4 h-4 mr-1.5" />
-            Indicadores & DRE Semanal
-          </button>
-          {isAdmin && (
-            <button
-              id="tab-financeiro-configs"
-              onClick={() => setActiveTab('configs')}
-              className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
-                activeTab === 'configs'
-                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-              }`}
-            >
-              <Settings className="w-4 h-4 mr-1.5" />
-              Taxas & Custos Fixos (Admin)
-            </button>
-          )}
+          {([
+            { id: 'caixa', label: 'Caixa e Bancos', icon: PiggyBank },
+            { id: 'contas', label: 'Contas a Pagar', icon: Wallet },
+            { id: 'areceber', label: 'Contas a Receber', icon: HandCoins },
+            { id: 'recebimentos', label: 'Recebimentos (cartão e Pix)', icon: Landmark },
+            { id: 'vendas', label: 'Histórico de Vendas', icon: Receipt },
+            { id: 'despesas', label: 'Despesas', icon: Calculator },
+            { id: 'indicadores', label: 'Indicadores & DRE', icon: Activity },
+            ...(isAdmin ? [{ id: 'configs', label: 'Taxas & Custos Fixos', icon: Settings }] : []),
+          ] as { id: FinanceiroTab; label: string; icon: typeof Receipt }[])
+            .filter(item => inSection(item.id))
+            .map(item => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  id={`tab-financeiro-${item.id}`}
+                  onClick={() => setActiveTab(item.id)}
+                  className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center border ${
+                    activeTab === item.id
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                      : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 mr-1.5" />
+                  {item.label}
+                </button>
+              );
+            })}
         </div>
       </div>
 
@@ -877,12 +824,12 @@ export default function FinanceiroView({
       )}
 
       {activeTab === 'recebimentos' && (
-        <ReceivablesPanel currentUser={currentUser} sales={sales} storeConfigs={storeConfigs} onOpenSettings={isAdmin ? () => setActiveTab('configs') : undefined} />
+        <ReceivablesPanel currentUser={currentUser} sales={sales} storeConfigs={storeConfigs} onOpenSettings={isAdmin ? () => openTab('configs') : undefined} />
       )}
 
       {/* 1. VIEW: Livro caixa (Saidas) */}
       {activeTab === 'despesas' && (
-        <ExpensesLedger currentUser={currentUser} expenses={expenses} storeConfigs={storeConfigs} onChanged={reloadExpenses} onOpenPayables={() => setActiveTab('contas')} />
+        <ExpensesLedger currentUser={currentUser} expenses={expenses} storeConfigs={storeConfigs} onChanged={reloadExpenses} onOpenPayables={() => openTab('contas')} />
       )}
 
       {/* 2. VIEW: Indicadores e DRE Semanal */}

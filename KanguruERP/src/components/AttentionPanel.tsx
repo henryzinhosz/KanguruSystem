@@ -1,16 +1,17 @@
-import { AlertTriangle, CalendarClock, ChevronRight, Cpu, HandCoins, Package, Receipt, ReceiptText, Wallet, WifiOff, Wrench, X } from 'lucide-react';
+import { AlertTriangle, CalendarClock, ChevronRight, Cpu, HandCoins, Landmark, Package, Receipt, ReceiptText, Wallet, WifiOff, Wrench, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ErpAlert, ErpAlertKind } from '../db/insights';
 
 // "Precisa de atenção" (desenho aprovado em 2026-11-03): pendencias das lojas num lugar so.
 // Cada alerta fica ate o problema ser resolvido (sem "dispensar").
 
-export type AttentionTarget = 'estoque' | 'servicos' | 'financeiro' | 'contas' | 'areceber' | null;
+export type AttentionTarget = 'estoque' | 'servicos' | 'financeiro' | 'contas' | 'areceber' | 'recebimentos' | null;
 
 const KIND_INFO: Record<ErpAlertKind, { label: string; icon: LucideIcon; tone: string; target: AttentionTarget; hint?: string }> = {
   PECA_AVULSA: { label: 'Peças avulsas com custo pendente', icon: Cpu, tone: 'text-white bg-rose-600 border-rose-700', target: 'estoque', hint: 'Informe o custo no Catálogo para o lucro ficar certo' },
   CONTA_PAGAR: { label: 'Contas a pagar vencidas ou vencendo', icon: Receipt, tone: 'text-rose-600 bg-rose-50 border-rose-100', target: 'contas' },
   CONTA_RECEBER: { label: 'Contas a receber vencidas', icon: HandCoins, tone: 'text-amber-600 bg-amber-50 border-amber-100', target: 'areceber', hint: 'Cobre pelo WhatsApp em Contas a Receber' },
+  RECEBIMENTO: { label: 'Recebimentos sem conferir', icon: Landmark, tone: 'text-amber-600 bg-amber-50 border-amber-100', target: 'recebimentos', hint: 'Sem conferir, o saldo da conta do banco fica para trás' },
   ESTOQUE: { label: 'Estoque baixo', icon: Package, tone: 'text-rose-600 bg-rose-50 border-rose-100', target: 'estoque' },
   OS_ATRASADA: { label: 'OS atrasadas', icon: Wrench, tone: 'text-rose-600 bg-rose-50 border-rose-100', target: 'servicos' },
   NOTA: { label: 'Notas com problema', icon: ReceiptText, tone: 'text-rose-600 bg-rose-50 border-rose-100', target: 'financeiro', hint: 'Corrija em Cupons e notas, no PDV' },
@@ -20,7 +21,7 @@ const KIND_INFO: Record<ErpAlertKind, { label: string; icon: LucideIcon; tone: s
   OFFLINE: { label: 'Vendas sem internet com divergência', icon: WifiOff, tone: 'text-amber-600 bg-amber-50 border-amber-100', target: 'financeiro' },
 };
 
-const KIND_ORDER: ErpAlertKind[] = ['PECA_AVULSA', 'CONTA_PAGAR', 'CONTA_RECEBER', 'ESTOQUE', 'OS_ATRASADA', 'NOTA', 'CAIXA', 'OS_PARADA', 'RESERVA', 'OFFLINE'];
+const KIND_ORDER: ErpAlertKind[] = ['PECA_AVULSA', 'CONTA_PAGAR', 'CONTA_RECEBER', 'RECEBIMENTO', 'ESTOQUE', 'OS_ATRASADA', 'NOTA', 'CAIXA', 'OS_PARADA', 'RESERVA', 'OFFLINE'];
 
 interface AttentionPanelProps {
   alerts: ErpAlert[];

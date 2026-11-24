@@ -31,6 +31,7 @@ export const movementLabel = (type: string) => MOVEMENT_TYPES.find(item => item.
 export interface CashSettings {
   pdvCashAccountId: string | null;
   payoutAccountId: string | null;
+  safeAccountId?: string | null; // Cofre: recebe as sangrias do PDV (migration 20261210)
   methodAccounts: Record<CashMethodKey, string | null>;
   reserveStartDate: string | null;
 }
@@ -282,4 +283,30 @@ export async function getRestockReserves(unitId: string): Promise<RestockReserve
 export async function setBrandSupplier(brand: string, supplierId: string | null): Promise<void> {
   const { error } = await supabase.rpc('set_brand_supplier', { p_brand: brand, p_supplier_id: supplierId });
   if (error) throw error;
+}
+
+// Lojas que usam Caixa e Bancos: conta que recebe os repasses e desde quando ela conta
+// (aviso "Recebimentos sem conferir" no sino). Antes da migration 20261209 volta vazio.
+export interface PayoutWatch {
+  unitId: string;
+  payoutStart: string; // dias de repasse depois desta data precisam ser conferidos
+}
+
+export async function loadPayoutWatch(): Promise<PayoutWatch[]> {
+  const [{ data: accounts, error: accountsError }, { data: stores, error: storesError }] = await Promise.all([
+    supabase.from('cash_accounts').select('id, unit_id, kind, is_active, opening_date, sort_order, created_at'),
+    supabase.from('store_configs').select('unit_id, cash_settings'),
+  ]);
+  if (accountsError || storesError) return [];
+  return (stores || []).flatMap(store => {
+    const settings = (store.cash_settings || {}) as Record<string, unknown>;
+    const own = (accounts || [])
+      .filter(account => account.unit_id === store.unit_id)
+      .sort((a, b) => (a.sort_order - b.sort_order) || String(a.created_at).localeCompare(String(b.created_at)));
+    const payoutId = 'payoutAccountId' in settings
+      ? (settings.payoutAccountId as string | null)
+      : own.find(account => account.is_active && account.kind === 'BANCO')?.id ?? null;
+    const payout = own.find(account => account.id === payoutId);
+    return payout ? [{ unitId: store.unit_id as string, payoutStart: payout.opening_date as string }] : [];
+  });
 }
