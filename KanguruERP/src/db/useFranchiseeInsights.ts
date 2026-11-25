@@ -7,6 +7,7 @@ import { listOpenReceivableInstallments } from './receivableTitles';
 import { toLocalDateKey } from './finance';
 import { listCardAportes, loadPayoutWatch, type CardAporte, type PayoutWatch } from './cashAccounts';
 import { addPayoutDays, buildReceivables, listPayoutChecks, rulesOf, type PayoutCheck } from './receivables';
+import { listVideoMakerAlerts } from './videoMaker';
 
 interface PayoutWatchData {
   watch: PayoutWatch[];
@@ -76,6 +77,25 @@ async function loadReceivableAlerts(): Promise<ErpAlert[]> {
   }));
 }
 
+// VideoMaker: videos com erro, Instagram desconectado e fila acabando (quem usa a Agência).
+async function loadVideoAlerts(): Promise<ErpAlert[]> {
+  const rows = await listVideoMakerAlerts();
+  const soon = Date.now() + 2 * 86400000;
+  return rows.flatMap(row => {
+    const items: ErpAlert[] = [];
+    if (row.expired) {
+      items.push({ kind: 'VIDEO', unitId: row.unitId, ref: `video-ig-${row.unitId}`, title: 'Instagram desconectado: os vídeos não serão publicados', detail: 'O dono precisa clicar em "Conectar Instagram" no VideoMaker', date: null });
+    }
+    if (row.errors > 0) {
+      items.push({ kind: 'VIDEO', unitId: row.unitId, ref: `video-erro-${row.unitId}`, title: `${row.errors} vídeo(s) com erro na publicação`, detail: row.errorNames, date: null });
+    }
+    if (row.nextAt && new Date(row.nextAt).getTime() < soon) {
+      items.push({ kind: 'VIDEO', unitId: row.unitId, ref: `video-fila-${row.unitId}`, title: `A fila de vídeos acaba em ${new Date(row.nextAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}`, detail: 'Suba novos vídeos para não ficar sem postar', date: null });
+    }
+    return items;
+  });
+}
+
 // Alertas "Precisa de atenção" e comunicados da rede para o ERP do franqueado.
 // Recarrega a cada 5 minutos; antes das migrations 20261118/20261119 fica vazio (sem erro na tela).
 const REFRESH_MS = 5 * 60 * 1000;
@@ -90,6 +110,8 @@ export function useFranchiseeInsights(
   const enabled = Boolean(currentUser && (currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.MANAGER));
   const seesFinance = Boolean(currentUser && (currentUser.role === UserRole.ADMIN
     || (currentUser.permissions ?? DEFAULT_MANAGER_PERMISSIONS).financeiro));
+  const usesAgency = Boolean(currentUser && (currentUser.role === UserRole.ADMIN
+    || (currentUser.permissions ?? DEFAULT_MANAGER_PERMISSIONS).agencia));
   const [serverAlerts, setServerAlerts] = useState<ErpAlert[]>([]);
   const [payableAlerts, setPayableAlerts] = useState<ErpAlert[]>([]);
   const [payoutData, setPayoutData] = useState<PayoutWatchData>({ watch: [], checks: [], aportes: [] });
@@ -101,19 +123,20 @@ export function useFranchiseeInsights(
     setAlertsLoading(true);
     try {
       const emptyPayout: PayoutWatchData = { watch: [], checks: [], aportes: [] };
-      const [server, payables, receivables, payout] = await Promise.all([
+      const [server, payables, receivables, payout, videos] = await Promise.all([
         listErpAlerts().catch(() => [] as ErpAlert[]),
         seesFinance ? loadPayableAlerts().catch(() => [] as ErpAlert[]) : Promise.resolve([] as ErpAlert[]),
         seesFinance ? loadReceivableAlerts().catch(() => [] as ErpAlert[]) : Promise.resolve([] as ErpAlert[]),
         seesFinance ? loadPayoutWatchData().catch(() => emptyPayout) : Promise.resolve(emptyPayout),
+        usesAgency ? loadVideoAlerts().catch(() => [] as ErpAlert[]) : Promise.resolve([] as ErpAlert[]),
       ]);
-      setServerAlerts(server);
+      setServerAlerts([...server, ...videos]);
       setPayableAlerts([...payables, ...receivables]);
       setPayoutData(payout);
     } finally {
       setAlertsLoading(false);
     }
-  }, [enabled, seesFinance]);
+  }, [enabled, seesFinance, usesAgency]);
 
   const reloadAnnouncements = useCallback(async () => {
     if (!enabled) return;
