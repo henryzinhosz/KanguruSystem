@@ -552,13 +552,15 @@ Deno.serve(async (request) => {
     });
     if (error) return json({ error: 'Não foi possível começar a conexão.' }, 500);
     // Login unificado: a configuracao (config_id) define a chave, as permissoes e o ativo Instagram.
-    const authorize = new URL(`https://www.facebook.com/${IG_VERSION}/dialog/oauth`);
+    // Igual ao "URL de login" que a Meta gera para a configuracao (conferido em 2026-11-26).
+    const authorize = new URL('https://www.facebook.com/dialog/oauth');
     authorize.searchParams.set('client_id', appId);
     authorize.searchParams.set('config_id', configId);
     authorize.searchParams.set('redirect_uri', `${supabaseUrl}/functions/v1/agency-videomaker`);
     authorize.searchParams.set('response_type', 'code');
     authorize.searchParams.set('override_default_response_type', 'true');
     authorize.searchParams.set('state', state);
+    authorize.searchParams.set('prompt', 'login');
     return json({ url: authorize.toString() });
   }
 
