@@ -629,7 +629,7 @@ export default function VideoMakerPanel({ currentUser, stores, unitId, onUnitCha
               <h4 className="flex items-center gap-2 text-sm font-bold text-blue-100"><AtSign className="h-4 w-4" />Instagram da loja</h4>
               {!account && (
                 <>
-                  <p className="text-xs text-slate-300">Conecte a conta Profissional do Instagram desta loja. A ligação fica guardada só no servidor e é renovada sozinha.</p>
+                  <p className="text-xs text-slate-300">Conecte a conta Profissional do Instagram desta loja. A ligação fica guardada só no servidor.</p>
                   {state.isOwner
                     ? <button type="button" disabled={busyId === 'connect'} onClick={connect} className={BUTTON} style={GREEN}>{busyId === 'connect' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AtSign className="h-3.5 w-3.5" />}Conectar Instagram</button>
                     : <p className="text-xs font-semibold text-amber-200">Peça ao dono da empresa para conectar o Instagram.</p>}
@@ -644,7 +644,7 @@ export default function VideoMakerPanel({ currentUser, stores, unitId, onUnitCha
                   <p className="text-xs text-slate-400">
                     {accountExpired
                       ? 'Os vídeos não serão publicados até conectar de novo.'
-                      : `Conectado por ${account.connectedByName || 'dono'}. Renovação automática (válida até ${new Date(account.expiresAt).toLocaleDateString('pt-BR')}).`}
+                      : `Conectado por ${account.connectedByName || 'dono'}. ${new Date(account.expiresAt).getFullYear() >= 2090 ? 'Ligação sem vencimento.' : `Válida até ${new Date(account.expiresAt).toLocaleDateString('pt-BR')}.`}`}
                   </p>
                   {account.lastError && !accountExpired && <p className="text-xs text-amber-200">{account.lastError}</p>}
                   {state.isOwner && (

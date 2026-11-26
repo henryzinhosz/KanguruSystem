@@ -9,9 +9,12 @@ import Anthropic from 'npm:@anthropic-ai/sdk@1.8.0';
 // - POST {action:tick}     agendador (pg_cron, a cada 5 min, com o segredo da tabela fechada):
 //                          renova chaves, publica os videos aprovados na hora e limpa arquivos
 //
-// Segredos: INSTAGRAM_APP_ID, INSTAGRAM_APP_SECRET (Meta › Instagram › API setup with Instagram
-// login), ANTHROPIC_API_KEY (sem ela, legenda em modo de teste). Opcionais: ERP_ORIGINS
-// (enderecos do ERP separados por virgula) e INSTAGRAM_API_VERSION.
+// Conexao: "API do Instagram com login unificado" (Meta, apps novos desde out/2026): Login do
+// Facebook para Empresas com uma configuracao (config_id) de chave de usuario do sistema sem
+// vencimento e a conta do Instagram como ativo; publicacao pelo graph.facebook.com.
+// Segredos: INSTAGRAM_APP_ID (ID do app na Meta), INSTAGRAM_APP_SECRET (Configuracoes do app ›
+// Basico › Chave secreta), INSTAGRAM_CONFIG_ID (ID da configuracao), ANTHROPIC_API_KEY (sem ela,
+// legenda em modo de teste). Opcionais: ERP_ORIGINS e INSTAGRAM_API_VERSION (padrao v26.0).
 // A chave do Instagram nunca sai do servidor e nunca vai para o log.
 
 const corsHeaders = {
@@ -21,9 +24,9 @@ const corsHeaders = {
 
 const MODEL = 'claude-opus-5-5';
 const BUCKET = 'agency-videos';
-const SCOPES = 'instagram_business_basic,instagram_business_content_publish';
-const IG_VERSION = Deno.env.get('INSTAGRAM_API_VERSION') || 'v27.0';
-const GRAPH = `https://graph.instagram.com/${IG_VERSION}`;
+const IG_VERSION = Deno.env.get('INSTAGRAM_API_VERSION') || 'v26.0';
+// "API do Instagram com login unificado" (apps novos desde out/2026): Graph do Facebook.
+const GRAPH = `https://graph.facebook.com/${IG_VERSION}`;
 const DEFAULT_ORIGINS = ['https://kanguruerp.vercel.app', 'http://localhost:3000'];
 const EDITABLE = ['RASCUNHO', 'APROVADO', 'PAUSADO', 'ERRO'];
 const MAX_FRAMES = 8;
@@ -181,32 +184,48 @@ async function handleCallback(service: SupabaseClient, url: URL) {
   const redirectUri = `${Deno.env.get('SUPABASE_URL')}/functions/v1/agency-videomaker`;
 
   try {
-    const short = unwrap(await graph('https://api.instagram.com/oauth/access_token', {
-      method: 'POST',
-      body: form({ client_id: appId, client_secret: appSecret, grant_type: 'authorization_code', redirect_uri: redirectUri, code }),
-    }));
-    const permissions = Array.isArray(short.permissions) ? short.permissions.join(',') : String(short.permissions || '');
-    if (permissions && !permissions.includes('instagram_business_content_publish')) return back(origin, 'erro', 'permissao');
+    // Login unificado: troca o codigo por uma chave de "usuario do sistema" (normalmente sem vencimento).
+    const exchanged = await graph(`${GRAPH}/oauth/access_token?${form({ client_id: appId, client_secret: appSecret, redirect_uri: redirectUri, code })}`);
+    const token = String(exchanged.access_token || '');
+    if (!token) return back(origin, 'erro', 'instagram');
+    const expiresIn = Number(exchanged.expires_in || 0);
 
-    const long = await graph(`https://graph.instagram.com/access_token?${form({
-      grant_type: 'ig_exchange_token',
-      client_secret: appSecret,
-      access_token: String(short.access_token),
-    })}`);
-    const token = String(long.access_token);
-    const expiresIn = Number(long.expires_in || 5184000);
-
-    const me = unwrap(await graph(`${GRAPH}/me?${form({ fields: 'user_id,username', access_token: token })}`));
-    const igUserId = String(me.user_id || short.user_id || '');
+    // Conta do Instagram escolhida na configuracao (ativo da empresa).
+    let igUserId = '';
+    let username = '';
+    try {
+      const assigned = await graph(`${GRAPH}/me/assigned_instagram_accounts?${form({ fields: 'id,username', access_token: token })}`);
+      const first = Array.isArray(assigned.data) ? (assigned.data[0] as Record<string, unknown> | undefined) : undefined;
+      igUserId = String(first?.id || '');
+      username = String(first?.username || '');
+    } catch {
+      // tenta pelo debug_token abaixo
+    }
+    if (!igUserId) {
+      const debug = await graph(`${GRAPH}/debug_token?${form({ input_token: token, access_token: `${appId}|${appSecret}` })}`);
+      const scopes = ((debug.data as Record<string, unknown>)?.granular_scopes || []) as Array<{ scope?: string; target_ids?: string[] }>;
+      const publish = scopes.find(item => item.scope === 'instagram_content_publish') || scopes.find(item => item.scope === 'instagram_basic');
+      igUserId = String(publish?.target_ids?.[0] || '');
+      if (!publish) return back(origin, 'erro', 'permissao');
+    }
     if (!igUserId) return back(origin, 'erro', 'conta');
+    if (!username) {
+      try {
+        const profile = await graph(`${GRAPH}/${igUserId}?${form({ fields: 'username', access_token: token })}`);
+        username = String(profile.username || '');
+      } catch {
+        // sem o @: segue conectado
+      }
+    }
 
     const { error } = await service.from('agency_instagram_accounts').upsert({
       tenant_id: pending.tenant_id,
       unit_id: pending.unit_id,
       ig_user_id: igUserId,
-      username: String(me.username || ''),
+      username,
       access_token: token,
-      token_expires_at: new Date(Date.now() + expiresIn * 1000).toISOString(),
+      // Sem vencimento informado: guarda uma data distante (a tela mostra "sem vencimento").
+      token_expires_at: expiresIn > 0 ? new Date(Date.now() + expiresIn * 1000).toISOString() : '2099-12-31T00:00:00Z',
       token_refreshed_at: new Date().toISOString(),
       status: 'ATIVA',
       last_error: null,
@@ -300,7 +319,7 @@ async function makeCaption(service: SupabaseClient, actor: Record<string, unknow
 
 // ---------------- Publicacao (agendador) ----------------
 async function tick(service: SupabaseClient) {
-  const summary = { refreshed: 0, expired: 0, containers: 0, published: 0, errors: 0, cleaned: 0 };
+  const summary = { expired: 0, containers: 0, published: 0, errors: 0, cleaned: 0 };
   const now = Date.now();
   const accounts = new Map<string, Account | null>();
   const keyOf = (tenant: string, unit: string) => `${tenant}|${unit}`;
@@ -315,30 +334,10 @@ async function tick(service: SupabaseClient) {
     summary.expired += 1;
   };
 
-  // 1. Renova as chaves que vencem em ate 15 dias (a Meta exige chave com 24 h ou mais).
-  const soon = new Date(now + 15 * 86400000).toISOString();
-  const { data: renewing } = await service.from('agency_instagram_accounts').select('*').eq('status', 'ATIVA').lt('token_expires_at', soon);
-  for (const account of (renewing || []) as Account[]) {
-    if (new Date(account.token_expires_at).getTime() <= now) {
-      await markAccountExpired(account, 'A chave do Instagram venceu. Conecte de novo.');
-      continue;
-    }
-    if (now - new Date(account.token_refreshed_at).getTime() < 86400000) continue;
-    try {
-      const body = await graph(`https://graph.instagram.com/refresh_access_token?${form({ grant_type: 'ig_refresh_token', access_token: account.access_token })}`);
-      await service.from('agency_instagram_accounts').update({
-        access_token: String(body.access_token),
-        token_expires_at: new Date(now + Number(body.expires_in || 5184000) * 1000).toISOString(),
-        token_refreshed_at: new Date().toISOString(),
-        last_error: null,
-      }).eq('tenant_id', account.tenant_id).eq('unit_id', account.unit_id);
-      summary.refreshed += 1;
-    } catch (error) {
-      const info = error instanceof InstagramError ? error.info : null;
-      if (info?.code === 190) await markAccountExpired(account, friendlyInstagram(info));
-      else await service.from('agency_instagram_accounts').update({ last_error: info ? friendlyInstagram(info) : 'Falha ao renovar a chave.' })
-        .eq('tenant_id', account.tenant_id).eq('unit_id', account.unit_id);
-    }
+  // 1. Chave do login unificado normalmente nao vence; se vier com vencimento e passar, avisa.
+  const { data: expiring } = await service.from('agency_instagram_accounts').select('*').eq('status', 'ATIVA').lte('token_expires_at', new Date(now).toISOString());
+  for (const account of (expiring || []) as Account[]) {
+    await markAccountExpired(account, 'A ligação com o Instagram venceu. Conecte de novo.');
   }
 
   const accountFor = async (video: Video): Promise<Account | null> => {
@@ -536,7 +535,8 @@ Deno.serve(async (request) => {
   if (payload.action === 'connect') {
     if (!actor.isOwner) return json({ error: 'Só o dono da empresa conecta o Instagram.' }, 403);
     const appId = Deno.env.get('INSTAGRAM_APP_ID');
-    if (!appId || !Deno.env.get('INSTAGRAM_APP_SECRET')) {
+    const configId = Deno.env.get('INSTAGRAM_CONFIG_ID');
+    if (!appId || !configId || !Deno.env.get('INSTAGRAM_APP_SECRET')) {
       return json({ error: 'A ligação com o Instagram ainda não foi configurada pela Kanguru.' }, 503);
     }
     const returnTo = String(payload.returnTo || '').replace(/\/+$/, '');
@@ -551,14 +551,14 @@ Deno.serve(async (request) => {
       return_to: returnTo,
     });
     if (error) return json({ error: 'Não foi possível começar a conexão.' }, 500);
-    const authorize = new URL('https://www.instagram.com/oauth/authorize');
+    // Login unificado: a configuracao (config_id) define a chave, as permissoes e o ativo Instagram.
+    const authorize = new URL(`https://www.facebook.com/${IG_VERSION}/dialog/oauth`);
     authorize.searchParams.set('client_id', appId);
+    authorize.searchParams.set('config_id', configId);
     authorize.searchParams.set('redirect_uri', `${supabaseUrl}/functions/v1/agency-videomaker`);
     authorize.searchParams.set('response_type', 'code');
-    authorize.searchParams.set('scope', SCOPES);
+    authorize.searchParams.set('override_default_response_type', 'true');
     authorize.searchParams.set('state', state);
-    authorize.searchParams.set('enable_fb_login', 'false');
-    authorize.searchParams.set('force_reauth', 'true');
     return json({ url: authorize.toString() });
   }
 
