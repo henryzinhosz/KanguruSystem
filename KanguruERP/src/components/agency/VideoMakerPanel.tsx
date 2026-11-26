@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import type { StoreConfig, User } from '../../types';
 import {
-  EDITABLE_STATUSES, MAX_VIDEO_BYTES, VIDEO_STATUS_LABELS, captionStats, deleteAgencyVideo, disconnectInstagram,
+  EDITABLE_STATUSES, MAX_VIDEO_BYTES, MAX_VIDEO_MB, VIDEO_STATUS_LABELS, captionStats, deleteAgencyVideo, disconnectInstagram,
   generateCaption, getVideoMakerState, registerAgencyVideo, removeVideoFiles, saveVideoMakerSettings, scheduleAgencyVideos,
   setAgencyVideoStatus, signedVideoUrls, startInstagramConnect, swapAgencyVideos, updateAgencyVideo, uploadSmallFile,
   uploadVideoFile, type AgencyVideo, type VideoAction, type VideoMakerState, type VideoStatus,
@@ -340,7 +340,7 @@ export default function VideoMakerPanel({ currentUser, stores, unitId, onUnitCha
       if (!file) throw new Error('Arquivo não encontrado.');
       const mime = mimeOf(file);
       if (!mime) throw new Error('Formato aceito: MP4 ou MOV.');
-      if (file.size > MAX_VIDEO_BYTES) throw new Error('O vídeo pode ter até 300 MB.');
+      if (file.size > MAX_VIDEO_BYTES) throw new Error(`O vídeo pode ter até ${MAX_VIDEO_MB} MB.`);
 
       updateItem(item.key, { step: 'Lendo o vídeo', progress: null });
       const info = await probeVideo(file);
@@ -679,7 +679,7 @@ export default function VideoMakerPanel({ currentUser, stores, unitId, onUnitCha
 
             <section className="space-y-2 rounded-xl border-2 p-3" style={PANEL}>
               <h4 className="flex items-center gap-2 text-sm font-bold text-blue-100"><Upload className="h-4 w-4" />Adicionar vídeos <span className="ml-auto font-mono text-xs text-slate-300">{activeRef.current}/{state.maxActive} na fila</span></h4>
-              <p className="text-[11px] text-slate-400">MP4 ou MOV, de 3 s a 15 min, até 300 MB, de preferência em pé (9:16).</p>
+              <p className="text-[11px] text-slate-400">MP4 ou MOV, de 3 s a 15 min, até {MAX_VIDEO_MB} MB, de preferência em pé (9:16).</p>
               <label className="flex items-start gap-2 text-xs text-slate-200">
                 <input type="checkbox" checked={rights} onChange={event => setRights(event.target.checked)} className="mt-0.5" />
                 Confirmo que a loja tem direito de usar estes vídeos e as músicas deles (música com direitos autorais pode ser silenciada pelo Instagram).
@@ -719,7 +719,7 @@ export default function VideoMakerPanel({ currentUser, stores, unitId, onUnitCha
                               onChange={event => setDriveSelected(current => { const next = new Set(current); if (event.target.checked) next.add(file.id); else next.delete(file.id); return next; })}
                             />
                             <span className="min-w-0 flex-1 truncate">{file.name}</span>
-                            <span>{formatSize(file.size)}{tooBig ? ' (passa de 300 MB)' : ''}</span>
+                            <span>{formatSize(file.size)}{tooBig ? ` (passa de ${MAX_VIDEO_MB} MB)` : ''}</span>
                           </label>
                         </li>
                       );

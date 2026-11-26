@@ -4,7 +4,10 @@ import { getSupabaseConfig, supabase } from './supabaseClient';
 // VideoMaker da Agência (migration 20261212, Edge Function agency-videomaker).
 
 export const VIDEO_BUCKET = 'agency-videos';
-export const MAX_VIDEO_BYTES = 300 * 1024 * 1024;
+// Plano Free do Supabase aceita até 50 MB por arquivo; no Pro, definir VITE_VIDEO_MAX_MB=300 na Vercel.
+const videoEnv = (import.meta.env ?? {}) as unknown as Record<string, string | undefined>;
+export const MAX_VIDEO_MB = Math.min(300, Math.max(1, Number(videoEnv.VITE_VIDEO_MAX_MB) || 50));
+export const MAX_VIDEO_BYTES = MAX_VIDEO_MB * 1024 * 1024;
 export const MAX_ACTIVE_VIDEOS = 40;
 
 export type VideoStatus = 'RASCUNHO' | 'APROVADO' | 'PUBLICANDO' | 'PUBLICADO' | 'ERRO' | 'PAUSADO' | 'CANCELADO';
