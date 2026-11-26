@@ -111,6 +111,8 @@ function VideoCard({ video, thumb, busy, canCaption, canMoveUp, canMoveDown, onA
   const editable = EDITABLE_STATUSES.includes(video.status);
   const [caption, setCaption] = useState(video.caption);
   const [note, setNote] = useState(video.note);
+  const [when, setWhen] = useState(toLocalInput(video.scheduledAt));
+  useEffect(() => setWhen(toLocalInput(video.scheduledAt)), [video.scheduledAt]);
   const [showTranscript, setShowTranscript] = useState(false);
   useEffect(() => setCaption(video.caption), [video.caption]);
   useEffect(() => setNote(video.note), [video.note]);
@@ -154,9 +156,16 @@ function VideoCard({ video, thumb, busy, canCaption, canMoveUp, canMoveDown, onA
             {editable ? (
               <input
                 type="datetime-local"
-                value={toLocalInput(video.scheduledAt)}
+                value={when}
+                min={toLocalInput(new Date().toISOString())}
                 disabled={busy}
-                onChange={event => { const value = event.target.value; void onSave(video, { scheduledAt: value ? new Date(value).toISOString() : null }); }}
+                // Salva só ao sair do campo (Enter também): enquanto digita, a hora passa por valores no passado.
+                onChange={event => setWhen(event.target.value)}
+                onBlur={() => {
+                  if (when === toLocalInput(video.scheduledAt)) return;
+                  void onSave(video, { scheduledAt: when ? new Date(when).toISOString() : null });
+                }}
+                onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); }}
                 className={`${INPUT} mt-1`}
               />
             ) : (
