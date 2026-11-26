@@ -28,6 +28,8 @@ export const ROOMS: RoomDef[] = [
 ];
 
 type Point = [number, number];
+
+const VIDEOMAKER_SEAT: Point = [6.25, 4.75];
 interface Shape { points: string; fill: string; stroke?: string; sw?: number }
 interface Colors { top: string; left: string; right: string }
 
@@ -101,6 +103,8 @@ function sprite(out: Shape[], sx: number, sy: number, rows: string[], pal: Recor
     }
   });
 }
+
+const VIDEOMAKER_LOOK = palette('#7c2d12', '#d4a373', '#f472b6', '#3b1d35');
 
 function buildScene(selected: AgencyRoom | null): Shape[] {
   const out: Shape[] = [];
@@ -176,6 +180,12 @@ function buildScene(selected: AgencyRoom | null): Shape[] {
   box(out, 5.4, 3.4, 1.9, 0.9, 18, 0, C.desk);
   monitor(out, 5.9, 3.5);
   box(out, 6.0, 4.5, 0.5, 0.5, 18, 0, C.chair);
+  // VideoMaker (2º agente do Marketing) com a câmera no tripé
+  { const p = iso(VIDEOMAKER_SEAT[0], VIDEOMAKER_SEAT[1], 14); sprite(out, p[0], p[1], SEATED, VIDEOMAKER_LOOK, 3); }
+  [[8.05, 3.75], [8.35, 3.75], [8.2, 4.05]].forEach(([gx, gy]) => box(out, gx, gy, 0.05, 0.05, 24, 0, { top: '#334155', left: '#1e293b', right: '#0f172a' }));
+  box(out, 8.02, 3.72, 0.42, 0.3, 11, 24, { top: '#475569', left: '#1f2937', right: '#111827' });
+  box(out, 8.12, 4.02, 0.16, 0.12, 6, 26, { top: '#1e293b', left: '#0b1220', right: '#0b1220' });
+  out.push(poly([iso(8.05, 3.72, 34), iso(8.12, 3.72, 34), iso(8.12, 3.72, 32), iso(8.05, 3.72, 32)], '#ef4444'));
   box(out, 5.1, 5.6, 3.7, 0.12, 30, 0, C.part);
 
   // Vendas
@@ -255,9 +265,12 @@ interface Props {
   panel: { used: number; limit: number; status: string; statusColor: string };
   // Etapa B: numero de avisos automaticos de cada sala (balao vermelho).
   badges?: Partial<Record<AgencyRoom, number>>;
+  // VideoMaker (dentro da sala de Marketing): clicar no agente abre o VideoMaker.
+  onVideoMaker?: () => void;
 }
 
-export default function AgencyOffice({ selected, states, onSelect, panel, badges }: Props) {
+export default function AgencyOffice({ selected, states, onSelect, panel, badges, onVideoMaker }: Props) {
+  const videoMakerAt = iso(VIDEOMAKER_SEAT[0], VIDEOMAKER_SEAT[1], 14);
   const shapes = useMemo(() => buildScene(selected), [selected]);
   const current = ROOMS.find(room => room.id === selected);
   const target = iso(current?.walk ?? 9.5, 7);
@@ -312,6 +325,20 @@ export default function AgencyOffice({ selected, states, onSelect, panel, badges
           style={{ left: pctX(left), top: pctY(top), width: pctX(width), height: pctY(height), background: 'transparent' }}
         />
       ))}
+
+      {onVideoMaker && (
+        <button
+          type="button"
+          onClick={onVideoMaker}
+          aria-label="Abrir o VideoMaker"
+          title="VideoMaker: subir vídeos e agendar no Instagram"
+          className="absolute cursor-pointer border-2 border-dashed border-transparent hover:border-pink-300/80 focus-visible:border-pink-300 outline-none"
+          style={{ left: pctX(videoMakerAt[0] - 30), top: pctY(videoMakerAt[1] - 42), width: pctX(60), height: pctY(70), background: 'transparent' }}
+        />
+      )}
+      <span className="pointer-events-none absolute whitespace-nowrap font-bold" style={{ left: pctX(videoMakerAt[0]), top: pctY(videoMakerAt[1] + 4), transform: 'translateX(-50%)', padding: `${cq(2)} ${cq(6)}`, background: '#2a0f22', border: '2px solid #f472b6', color: '#fbcfe8', letterSpacing: '0.06em', ...textStyle(11) }}>
+        VIDEOMAKER
+      </span>
 
       {labels.map(({ room, x, y, look }) => (
         <span key={room.id} className="pointer-events-none absolute flex flex-col items-center" style={{ left: pctX(x), top: pctY(y), transform: 'translate(-50%, -100%)', gap: cq(4) }}>

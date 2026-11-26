@@ -130,6 +130,21 @@ export default function App() {
   useEffect(() => {
     if (activeTab !== 'agencia') agencyReturnTab.current = activeTab;
   }, [activeTab]);
+  // Volta do login do Instagram (VideoMaker): ?instagram=ok|erro&motivo=...&loja=...
+  const [instagramReturn, setInstagramReturn] = useState<{ ok: boolean; reason: string; unitId: string } | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const result = params.get('instagram');
+    return result ? { ok: result === 'ok', reason: params.get('motivo') || '', unitId: params.get('loja') || '' } : null;
+  });
+  useEffect(() => {
+    if (!instagramReturn) return;
+    const url = new URL(window.location.href);
+    ['instagram', 'motivo', 'loja'].forEach(key => url.searchParams.delete(key));
+    window.history.replaceState(null, '', url.toString());
+  }, [instagramReturn]);
+  useEffect(() => {
+    if (instagramReturn && currentUser) setActiveTab('agencia');
+  }, [instagramReturn, currentUser]);
   const insights = useFranchiseeInsights(currentUser, products, inventory, sales, storeConfigs);
   const subscription = useSubscriptionState(currentUser?.tenantId);
 
@@ -451,6 +466,8 @@ export default function App() {
               productStoreCosts={productStoreCosts}
               onNavigate={navigateFromAgency}
               onExit={() => setActiveTab(agencyReturnTab.current)}
+              instagramReturn={instagramReturn}
+              onInstagramReturnHandled={() => setInstagramReturn(null)}
             />
           )}
 

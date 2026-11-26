@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { ArrowLeft, History, Loader2, MessageSquarePlus, Send, Sparkles, Trash2 } from 'lucide-react';
+import { ArrowLeft, Film, History, Loader2, MessageSquarePlus, Send, Sparkles, Trash2 } from 'lucide-react';
 import type { Expense, PdvOperator, Product, ProductStoreCost, Sale, StockInventory, StoreConfig, Supplier, User, WorkOrder } from '../../types';
 import { DEFAULT_MANAGER_PERMISSIONS, UserRole } from '../../types';
 import type { OtherIncome } from '../../db/finance';
@@ -21,6 +21,7 @@ import type { ErpAlert } from '../../db/insights';
 import AgencyOffice, { ROOMS, type RoomState } from './AgencyOffice';
 import { buildAgencyContext } from './agencyContext';
 import { financeAgencyNotices, quickAgencyNotices, sortNotices, type AgencyNotice } from './agencyNotices';
+import VideoMakerPanel from './VideoMakerPanel';
 
 // Agencia de IA (etapa A): escritorio com 6 salas + chat da sala escolhida.
 // O agente so sugere; os botoes da resposta so abrem telas do ERP.
@@ -66,7 +67,18 @@ interface Props {
   onNavigate: (target: AgencyTarget) => void;
   // Botão vermelho "Voltar ao ERP" (a Agência ocupa a tela inteira).
   onExit: () => void;
+  // Volta do login do Instagram (VideoMaker).
+  instagramReturn?: { ok: boolean; reason: string; unitId: string } | null;
+  onInstagramReturnHandled?: () => void;
 }
+
+const INSTAGRAM_REASONS: Record<string, string> = {
+  expirou: 'A conexão demorou demais. Clique em "Conectar Instagram" de novo.',
+  cancelado: 'A conexão foi cancelada no Instagram.',
+  permissao: 'Faltou aceitar a permissão de publicar. Conecte de novo e aceite todas as permissões.',
+  configuracao: 'A ligação com o Instagram ainda não foi configurada pela Kanguru.',
+  conta: 'Não foi possível identificar a conta do Instagram. Confira se ela é Profissional (Empresa ou Criador).',
+};
 
 const NOTICE_DOT: Record<AgencyNotice['level'], string> = { alto: '#f87171', medio: '#fbbf24', info: '#60a5fa' };
 
@@ -90,7 +102,7 @@ function AnswerText({ text }: { text: string }) {
 }
 
 export default function AgencyView(props: Props) {
-  const { currentUser, storeConfigs, onNavigate, onExit } = props;
+  const { currentUser, storeConfigs, onNavigate, onExit, instagramReturn, onInstagramReturnHandled } = props;
   const stores = useMemo(() => storeConfigs.filter(store => store.unitId !== 'central'), [storeConfigs]);
   const isAdmin = currentUser.role === UserRole.ADMIN;
   const permissions = currentUser.permissions ?? DEFAULT_MANAGER_PERMISSIONS;
@@ -120,6 +132,9 @@ export default function AgencyView(props: Props) {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [notices, setNotices] = useState<AgencyNotice[]>([]);
   const [noticesOpen, setNoticesOpen] = useState(true);
+  const [videoMakerOpen, setVideoMakerOpen] = useState(false);
+  const [videoMakerBusy, setVideoMakerBusy] = useState(false);
+  const [videoMakerNotice, setVideoMakerNotice] = useState<{ ok: boolean; text: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const draftRef = useRef<HTMLTextAreaElement>(null);
 
@@ -149,7 +164,33 @@ export default function AgencyView(props: Props) {
   }, [notices]);
   const roomNotices = room === 'recepcao' ? notices : notices.filter(notice => notice.room === room);
 
+  // Voltou do login do Instagram: abre o VideoMaker da loja conectada com o resultado.
+  useEffect(() => {
+    if (!instagramReturn) return;
+    if (instagramReturn.unitId && stores.some(store => store.unitId === instagramReturn.unitId)) setUnitId(instagramReturn.unitId);
+    setRoom('marketing');
+    setVideoMakerOpen(true);
+    setVideoMakerNotice(instagramReturn.ok
+      ? { ok: true, text: 'Instagram conectado! Os vídeos aprovados desta loja serão publicados sozinhos no dia e hora marcados.' }
+      : { ok: false, text: INSTAGRAM_REASONS[instagramReturn.reason] || 'Não foi possível conectar o Instagram. Confira se a conta é Profissional e tente de novo.' });
+    onInstagramReturnHandled?.();
+  }, [instagramReturn, onInstagramReturnHandled, stores]);
+
+  const onVideoMakerUsage = useCallback((used: number, limit: number) => {
+    setStatus(current => (current ? { ...current, used, limit, ok: current.enabled && used < limit, reason: !current.enabled ? 'DESLIGADA' : used < limit ? (current.reason === 'LIMITE' ? null : current.reason) : 'LIMITE' } : current));
+  }, []);
+
+  const exitAgency = () => {
+    if (videoMakerBusy && !window.confirm('Ainda há vídeos sendo enviados. Sair agora interrompe o envio. Sair mesmo assim?')) return;
+    onExit();
+  };
+
   const pickNotice = (notice: AgencyNotice) => {
+    if (notice.action === 'videomaker') {
+      setRoom('marketing');
+      setVideoMakerOpen(true);
+      return;
+    }
     if (notice.room !== room) setRoom(notice.room);
     setDraft(notice.question);
     window.setTimeout(() => draftRef.current?.focus(), 50);
@@ -283,7 +324,7 @@ export default function AgencyView(props: Props) {
       <header className="flex flex-wrap items-center gap-3 border-b-2 px-4 py-2" style={{ background: '#111c2e', borderColor: '#1f2f4b' }}>
         <button
           type="button"
-          onClick={onExit}
+          onClick={exitAgency}
           className="flex items-center gap-2 rounded-lg border-2 border-red-900 bg-red-600 px-3 py-1.5 text-sm font-bold text-white shadow-[3px_3px_0_#070b14] hover:bg-red-500"
         >
           <ArrowLeft className="h-4 w-4" />Voltar ao ERP
@@ -297,6 +338,19 @@ export default function AgencyView(props: Props) {
         )}
       </header>
 
+      {videoMakerOpen ? (
+        <VideoMakerPanel
+          currentUser={currentUser}
+          stores={stores}
+          unitId={unitId}
+          onUnitChange={setUnitId}
+          onBack={() => { setVideoMakerOpen(false); setVideoMakerNotice(null); }}
+          onBusyChange={setVideoMakerBusy}
+          notice={videoMakerNotice}
+          onNoticeClose={() => setVideoMakerNotice(null)}
+          onUsage={onVideoMakerUsage}
+        />
+      ) : (
       <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto p-3 lg:grid-cols-[minmax(0,1fr)_440px] lg:overflow-hidden">
         <div className="flex min-h-0 flex-col items-center justify-center gap-3">
           <div className="w-full" style={{ maxWidth: 'calc((100vh - 84px) * 16 / 9)' }}>
@@ -306,6 +360,7 @@ export default function AgencyView(props: Props) {
             onSelect={setRoom}
             panel={{ used: status?.used ?? 0, limit: status?.limit ?? 0, ...panelStatus }}
             badges={badges}
+            onVideoMaker={roomAllowed('marketing') ? () => { setRoom('marketing'); setVideoMakerOpen(true); } : undefined}
           />
           </div>
           <div className="flex flex-wrap gap-2 lg:hidden">
@@ -330,6 +385,11 @@ export default function AgencyView(props: Props) {
           <div className="flex items-center justify-between gap-2 border-b-2 px-3 py-2" style={{ background: '#1f2f4b', borderColor: '#5b7fa8' }}>
             <span className="text-sm font-bold text-blue-100">{currentRoom.agent}</span>
             <div className="flex items-center gap-1">
+              {room === 'marketing' && (
+                <button type="button" onClick={() => setVideoMakerOpen(true)} title="Subir vídeos e agendar postagens no Instagram" className="mr-1 flex items-center gap-1 rounded border-2 px-2 py-0.5 text-xs font-bold" style={{ background: '#2a0f22', borderColor: '#f472b6', color: '#fbcfe8' }}>
+                  <Film className="h-3.5 w-3.5" />VideoMaker
+                </button>
+              )}
               <button type="button" onClick={() => setHistoryOpen(open => !open)} title="Conversas anteriores" aria-label="Conversas anteriores" className="rounded p-1.5 text-blue-200 hover:bg-white/10"><History className="h-4 w-4" /></button>
               <button type="button" onClick={newConversation} title="Nova conversa" aria-label="Nova conversa" className="rounded p-1.5 text-blue-200 hover:bg-white/10"><MessageSquarePlus className="h-4 w-4" /></button>
             </div>
@@ -374,7 +434,7 @@ export default function AgencyView(props: Props) {
                           className="shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold disabled:opacity-50"
                           style={{ background: '#0c1a33', borderColor: '#60a5fa', color: '#bfdbfe' }}
                         >
-                          {notice.room === room ? 'Perguntar' : `Ir para ${owner.short}`}
+                          {notice.action === 'videomaker' ? 'Abrir VideoMaker' : notice.room === room ? 'Perguntar' : `Ir para ${owner.short}`}
                         </button>
                       </li>
                     );
@@ -470,6 +530,7 @@ export default function AgencyView(props: Props) {
           <p className="px-3 pb-2 text-[11px] text-slate-400" style={{ fontFamily: 'var(--font-sans)' }}>A IA pode errar: confira os números no ERP antes de agir.</p>
         </section>
       </div>
+      )}
     </div>
   );
 }

@@ -19,6 +19,8 @@ export interface AgencyNotice {
   title: string;
   detail?: string;
   question: string;
+  // Aviso do VideoMaker: abre o VideoMaker em vez de preencher a pergunta.
+  action?: 'videomaker';
 }
 
 export interface NoticeInput {
@@ -297,7 +299,21 @@ export function quickAgencyNotices(input: NoticeInput): AgencyNotice[] {
   if (input.roomAllowed('compras')) notices.push(...purchaseNotices(input, sales));
   if (input.roomAllowed('atendimento')) notices.push(...serviceNotices(input));
   if (input.roomAllowed('vendas')) notices.push(...salesNotices(input, sales));
-  if (input.roomAllowed('marketing')) notices.push(...marketingNotices(input, sales));
+  if (input.roomAllowed('marketing')) {
+    // VideoMaker (mesmos avisos do sino): clicar abre o VideoMaker em vez de perguntar.
+    input.alerts
+      .filter(alert => alert.kind === 'VIDEO' && alert.unitId === input.unitId)
+      .forEach(alert => notices.push({
+        id: `vm-${alert.ref}`,
+        room: 'marketing',
+        level: alert.ref?.startsWith('video-fila') ? 'medio' : 'alto',
+        title: `VideoMaker: ${alert.title}`,
+        detail: alert.detail ?? undefined,
+        question: '',
+        action: 'videomaker',
+      }));
+    notices.push(...marketingNotices(input, sales));
+  }
   return notices;
 }
 

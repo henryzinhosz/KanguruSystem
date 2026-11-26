@@ -1,11 +1,11 @@
-import { AlertTriangle, CalendarClock, ChevronRight, Cpu, HandCoins, Landmark, Package, Receipt, ReceiptText, Wallet, WifiOff, Wrench, X } from 'lucide-react';
+import { AlertTriangle, CalendarClock, ChevronRight, Cpu, Film, HandCoins, Landmark, Package, Receipt, ReceiptText, Wallet, WifiOff, Wrench, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { ErpAlert, ErpAlertKind } from '../db/insights';
 
 // "Precisa de atenção" (desenho aprovado em 2026-11-03): pendencias das lojas num lugar so.
 // Cada alerta fica ate o problema ser resolvido (sem "dispensar").
 
-export type AttentionTarget = 'estoque' | 'servicos' | 'financeiro' | 'contas' | 'areceber' | 'recebimentos' | null;
+export type AttentionTarget = 'estoque' | 'servicos' | 'financeiro' | 'contas' | 'areceber' | 'recebimentos' | 'agencia' | null;
 
 const KIND_INFO: Record<ErpAlertKind, { label: string; icon: LucideIcon; tone: string; target: AttentionTarget; hint?: string }> = {
   PECA_AVULSA: { label: 'Peças avulsas com custo pendente', icon: Cpu, tone: 'text-white bg-rose-600 border-rose-700', target: 'estoque', hint: 'Informe o custo no Catálogo para o lucro ficar certo' },
@@ -19,9 +19,10 @@ const KIND_INFO: Record<ErpAlertKind, { label: string; icon: LucideIcon; tone: s
   OS_PARADA: { label: 'OS prontas e não retiradas', icon: Wrench, tone: 'text-amber-600 bg-amber-50 border-amber-100', target: 'servicos' },
   RESERVA: { label: 'Reservas vencidas', icon: CalendarClock, tone: 'text-amber-600 bg-amber-50 border-amber-100', target: null, hint: 'Converta ou cancele na tela Reservas do PDV' },
   OFFLINE: { label: 'Vendas sem internet com divergência', icon: WifiOff, tone: 'text-amber-600 bg-amber-50 border-amber-100', target: 'financeiro' },
+  VIDEO: { label: 'VideoMaker (Instagram)', icon: Film, tone: 'text-rose-600 bg-rose-50 border-rose-100', target: 'agencia', hint: 'Abra a Agência › Marketing › VideoMaker' },
 };
 
-const KIND_ORDER: ErpAlertKind[] = ['PECA_AVULSA', 'CONTA_PAGAR', 'CONTA_RECEBER', 'RECEBIMENTO', 'ESTOQUE', 'OS_ATRASADA', 'NOTA', 'CAIXA', 'OS_PARADA', 'RESERVA', 'OFFLINE'];
+const KIND_ORDER: ErpAlertKind[] = ['PECA_AVULSA', 'CONTA_PAGAR', 'CONTA_RECEBER', 'RECEBIMENTO', 'ESTOQUE', 'OS_ATRASADA', 'NOTA', 'CAIXA', 'OS_PARADA', 'RESERVA', 'OFFLINE', 'VIDEO'];
 
 interface AttentionPanelProps {
   alerts: ErpAlert[];
