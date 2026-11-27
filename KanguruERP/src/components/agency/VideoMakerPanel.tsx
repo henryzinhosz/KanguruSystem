@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import {
   AlertTriangle, ArrowDown, ArrowLeft, ArrowUp, AtSign, CalendarDays, Check, ExternalLink, Eye, Film, FolderOpen,
-  Loader2, Pause, Play, Plus, RotateCcw, Sparkles, Trash2, Undo2, Upload, X,
+  Loader2, Music, Pause, Play, Plus, RotateCcw, Sparkles, Trash2, Undo2, Upload, VolumeX, X,
 } from 'lucide-react';
 import type { StoreConfig, User } from '../../types';
 import {
   EDITABLE_STATUSES, MAX_VIDEO_BYTES, MAX_VIDEO_MB, VIDEO_STATUS_LABELS, captionStats, deleteAgencyVideo, disconnectInstagram,
   generateCaption, getVideoMakerState, registerAgencyVideo, removeVideoFiles, saveVideoMakerSettings, scheduleAgencyVideos,
   setAgencyVideoStatus, signedVideoUrls, startInstagramConnect, swapAgencyVideos, updateAgencyVideo, uploadSmallFile,
-  uploadVideoFile, type AgencyVideo, type VideoAction, type VideoMakerState, type VideoStatus,
+  uploadVideoFile, downloadStoredVideo, setAgencyVideoMusic,
+  type AgencyVideo, type VideoAction, type VideoMakerState, type VideoMusic, type VideoStatus,
 } from '../../db/videoMaker';
 import { extractAudio, extractFrames, probeVideo, transcribe } from './videoProcessing';
 import { downloadDriveVideo, driveImportAvailable, listDriveFolderVideos, type DriveVideo } from './driveImport';
+import MusicPicker, { formatMusicDuration } from './MusicPicker';
+import { makeSilentCopy } from './mp4Silent';
 
 // VideoMaker (Agência › Marketing): sobe vídeos, a IA escreve a legenda, o franqueado aprova e o
 // servidor publica no Instagram da loja no dia e hora marcados (1 por dia, alternando horários).
@@ -105,9 +108,10 @@ interface CardProps {
   onMove: (video: AgencyVideo, direction: -1 | 1) => void;
   onWatch: (video: AgencyVideo) => void;
   onDelete: (video: AgencyVideo) => void;
+  onMusic: (video: AgencyVideo) => void;
 }
 
-function VideoCard({ video, thumb, busy, canCaption, canMoveUp, canMoveDown, onAction, onSave, onCaption, onMove, onWatch, onDelete }: CardProps) {
+function VideoCard({ video, thumb, busy, canCaption, canMoveUp, canMoveDown, onAction, onSave, onCaption, onMove, onWatch, onDelete, onMusic }: CardProps) {
   const editable = EDITABLE_STATUSES.includes(video.status);
   const [caption, setCaption] = useState(video.caption);
   const [note, setNote] = useState(video.note);
@@ -201,6 +205,31 @@ function VideoCard({ video, thumb, busy, canCaption, canMoveUp, canMoveDown, onA
             className={`${INPUT} mt-1 resize-y font-normal leading-relaxed`}
           />
         </label>
+
+        <div className="flex flex-wrap items-center gap-2 rounded border border-slate-700 bg-slate-950/50 px-2 py-1.5 text-xs">
+          <Music className="h-3.5 w-3.5 shrink-0 text-pink-300" />
+          {video.music ? (
+            <span className="min-w-0 flex-1 truncate text-slate-200" title={`${video.music.title} · ${video.music.artist}`}>
+              <b>{video.music.title}</b>{video.music.artist ? ` · ${video.music.artist}` : ''}{video.music.durationMs ? ` (${formatMusicDuration(video.music.durationMs)})` : ''}
+              <span className="ml-1 text-slate-400">
+                · música {video.music.musicVolume}%{video.music.muteOriginal ? ' · sem o som original' : ` · som do vídeo ${video.music.videoVolume}%`}
+              </span>
+            </span>
+          ) : (
+            <span className="flex-1 text-slate-400">Sem música (vai com o som do próprio vídeo)</span>
+          )}
+          {video.music?.muteOriginal && <VolumeX className="h-3.5 w-3.5 text-slate-400" aria-label="Sem o som original" />}
+          {editable && (
+            <button type="button" disabled={busy} onClick={() => onMusic(video)} className={BUTTON} style={BLUE}>
+              <Music className="h-3.5 w-3.5" />{video.music ? 'Trocar música' : 'Adicionar música'}
+            </button>
+          )}
+        </div>
+        {video.musicDroppedAt && video.music && (video.status === 'PUBLICADO' || video.status === 'PUBLICANDO') && (
+          <p className="flex items-start gap-1.5 rounded border border-amber-700 bg-amber-950/50 px-2 py-1.5 text-xs text-amber-100">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />A música não estava disponível no Instagram na hora: o vídeo foi postado sem som.
+          </p>
+        )}
 
         {video.transcript && (
           <div className="text-xs">
@@ -318,13 +347,15 @@ export default function VideoMakerPanel({ currentUser, stores, unitId, onUnitCha
 
   // Aviso ao fechar a aba no meio de um envio.
   const processing = queue.some(item => !item.done);
+  const [musicWorking, setMusicWorking] = useState(false);
   useEffect(() => {
-    onBusyChange(processing);
-    if (!processing) return;
+    const working = processing || musicWorking;
+    onBusyChange(working);
+    if (!working) return;
     const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [processing, onBusyChange]);
+  }, [processing, musicWorking, onBusyChange]);
 
   const updateItem = (key: string, patch: Partial<QueueItem>) => {
     queueRef.current = queueRef.current.map(item => (item.key === key ? { ...item, ...patch } : item));
@@ -523,9 +554,63 @@ export default function VideoMakerPanel({ currentUser, stores, unitId, onUnitCha
   const onDelete = (video: AgencyVideo) => {
     if (!window.confirm(`Excluir "${video.fileName}"? ${video.status === 'PUBLICADO' ? 'O post continua no Instagram; sai só daqui.' : 'Ele não será publicado.'}`)) return;
     void run(video.id, async () => {
-      await deleteAgencyVideo(video.id);
+      await deleteAgencyVideo(video.id, [video.silentPath]);
       await reload();
     });
+  };
+
+  // ---------------- Música ----------------
+  const [musicFor, setMusicFor] = useState<AgencyVideo | null>(null);
+  const [musicSaving, setMusicSaving] = useState<string | null>(null);
+  const [musicError, setMusicError] = useState('');
+  useEffect(() => setMusicWorking(musicSaving !== null), [musicSaving]);
+
+  const openMusic = (video: AgencyVideo) => {
+    setMusicError('');
+    setMusicFor(video);
+  };
+
+  // Com música, guarda antes uma cópia muda do vídeo (para "tirar o som original" e para postar
+  // sem som se a música sair da biblioteca). Feita uma vez por vídeo.
+  const saveMusic = async (music: VideoMusic | null) => {
+    const video = musicFor;
+    if (!video) return;
+    setMusicError('');
+    try {
+      if (!music) {
+        setMusicSaving('Salvando');
+        replaceVideo(await setAgencyVideoMusic(video.id, null));
+        setMusicFor(null);
+        return;
+      }
+      let silentPath = video.silentPath;
+      let warning = '';
+      if (!silentPath) {
+        const label = 'Preparando a cópia sem som do vídeo';
+        setMusicSaving(`${label}: baixando 0%`);
+        const buffer = await downloadStoredVideo(video.storagePath, fraction => setMusicSaving(`${label}: baixando ${Math.round(fraction * 100)}%`));
+        setMusicSaving(`${label}`);
+        const result = makeSilentCopy(buffer);
+        if (result.kind === 'silent') {
+          silentPath = video.storagePath;
+        } else if (result.kind === 'copy') {
+          const path = video.storagePath.replace(/[^/]+$/, `silent.${video.mimeType === 'video/quicktime' ? 'mov' : 'mp4'}`);
+          const blob = new Blob([result.data.buffer as ArrayBuffer], { type: video.mimeType });
+          await uploadVideoFile(path, blob, video.mimeType, fraction => setMusicSaving(`${label}: enviando ${Math.round(fraction * 100)}%`));
+          silentPath = path;
+        } else {
+          warning = `"${video.fileName}": não deu para fazer a cópia sem som deste vídeo. Se a música sair do Instagram, ele vai com o som original; com "Tirar o som original", o som do vídeo fica em 1%.`;
+        }
+      }
+      setMusicSaving('Salvando');
+      replaceVideo(await setAgencyVideoMusic(video.id, { ...music, silentPath }));
+      setMusicFor(null);
+      if (warning) setError(warning);
+    } catch (failure) {
+      setMusicError(errorText(failure, 'Não foi possível salvar a música.'));
+    } finally {
+      setMusicSaving(null);
+    }
   };
 
   const pending = useMemo(() => (state?.videos || []).filter(video => EDITABLE_STATUSES.includes(video.status) || video.status === 'PUBLICANDO'), [state?.videos]);
@@ -805,6 +890,7 @@ export default function VideoMakerPanel({ currentUser, stores, unitId, onUnitCha
                     onMove={onMove}
                     onWatch={video => void onWatch(video)}
                     onDelete={onDelete}
+                    onMusic={openMusic}
                   />
                 );
               })}
@@ -834,6 +920,7 @@ export default function VideoMakerPanel({ currentUser, stores, unitId, onUnitCha
                       onMove={onMove}
                       onWatch={item => void onWatch(item)}
                       onDelete={onDelete}
+                      onMusic={openMusic}
                     />
                   ))}
                   <p className="text-[11px] text-slate-500">O arquivo do vídeo é apagado do Kanguru 7 dias depois de publicado ou cancelado (fica a miniatura e o link do post).</p>
@@ -842,6 +929,17 @@ export default function VideoMakerPanel({ currentUser, stores, unitId, onUnitCha
             </section>
           )}
         </>
+      )}
+
+      {musicFor && (
+        <MusicPicker
+          unitId={unitId}
+          video={musicFor}
+          saving={musicSaving}
+          error={musicError}
+          onSave={music => void saveMusic(music)}
+          onClose={() => setMusicFor(null)}
+        />
       )}
     </div>
   );

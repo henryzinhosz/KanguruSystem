@@ -6,6 +6,7 @@ import Anthropic from 'npm:@anthropic-ai/sdk@1.8.0';
 // - GET  ?code&state       retorno do login do Instagram (state conferido no banco, vale 15 min)
 // - POST {action:connect}  dono pede o endereco de login do Instagram da loja
 // - POST {action:caption}  legenda pela IA a partir das fotos e da transcricao (conta no limite)
+// - POST {action:music_search} busca musicas da biblioteca do Instagram (migration 20261213)
 // - POST {action:tick}     agendador (pg_cron, a cada 5 min, com o segredo da tabela fechada):
 //                          renova chaves, publica os videos aprovados na hora e limpa arquivos
 //
@@ -159,7 +160,35 @@ type Video = {
   ig_container_id: string | null;
   publish_started_at: string | null;
   attempts: number;
+  // Musica (migration 20261213; ausentes antes dela).
+  music_audio_id?: string | null;
+  music_volume?: number;
+  video_volume?: number;
+  mute_original?: boolean;
+  silent_path?: string | null;
+  music_dropped_at?: string | null;
 };
+
+// Arquivo e campos do conteiner do Reels, com ou sem a musica escolhida.
+// - musica + tirar o som original: copia muda + musica (sem copia muda: som do video em 1%)
+// - musica: video original + musica, com os dois volumes
+// - sem musica (ou musica que saiu): video original; se a musica saiu, a copia muda
+function containerPlan(video: Video, withMusic: boolean) {
+  const hasMusic = Boolean(video.music_audio_id) && withMusic;
+  if (!hasMusic) {
+    const dropped = Boolean(video.music_audio_id) && !withMusic;
+    return { path: dropped ? (video.silent_path || video.storage_path) : video.storage_path, audio: null as string | null };
+  }
+  const musicVolume = Math.min(100, Math.max(1, Number(video.music_volume || 100)));
+  const config: Record<string, unknown> = { audio_id: String(video.music_audio_id), audio_volume: musicVolume };
+  let path = video.storage_path;
+  if (video.mute_original && video.silent_path) {
+    path = video.silent_path;
+  } else {
+    config.video_volume = video.mute_original ? 1 : Math.min(100, Math.max(1, Number(video.video_volume || 100)));
+  }
+  return { path, audio: JSON.stringify(config) };
+}
 
 // ---------------- Retorno do login do Instagram ----------------
 async function handleCallback(service: SupabaseClient, url: URL) {
@@ -367,6 +396,29 @@ async function tick(service: SupabaseClient) {
     await fail(video, info ? friendlyInstagram(info) : 'Não foi possível publicar agora. Use "Tentar de novo".');
   };
 
+  // Cria o conteiner do Reels no Instagram (link assinado de 6 h para o arquivo).
+  const createContainer = async (video: Video, account: Account, withMusic: boolean): Promise<string | null> => {
+    const plan = containerPlan(video, withMusic);
+    const { data: signed, error: signError } = await service.storage.from(BUCKET).createSignedUrl(plan.path, 6 * 60 * 60);
+    if (signError || !signed?.signedUrl) return null;
+    const fields: Record<string, string> = { media_type: 'REELS', video_url: signed.signedUrl, caption: video.caption, access_token: account.access_token };
+    if (plan.audio) fields.audio_configuration = plan.audio;
+    const container = await graph(`${GRAPH}/${account.ig_user_id}/media`, { method: 'POST', body: form(fields) });
+    return String(container.id);
+  };
+
+  // Musica recusada pelo Instagram (saiu da biblioteca, por exemplo): posta mudo, sem musica, e avisa.
+  const retryWithoutMusic = async (video: Video, account: Account): Promise<boolean> => {
+    if (!video.music_audio_id || video.music_dropped_at) return false;
+    const containerId = await createContainer(video, account, false);
+    if (!containerId) return false;
+    video.ig_container_id = containerId;
+    video.music_dropped_at = new Date().toISOString();
+    await setVideo(video.id, { ig_container_id: containerId, music_dropped_at: video.music_dropped_at });
+    summary.containers += 1;
+    return true;
+  };
+
   const checkContainer = async (video: Video): Promise<boolean> => {
     const account = await accountFor(video);
     if (!account || account.status !== 'ATIVA') {
@@ -399,6 +451,7 @@ async function tick(service: SupabaseClient) {
         return true;
       }
       if (code === 'ERROR' || code === 'EXPIRED') {
+        if (code === 'ERROR' && (await retryWithoutMusic(video, account))) return false;
         await fail(video, `O Instagram não aceitou o vídeo${status.status ? ` (${String(status.status).slice(0, 200)})` : ''}. Confira se é MP4 ou MOV, vertical, de 3 s a 15 min.`);
         return true;
       }
@@ -433,18 +486,31 @@ async function tick(service: SupabaseClient) {
       continue;
     }
     try {
-      const { data: signed, error: signError } = await service.storage.from(BUCKET).createSignedUrl(video.storage_path, 6 * 60 * 60);
-      if (signError || !signed?.signedUrl) {
+      // Cada tentativa nova comeca com a musica escolhida.
+      const hadMusicColumns = video.music_dropped_at !== undefined;
+      video.music_dropped_at = null;
+      let containerId: string | null = null;
+      let dropped = false;
+      try {
+        containerId = await createContainer(video, account, true);
+      } catch (error) {
+        const info = error instanceof InstagramError ? error.info : null;
+        // Recusa definitiva com musica: tenta mudo, sem a musica.
+        if (!video.music_audio_id || !info || info.transient || info.code === 190) throw error;
+        console.error('agency-videomaker music refused', video.id, `${info.code} ${info.message}`);
+        containerId = await createContainer(video, account, false);
+        dropped = true;
+      }
+      if (!containerId) {
         await fail(video, 'O arquivo do vídeo não foi encontrado no Kanguru.');
         continue;
       }
-      const container = await graph(`${GRAPH}/${account.ig_user_id}/media`, {
-        method: 'POST',
-        body: form({ media_type: 'REELS', video_url: signed.signedUrl, caption: video.caption, access_token: account.access_token }),
-      });
-      video.ig_container_id = String(container.id);
+      video.ig_container_id = containerId;
       video.publish_started_at = new Date().toISOString();
-      await setVideo(video.id, { ig_container_id: video.ig_container_id });
+      if (dropped) video.music_dropped_at = new Date().toISOString();
+      await setVideo(video.id, hadMusicColumns
+        ? { ig_container_id: containerId, music_dropped_at: video.music_dropped_at }
+        : { ig_container_id: containerId });
       summary.containers += 1;
       fresh.push(video);
     } catch (error) {
@@ -463,13 +529,15 @@ async function tick(service: SupabaseClient) {
 
   // 6. Apaga o arquivo do video 7 dias depois de publicado ou cancelado (fica a 1a foto).
   const oldBefore = new Date(now - 7 * 86400000).toISOString();
-  const { data: old } = await service.from('agency_videos').select('id, storage_path, frame_paths, status, published_at, updated_at')
+  const { data: old } = await service.from('agency_videos').select('*')
     .is('video_deleted_at', null)
     .or(`and(status.eq.PUBLICADO,published_at.lt.${oldBefore}),and(status.eq.CANCELADO,updated_at.lt.${oldBefore})`)
     .limit(20);
-  for (const video of (old || []) as Array<{ id: string; storage_path: string; frame_paths: string[] }>) {
+  for (const video of (old || []) as Video[]) {
     const frames = video.frame_paths || [];
-    const { error } = await service.storage.from(BUCKET).remove([video.storage_path, ...frames.slice(1)]);
+    const files = [video.storage_path, ...frames.slice(1)];
+    if (video.silent_path && video.silent_path !== video.storage_path) files.push(video.silent_path);
+    const { error } = await service.storage.from(BUCKET).remove(files);
     if (error) continue;
     await service.from('agency_videos').update({ video_deleted_at: new Date().toISOString(), frame_paths: frames.slice(0, 1) }).eq('id', video.id);
     summary.cleaned += 1;
@@ -600,6 +668,39 @@ Deno.serve(async (request) => {
         return json({ error: 'A chave da IA não está aceita. Avise o suporte da Kanguru.' }, 502);
       }
       return json({ error: 'Não foi possível escrever a legenda agora. Tente de novo.' }, 502);
+    }
+  }
+
+  // Busca na biblioteca de musicas do Instagram (API de Audio da Meta). Sem texto: musicas em alta.
+  if (payload.action === 'music_search') {
+    const { data: account } = await service.from('agency_instagram_accounts').select('*')
+      .eq('tenant_id', actor.tenantId).eq('unit_id', unitId).maybeSingle();
+    if (!account || account.status !== 'ATIVA' || new Date(account.token_expires_at).getTime() <= Date.now()) {
+      return json({ error: 'Conecte o Instagram da loja para buscar músicas.' }, 400);
+    }
+    const query = String(payload.query || '').trim().slice(0, 100);
+    const params: Record<string, string> = { audio_type: 'music', user_id: String(account.ig_user_id), access_token: String(account.access_token) };
+    if (query) params.search_query = query;
+    try {
+      const body = await graph(`${GRAPH}/ig_audio?${form(params)}`);
+      const rows = (Array.isArray(body.data) ? body.data : Array.isArray(body) ? body : []) as Array<Record<string, unknown>>;
+      const tracks = rows.slice(0, 40).map(row => ({
+        audioId: String(row.audio_id ?? row.id ?? ''),
+        title: String(row.title ?? ''),
+        artist: String(row.display_artist ?? row.artist ?? ''),
+        coverUrl: (row.cover_artwork_thumbnail_uri ?? row.cover_artwork_thumbnail_url ?? null) as string | null,
+        durationMs: row.duration_in_ms == null ? null : Number(row.duration_in_ms),
+        previewUrl: (row.download_url ?? null) as string | null,
+      })).filter(track => /^[0-9A-Za-z_-]{1,64}$/.test(track.audioId));
+      return json({ tracks });
+    } catch (error) {
+      const info = error instanceof InstagramError ? error.info : null;
+      console.error('agency-videomaker music_search', info ? `${info.code} ${info.message}` : String(error));
+      if (info?.code === 190) return json({ error: friendlyInstagram(info) }, 502);
+      if (info && (info.code === 3 || info.code === 10 || info.code === 100 || info.code === 200)) {
+        return json({ error: 'O Instagram não liberou a biblioteca de músicas para esta conta. Avise o suporte da Kanguru.' }, 502);
+      }
+      return json({ error: info ? friendlyInstagram(info) : 'Não foi possível buscar músicas agora.' }, 502);
     }
   }
 

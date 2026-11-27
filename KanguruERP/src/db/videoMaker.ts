@@ -41,6 +41,30 @@ export interface AgencyVideo {
   videoDeleted: boolean;
   createdByName: string;
   createdAt: string;
+  // Música (migration 20261213).
+  music: VideoMusic | null;
+  silentPath: string | null;
+  musicDroppedAt: string | null;
+}
+
+export interface VideoMusic {
+  audioId: string;
+  title: string;
+  artist: string;
+  coverUrl: string | null;
+  durationMs: number | null;
+  musicVolume: number;
+  videoVolume: number;
+  muteOriginal: boolean;
+}
+
+export interface MusicTrack {
+  audioId: string;
+  title: string;
+  artist: string;
+  coverUrl: string | null;
+  durationMs: number | null;
+  previewUrl: string | null;
 }
 
 export interface InstagramAccount {
@@ -105,7 +129,23 @@ const toVideo = (raw: Record<string, unknown>): AgencyVideo => ({
   videoDeleted: Boolean(raw.videoDeleted),
   createdByName: String(raw.createdByName ?? ''),
   createdAt: String(raw.createdAt ?? ''),
+  music: raw.music ? toMusic(raw.music as Record<string, unknown>) : null,
+  silentPath: (raw.silentPath as string) ?? null,
+  musicDroppedAt: (raw.musicDroppedAt as string) ?? null,
 });
+
+function toMusic(raw: Record<string, unknown>): VideoMusic {
+  return {
+    audioId: String(raw.audioId ?? ''),
+    title: String(raw.title ?? ''),
+    artist: String(raw.artist ?? ''),
+    coverUrl: (raw.coverUrl as string) ?? null,
+    durationMs: raw.durationMs == null ? null : Number(raw.durationMs),
+    musicVolume: Number(raw.musicVolume ?? 100),
+    videoVolume: Number(raw.videoVolume ?? 100),
+    muteOriginal: Boolean(raw.muteOriginal),
+  };
+}
 
 // Mensagem do banco sem o prefixo técnico.
 const clean = (error: { message?: string } | null) => {
@@ -191,11 +231,46 @@ export async function scheduleAgencyVideos(unitId: string, start: string, ids: s
   return Number(data ?? 0);
 }
 
-export async function deleteAgencyVideo(id: string): Promise<void> {
+export async function deleteAgencyVideo(id: string, extraPaths: Array<string | null> = []): Promise<void> {
   const { data, error } = await supabase.rpc('delete_agency_video', { p_id: id });
   if (error) throw clean(error);
-  const paths = ((data as string[]) || []).filter(Boolean);
+  const paths = Array.from(new Set([...((data as string[]) || []), ...extraPaths].filter((path): path is string => Boolean(path))));
   if (paths.length) await supabase.storage.from(VIDEO_BUCKET).remove(paths);
+}
+
+// Escolhe/troca a música (null tira). silentPath: cópia muda já enviada (ou o próprio vídeo, se não tem som).
+export async function setAgencyVideoMusic(id: string, music: (VideoMusic & { silentPath?: string | null }) | null): Promise<AgencyVideo> {
+  const { data, error } = await supabase.rpc('set_agency_video_music', { p_id: id, p_music: music });
+  if (error) {
+    if (/set_agency_video_music/.test(error.message || '')) throw new Error('A música ainda não foi ativada no banco do Kanguru (falta aplicar a atualização 20261213).');
+    throw clean(error);
+  }
+  return toVideo(data as Record<string, unknown>);
+}
+
+// Baixa o vídeo guardado (para fazer a cópia sem som), com progresso.
+export async function downloadStoredVideo(path: string, onProgress?: (fraction: number) => void): Promise<ArrayBuffer> {
+  const { data, error } = await supabase.storage.from(VIDEO_BUCKET).createSignedUrl(path, 3600);
+  if (error || !data?.signedUrl) throw new Error('Não foi possível abrir o vídeo guardado.');
+  const response = await fetch(data.signedUrl);
+  if (!response.ok || !response.body) throw new Error('Não foi possível baixar o vídeo guardado.');
+  const total = Number(response.headers.get('content-length') || 0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      received += value.length;
+      if (total) onProgress?.(received / total);
+    }
+  }
+  const result = new Uint8Array(received);
+  let offset = 0;
+  for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; }
+  return result.buffer;
 }
 
 export async function disconnectInstagram(unitId: string): Promise<void> {
@@ -242,6 +317,12 @@ async function callFunction<T>(body: Record<string, unknown>): Promise<T> {
 export async function startInstagramConnect(unitId: string): Promise<string> {
   const result = await callFunction<{ url: string }>({ action: 'connect', unitId, returnTo: window.location.origin });
   return result.url;
+}
+
+// Músicas da biblioteca do Instagram (texto vazio = em alta).
+export async function searchMusic(unitId: string, query: string): Promise<MusicTrack[]> {
+  const result = await callFunction<{ tracks: MusicTrack[] }>({ action: 'music_search', unitId, query });
+  return Array.isArray(result.tracks) ? result.tracks : [];
 }
 
 export async function generateCaption(unitId: string, videoId: string): Promise<{ caption: string; source: string; used: number; limit: number }> {
